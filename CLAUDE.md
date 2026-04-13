@@ -1,4 +1,4 @@
-# sec-scan-skills
+# palantir
 
 Claude Code 보안 진단 모듈 모음 — 취약점 유형별 독립 실행 가능한 SAST skill.
 
@@ -16,7 +16,7 @@ Claude Code 보안 진단 모듈 모음 — 취약점 유형별 독립 실행 �
 ## 레포 구조
 
 ```
-sec-scan-skills/
+palantir/
 ├── shared/
 │   ├── references/          # 모든 skill이 공유하는 진단 기준, 스키마, 정책
 │   │   └── task_prompts/    # 공통 task 프롬프트 (task_11 자산 식별 등)
