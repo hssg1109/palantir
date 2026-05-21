@@ -77,7 +77,9 @@ _FILE_API_RE = re.compile(
     r'(?:'
     r'new\s+File\s*\(|new\s+FileInputStream\s*\(|new\s+FileReader\s*\(|'
     r'Paths\.get\s*\(|'
-    r'Files\.(?:readAllBytes|newInputStream|copy|write|newBufferedReader)\s*\('
+    r'Files\.(?:readAllBytes|newInputStream|copy|write|newBufferedReader)\s*\(|'
+    r'\.getRealPath\s*\(|'           # Spring MVC 뷰 경로 실제 경로 변환 (LFI 소스)
+    r'getServletContext\s*\(\s*\)'   # ServletContext 접근 (getRealPath 연쇄 시작)
     r')'
 )
 
@@ -267,7 +269,7 @@ def scan_uploads(source_dir: Path) -> list[dict]:
                 result, severity = "info", "Medium"
                 detail = "보안 보완 권고: " + " / ".join(missing)
             else:
-                result, severity = "safe", "Info"
+                result, severity = "safe", "Informational"
                 detail = "UUID 난수화 + 확장자 Whitelist + Tika MIME 검증 + 크기 제한 적용됨"
 
             results.append(
@@ -334,7 +336,7 @@ def scan_downloads(source_dir: Path) -> list[dict]:
                             "has_db_lookup": bool(_DB_FILE_LOOKUP_RE.search(body)),
                         },
                         "result": "safe",
-                        "severity": "Info",
+                        "severity": "Informational",
                         "detail": "HTTP 파라미터 없이 고정 경로에서만 파일 접근",
                         "needs_review": False,
                     }
@@ -356,17 +358,17 @@ def scan_downloads(source_dir: Path) -> list[dict]:
                 has_db_lookup = bool(_DB_FILE_LOOKUP_RE.search(body))
 
                 if is_id_type or has_db_lookup:
-                    result, severity = "safe", "Info"
+                    result, severity = "safe", "Informational"
                     detail = (
                         f"숫자 타입({param_type}) 파일 ID 또는 DB 조회 기반 다운로드 — Taint 차단됨"
                     )
                     needs_review = False
                 elif not param_in_body:
-                    result, severity = "safe", "Info"
+                    result, severity = "safe", "Informational"
                     detail = f"파라미터 '{param_name}'이 파일 API 호출 경로에 미전달 (추적 불가)"
                     needs_review = True
                 elif param_type == "String" and has_path_filter:
-                    result, severity = "safe", "Info"
+                    result, severity = "safe", "Informational"
                     detail = f"String 파라미터 '{param_name}' 사용이지만 Path Traversal 필터 적용 확인"
                     needs_review = False
                 else:
@@ -395,6 +397,80 @@ def scan_downloads(source_dir: Path) -> list[dict]:
                         "needs_review": needs_review,
                     }
                 )
+
+    return results
+
+
+# ── Spring MVC 뷰 리졸버 주입 탐지 (LFI via ViewResolver) ──────────────────────
+
+def scan_view_injection(source_dir: Path) -> list[dict]:
+    """@GetMapping String 파라미터 → 뷰 이름 반환 패턴으로 Spring MVC 뷰 리졸버 LFI 탐지.
+
+    정규식으로 서비스 레이어 위임까지 추적하기 어렵기 때문에 다음 패턴을 needs_review=True
+    로 플래그하여 task_24 프롬프트에서 수동 확인하도록 위임:
+    - @GetMapping / @RequestMapping 핸들러가 String 반환 타입
+    - 메서드 파라미터에 @RequestParam 또는 @PathVariable String 포함
+    """
+    results = []
+
+    # String 반환 타입 컨트롤러 메서드 패턴
+    # public String <methodName>(...) — ResponseEntity / ModelAndView / void 제외
+    _VIEW_HANDLER_RE = re.compile(
+        r'(?:public|protected)\s+String\s+(\w+)\s*\(([^)]*)\)',
+        re.MULTILINE,
+    )
+    # @RequestParam/@PathVariable String 파라미터 또는 @ModelAttribute 임의 VO 파라미터
+    # — @Valid @ModelAttribute ViewReqVo 패턴도 커버
+    _REQUEST_PARAM_RE = re.compile(
+        r'@(?:RequestParam|PathVariable)\s*(?:\([^)]*\)\s*)?String\s+(\w+)',
+        re.IGNORECASE,
+    )
+    _MODEL_ATTR_RE = re.compile(
+        r'@(?:Valid\s+)?@?ModelAttribute\s*(?:\([^)]*\)\s*)?(?:\w+)\s+(\w+)',
+        re.IGNORECASE,
+    )
+
+    for fpath in sorted(source_dir.rglob("*.java")):
+        content = _read_file(fpath)
+        if not _DOWNLOAD_ANN_RE.search(content):
+            continue
+
+        for m in _VIEW_HANDLER_RE.finditer(content):
+            method_name = m.group(1)
+            param_block = m.group(2)
+            method_line = content[:m.start()].count('\n') + 1
+
+            # String 파라미터 또는 ModelAttribute VO 존재 여부 확인
+            string_params = _REQUEST_PARAM_RE.findall(param_block)
+            model_attr_params = _MODEL_ATTR_RE.findall(param_block)
+            if not string_params and not model_attr_params:
+                continue
+
+            # @GetMapping/@RequestMapping 어노테이션이 메서드 직전 400자 이내에 있는지 확인
+            preceding = content[max(0, m.start() - 400):m.start()]
+            if not _DOWNLOAD_ANN_RE.search(preceding):
+                continue
+
+            all_params = string_params + [f"{p}(VO)" for p in model_attr_params]
+            results.append(
+                {
+                    "type": "view_resolver_injection",
+                    "controller_file": _relative(fpath, source_dir),
+                    "controller_line": method_line,
+                    "method_name": method_name,
+                    "string_params": all_params,
+                    "result": "needs_review",
+                    "severity": "Medium",
+                    "detail": (
+                        f"@GetMapping 핸들러 `{method_name}`이 String을 반환하면서 "
+                        f"요청 파라미터({', '.join(all_params)})를 수신. "
+                        "서비스 레이어에서 파라미터가 뷰 이름 조합에 사용될 경우 "
+                        "InternalResourceViewResolver를 통한 LFI 가능. "
+                        "task_24 수동 리뷰에서 뷰 이름 생성 로직 확인 필요."
+                    ),
+                    "needs_review": True,
+                }
+            )
 
     return results
 
@@ -438,7 +514,7 @@ def scan_rfi(source_dir: Path) -> list[dict]:
                 param_name = p.group(1)
 
                 if has_whitelist:
-                    result, severity = "safe", "Info"
+                    result, severity = "safe", "Informational"
                     detail = f"URL Whitelist 검증 확인됨 — '{param_name}' → {ext_api}"
                     needs_review = False
                 else:
@@ -540,6 +616,107 @@ def scan_config(source_dir: Path) -> dict:
 
 # ── 요약 계산 ──────────────────────────────────────────────────────────────────
 
+# ── auto_findings / evidence_trail 생성 ──────────────────────────────────────
+
+_FILE_TYPE_META = {
+    "upload": {
+        "title":          "파일 업로드 취약점 (웹쉘 업로드 가능)",
+        "cwe_id":         "CWE-434",
+        "recommendation": (
+            "파일 확장자 Whitelist 검증, UUID 파일명 난수화, "
+            "Apache Tika를 이용한 MIME 타입 검증, 파일 크기 제한을 모두 적용하세요."
+        ),
+    },
+    "download": {
+        "title":          "파일 다운로드 취약점 (Path Traversal / LFI)",
+        "cwe_id":         "CWE-22",
+        "recommendation": (
+            "파일 경로에 사용자 입력을 직접 사용하지 말고, "
+            "DB 기반 파일 ID 조회 또는 Path Traversal 필터를 적용하세요."
+        ),
+    },
+    "rfi": {
+        "title":          "원격 파일 포함 / SSRF (외부 URL 요청)",
+        "cwe_id":         "CWE-918",
+        "recommendation": (
+            "외부 요청 URL을 Whitelist로 검증하고, "
+            "사용자 입력을 URL에 직접 포함하지 마세요."
+        ),
+    },
+}
+
+
+def _file_item_to_auto_finding(item: dict, seq: int) -> dict:
+    """upload/download/rfi 취약/info record → FILE finding object."""
+    ftype = item.get("type", "upload")
+    meta  = _FILE_TYPE_META.get(ftype, _FILE_TYPE_META["upload"])
+
+    result   = item.get("result", "vulnerable")
+    severity = item.get("severity", "High")
+    # result==info → Informational 강등
+    if result == "info":
+        severity = "Informational"
+
+    endpoint = ""
+    if ftype == "upload":
+        endpoint = f"(upload param: {item.get('multipart_param', '')})"
+    else:
+        endpoint = f"(param: {item.get('param_name', '')})"
+
+    snippet_line = item.get("controller_line")
+
+    return {
+        "finding_id":       f"FILE-AUTO-{seq:03d}",
+        "title":            meta["title"],
+        "severity":         severity,
+        "category":         f"FileProcessing/{ftype.upper()}",
+        "cwe_id":           meta["cwe_id"],
+        "result":           "취약" if result == "vulnerable" else "정보",
+        "diagnosis_method": "auto-scan",
+        "source":           "auto-scan",
+        "fn_detected":      False,
+        "scope": {
+            "type":     "endpoint",
+            "endpoint": endpoint,
+            "file":     item.get("controller_file", ""),
+            "line":     snippet_line,
+            "module":   None,
+        },
+        "description":    item.get("detail", ""),
+        "recommendation": meta["recommendation"],
+        "code_snippet":   "",
+        "evidence":       [{"checks": item.get("checks", {})}],
+        "needs_review":   item.get("needs_review", False),
+    }
+
+
+def _build_file_auto_findings_and_trail(
+    uploads: list, downloads: list, rfis: list
+) -> tuple[list[dict], list[dict]]:
+    """upload/download/rfi 리스트 → (auto_findings[], evidence_trail[])."""
+    auto_findings: list[dict] = []
+    evidence_trail: list[dict] = []
+    seq = 1
+
+    for item in uploads + downloads + rfis:
+        result = item.get("result", "safe")
+        if result in ("vulnerable", "info"):
+            auto_findings.append(_file_item_to_auto_finding(item, seq))
+            seq += 1
+        else:
+            evidence_trail.append({
+                "finding_id":  f"FILE-TRAIL-{len(evidence_trail)+1:03d}",
+                "type":        item.get("type", ""),
+                "result":      result,
+                "file":        item.get("controller_file", ""),
+                "line":        item.get("controller_line"),
+                "detail":      (item.get("detail", ""))[:200],
+                "fp_corrected": False,
+            })
+
+    return auto_findings, evidence_trail
+
+
 def _summarize(uploads: list, downloads: list, rfis: list, config: dict) -> dict:
     def counts(lst: list) -> dict:
         c = {"safe": 0, "vulnerable": 0, "info": 0, "needs_review": 0, "total": len(lst)}
@@ -631,12 +808,16 @@ def main() -> None:
 
     uploads = scan_uploads(source_dir)
     downloads = scan_downloads(source_dir)
+    view_injections = scan_view_injection(source_dir)
     rfis = scan_rfi(source_dir)
     config = scan_config(source_dir)
 
     summary = _summarize(uploads, downloads, rfis, config)
+    auto_findings, evidence_trail = _build_file_auto_findings_and_trail(uploads, downloads, rfis)
 
     output = {
+        "task_id": "file",
+        "status": "completed",
         "scan_metadata": {
             "version": VERSION,
             "source_dir": str(source_dir),
@@ -644,12 +825,21 @@ def main() -> None:
             "total_upload_endpoints": len(uploads),
             "total_download_endpoints": len(downloads),
             "total_rfi_endpoints": len(rfis),
+            "total_view_injection_suspects": len(view_injections),
         },
         "upload_diagnoses": uploads,
         "download_diagnoses": downloads,
         "rfi_diagnoses": rfis,
+        "view_injection_suspects": view_injections,
         "config_findings": config,
-        "summary": summary,
+        "auto_findings":  auto_findings,
+        "evidence_trail": evidence_trail,
+        "summary": {
+            **summary,
+            "auto_findings_count":  len(auto_findings),
+            "evidence_trail_count": len(evidence_trail),
+            "view_injection_suspects": len(view_injections),
+        },
     }
 
     # 출력
@@ -668,6 +858,7 @@ def main() -> None:
         f"\n[요약] 업로드: 취약 {s['upload']['vulnerable']} / 정보 {s['upload']['info']} / 양호 {s['upload']['safe']}"
         f"  |  다운로드: 취약 {s['download']['vulnerable']} / 정보 {s['download']['info']} / 양호 {s['download']['safe']}"
         f"  |  RFI: 취약 {s['rfi']['vulnerable']} / 양호 {s['rfi']['safe']}"
+        f"  |  뷰주입의심: {len(view_injections)}건"
         f"  |  수동검토 필요: {s['total_needs_review']}건"
         f"  |  설정 크기제한: {'Y' if s['config']['has_size_limit'] else 'N'}"
     )

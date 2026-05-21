@@ -4,26 +4,6 @@ SAST 스크립트가 구조적 한계(DTO 래핑, 다단계 인터페이스 위�
 못하고 **`정보(Info)`** 또는 **`수동검토 필요(needs_review: true)`**로 분류한 항목에 대해
 LLM이 시니어 애플리케이션 보안 컨설턴트 역할로 심층 분석할 때 사용하는 프롬프트입니다.
 
----
-
-## ⚠️ Phase 3 시작 전 필수: FP 예외 메모리 로드
-
-Phase 3 분석을 시작하기 **전에** 아래 순서를 반드시 실행합니다.
-
-```bash
-# 1. audit-memory 컨텍스트 생성
-python3 tools/scripts/load_audit_memory.py \
-    --state-dir state/<prefix>/ \
-    --output state/<prefix>/audit_memory.md
-
-# 2. 생성된 파일 읽기 (파일이 비어있으면 등록된 FP 규칙 없음 — 그대로 진행)
-cat state/<prefix>/audit_memory.md
-```
-
-`state/<prefix>/audit_memory.md` 파일이 **비어있지 않으면**, 해당 내용이
-**[Project Specific Context & Exceptions]** 로서 이 Phase 3 전체 분석에 적용됩니다.
-파일을 읽은 후 아래 [FP 예외 규칙 적용 지침]에 따라 분석을 수행하십시오.
-
 ## 적용 시점
 
 - `result: "정보"` 이면서 `needs_review: true`인 항목
@@ -178,23 +158,6 @@ Controller(@RequestBody SearchRequest request)
 - ${keyword} → #{keyword} 또는 LIKE concat 방식을 PreparedStatement 파라미터로 교체
 ```
 
-### JSON 결과 반영
-
-`apply_audit.py`가 읽는 패치 포맷으로 출력합니다. `api_path` 키로 업데이트 대상 endpoint를 식별합니다.
-
-```json
-[
-  {
-    "api_path": "POST /api/v1/items/search",
-    "result": "취약",
-    "severity": "High",
-    "needs_review": false,
-    "diagnosis_type": "[실제] SQL Injection — DTO 래핑 역추적",
-    "manual_review_note": "SearchRequest.keyword → ItemQuery.keyword → MyBatis ${keyword} 직접 삽입. XML 코드 직접 확인 — 추측 없음."
-  }
-]
-```
-
 ---
 
 ## LLM 페르소나 선언 (프롬프트 시작부에 포함)
@@ -305,23 +268,6 @@ LLM의 분석 결과를 아래 형식으로 수집하고 JSON에 반영합니다
 - OWASP A03:2021 / KISA DBMS 조회 및 결과 검증 취약점 / 기타
 ```
 
-### JSON 결과 반영
-
-`apply_audit.py`가 읽는 패치 포맷으로 출력합니다. `api_path` 키로 업데이트 대상 endpoint를 식별합니다.
-
-```json
-[
-  {
-    "api_path": "POST /api/v1/users/search",
-    "result": "취약",
-    "severity": "High",
-    "needs_review": false,
-    "diagnosis_type": "[실제] SQL Injection",
-    "manual_review_note": "Controller에서 String 타입 파라미터가 MyBatis ${} 구문에 직접 전달됨. OWASP A03:2021 기준 취약. 추가 정보 없이 판정 가능."
-  }
-]
-```
-
 ---
 
 ## 참고 공식 문서
@@ -413,26 +359,9 @@ LLM에게 분석을 요청할 때 아래 항목을 포함해 제공합니다.
 - (JAR 디컴파일 또는 소스 확인이 필요한 클래스/메서드)
 ```
 
-### JSON 결과 반영
-
-`apply_audit.py`가 읽는 패치 포맷으로 출력합니다. `api_path` 키로 업데이트 대상 endpoint를 식별합니다.
-
-```json
-[
-  {
-    "api_path": "GET /api/v1/users",
-    "result": "정보",
-    "severity": "Info",
-    "needs_review": false,
-    "diagnosis_type": "외부 의존성 호출",
-    "manual_review_note": "Spring Data JPA findByNameContaining — JPA 자동 PreparedStatement 바인딩으로 안전 추정. 추측 포함 — JAR 내부 구현 미확인. 커스텀 @Query 존재 시 재검토 필요."
-  }
-]
-```
-
 ---
 
-## Task 2-5: 데이터 보호 AI 수동 진단 프롬프트
+## 데이터 보호 AI 수동 진단 프롬프트
 
 ### 적용 대상
 
@@ -682,23 +611,6 @@ public class CryptoUtils {
 
 ---
 
-### JSON 결과 반영 형식
-
-`apply_audit.py`가 읽는 패치 포맷으로 출력합니다. `finding_id` 키로 업데이트 대상 finding을 식별합니다.
-
-```json
-[
-  {
-    "finding_id": "DATA-SEC-001",
-    "result": "정보",
-    "severity": "Medium",
-    "needs_review": false,
-    "diagnosis_type": "HARDCODED_SECRET / @Value fallback",
-    "manual_review_note": "JWT secret key @Value fallback 하드코딩. application.yml jwt.secret 정의 확인 — 운영환경 fallback 미사용. 테스트 환경 노출만 해당. 운영 배포 환경 변수 주입 여부 재확인 권장."
-  }
-]
-```
-
 ---
 
 ## View XSS (JSP/Thymeleaf) AI 수동 진단 프롬프트
@@ -917,23 +829,6 @@ clauseContent는 DB 저장값(관리자 입력 HTML). 저장 시 전역 필터 �
 **참고 기준:**
 - OWASP XSS Prevention Cheat Sheet — Rule #1: HTML Context Output Encoding
 - KISA 주요정보통신기반시설 취약점 분석·평가 기준 — 크로스사이트 스크립팅
-```
-
-### JSON 결과 반영
-
-`apply_audit.py`가 읽는 패치 포맷으로 출력합니다. `api_path` 키로 업데이트 대상 endpoint를 식별합니다.
-
-```json
-[
-  {
-    "api_path": "GET /main/wallet/clause",
-    "result": "취약",
-    "severity": "High",
-    "needs_review": false,
-    "diagnosis_type": "[View XSS] Stored XSS 실제위협",
-    "manual_review_note": "JSP ${clauseContent} naked EL 출력 확인. 전역 필터 부재로 인한 취약 확정."
-  }
-]
 ```
 
 ---

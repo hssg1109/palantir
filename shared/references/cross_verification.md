@@ -4,7 +4,7 @@
 
 ---
 
-## Phase 3-1: 자동판정 "취약" 항목 교차검증
+## LLM-Check Phase 1: 자동판정 "취약" 항목 교차검증
 
 ### 적용 시점
 
@@ -42,6 +42,23 @@ Controller (@RequestParam/PathVariable/RequestBody)
 - `@Deprecated` + 호출부 없음 → "정보(미사용 코드)"
 - `@Profile("test")` 등 특정 환경 전용 → 명시
 
+> ⚠️ **OS Command Injection / SSI Injection 예외 — 보수적 원칙**
+>
+> OS Command 및 SSI 패턴은 **현재 dead code(호출부 없음)이거나 미사용 메서드라도 `취약`으로 판정**한다.
+>
+> **근거**: SQL Injection과 달리 OS Command/SSI는 단 한 줄의 호출 코드 추가 또는 리팩터링으로
+> 즉시 RCE(원격 코드 실행)/서버 정보 노출로 이어지며, 코드 존재 자체가 미래 악용의 시작점이다.
+>
+> | 상태 | SQL Injection | OS Command / SSI |
+> |---|---|---|
+> | 활성 코드 (호출부 있음) | 취약 | 취약 (High/Critical) |
+> | Dead code (호출부 없음) | 정보 (비활성 코드) | **취약 (Medium)** — 현재 미호출이나 패턴 자체가 위험 |
+> | 주석 처리 | 정보 (비활성 코드) | 정보 (비활성 코드) |
+>
+> - 심각도: `Medium` (현재 미호출), `High/Critical` (직접 호출 경로 있음)
+> - `diagnosis_type`: `"취약 (현재 미호출)"` 으로 기록
+> - 권고: 미사용 OS Command / ProcessBuilder / SSI 코드 즉시 삭제
+
 ### Step 4: 분기 경로 도달 확인
 
 Service에서 switch/if 분기로 여러 Repository 메서드를 호출하는 경우:
@@ -58,6 +75,7 @@ Service에서 switch/if 분기로 여러 Repository 메서드를 호출하는 �
 | long/int 타입 설정값 | 정보 (타입 안전) |
 | 주석 처리 비활성 코드 | 정보 (비활성 코드) |
 | 코드 경로 미도달 | 정보 (오탐) |
+| **OS Command / SSI — dead code (호출부 없음)** | **취약 (Medium)** — 미호출이나 패턴 존재 자체가 위험 |
 
 ### 결과 업데이트
 
@@ -82,11 +100,11 @@ Service에서 switch/if 분기로 여러 Repository 메서드를 호출하는 �
 
 ---
 
-## Phase 3-2: "정보/수동검토" 항목 LLM 수동 심층진단
+## LLM-Check Phase 2: "정보/수동검토" 항목 LLM 수동 심층진단
 
 ### 적용 시점
 
-Phase 3-1 완료 후, 아래 조건 중 하나 이상에 해당하는 항목을 대상으로 실시:
+LLM-Check Phase 1 완료 후, 아래 조건 중 하나 이상에 해당하는 항목을 대상으로 실시:
 - `result: "정보"` 이면서 `needs_review: true`인 항목
 - `result: "취약"` 이면서 `diagnosis_method: "추정"` 또는 `taint_confirmed: null`인 항목
 - `diagnosis_type`이 `[잠재] 취약한 쿼리 구조`인 항목
@@ -94,7 +112,7 @@ Phase 3-1 완료 후, 아래 조건 중 하나 이상에 해당하는 항목을 
 
 ---
 
-### Phase 3-2 [인젝션 전용]: 스캐너 추적 실패 API LLM 취약 여부 갱신 절차
+### LLM-Check Phase 2 [인젝션 전용]: 스캐너 추적 실패 API LLM 취약 여부 갱신 절차
 
 > **이 절차는 scan_injection_enhanced.py가 DB 흐름을 따라가지 못한 API들에 대해
 > LLM이 직접 코드를 읽고 취약 여부를 확정하여 task22_llm.json에 반영하는 전체 과정이다.**
@@ -192,7 +210,7 @@ rg "(redisTemplate\.|StringRedisTemplate|@Cacheable|@RedisHash)" <ServiceFile> -
 
 ```json
 {
-  "task_id": "2-2",
+  "task_id": "injection",
   "status": "completed",
   "sqli_endpoint_review": {
     "total_info_endpoints": N,
@@ -223,7 +241,7 @@ print(len(failed), '건 추적 실패')
 
 ---
 
-### Phase 3-2 [일반]: needs_review/잠재취약 항목 수동진단 진행 방법
+### LLM-Check Phase 2 [일반]: needs_review/잠재취약 항목 수동진단 진행 방법
 
 **대상**: `result: "정보"` + `needs_review: true`, `taint_confirmed: null`, `[잠재] 취약한 쿼리 구조`
 (Taint 추적 실패 API는 위 [인젝션 전용] 절차로 처리)

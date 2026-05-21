@@ -3,7 +3,7 @@
 **역할**: 당신은 보안 진단 전문가입니다.
 **입력 파일**: `state/<prefix>/task25.json` (scan_data_protection.py 자동스캔 결과)
 **출력 파일**: `state/<prefix>/task25_llm.json` (LLM 수동분석 보완 — supplemental)
-**게시 방식**: 별도 Confluence 페이지 X → `<prefix>_task25.json` finding 페이지의 `supplemental_sources`로 통합
+**게시 방식**: `findings_DATA.json`으로 통합하여 /sec-review 대상으로 전달
 
 ---
 
@@ -50,15 +50,47 @@
 | LLM이 Read 툴로 읽은 파일에서 발견 | 기재 전 반드시 마스킹 처리 후 출력 | — |
 | 변수명·파일경로·라인번호 | 마스킹 불필요 (비민감 메타데이터) | — |
 
-> **[적용 범위]** 이 규칙은 task25_llm.json(진단 JSON) 및 진단보고서.md(Markdown 보고서) 양쪽 모두에 적용된다.
-> generate_finding_report.py가 code_snippet 원문을 보고서에 그대로 출력하므로 **JSON 작성 단계에서 마스킹 완료** 필수.
+> **[적용 범위]** 이 규칙은 task25_llm.json(진단 JSON) 및 summary_data.md 양쪽 모두에 적용된다.
+> code_snippet 원문이 보고서에 그대로 출력되므로 **JSON 작성 단계에서 마스킹 완료** 필수.
 
 > **[자동 보조]** `scan_data_protection.py v1.4.0+`은 JWT/API Key/AWS Key/Base64 Secret 스니펫에서
 > IP·계정·JDBC URL을 `_masked_snippet()`으로 자동 마스킹한다.
 > LLM이 직접 Read 툴로 소스를 읽고 snippet을 기재할 때는 위 표를 기준으로 **수동 마스킹 필수**.
 
-> **[Phase 4 자동 보완]** 보고서 생성 전 `redact.py`를 state JSON 파일에 실행하면
-> 잔여 IP·계정·JWT 등을 일괄 치환할 수 있다 (workflow.md Step 4-1 참조).
+> **[추가 보완]** sec-review 전 JSON 파일을 재검토하여 잔여 IP·계정·JWT 등을 수동 치환한다.
+
+#### [RULE-5] review_note — 자동 보고서 포함용 마크다운 섹션 형식 필수
+
+`SENSITIVE_LOGGING` / `API_RESPONSE_PII` / `DTO_EXPOSURE` 카테고리의 finding은
+`review_note` 필드에 **`## 섹션 제목 + 마크다운 테이블`** 형식으로 상세 데이터를 작성해야 한다.
+
+`generate_final_report.py`가 `## ` 이후 구간을 자동 추출하여 Confluence `:::expand` 블록으로 렌더링한다.
+
+**필수 형식:**
+```
+(앞부분 서술 텍스트 — 보고서에서 skip됨)
+
+## 영향 파일 목록 (N건)
+
+| 파일 | 레벨 | PII 필드 | 라인 수 |
+|------|------|----------|---------|
+| FooService.java | ERROR | mbrId, cardNo | 42, 88 |
+...
+
+## (추가 섹션 필요 시 동일 형식 반복)
+```
+
+**금지**: HARDCODED_SECRET / SECRET_EXPOSURE 카테고리에 `## ` 섹션 사용 → 보고서에 credential 원문 노출 위험.
+
+**권장 섹션 이름 예시:**
+
+| 카테고리 | 권장 섹션 이름 |
+|---|---|
+| SENSITIVE_LOGGING (LOG-001) | `## 영향 파일 목록 (N건)` |
+| SENSITIVE_LOGGING (LOG-002) | `## 디버그 로그 파일 목록 (N건)` |
+| API_RESPONSE_PII | `## PII 노출 엔드포인트 목록` |
+| DTO_EXPOSURE (Critical) | `## Critical DTO 클래스 목록` |
+| DTO_EXPOSURE (High) | `## High DTO 클래스 목록` |
 
 ---
 
@@ -73,13 +105,17 @@
    - 특정 카테고리 항목만 필요하면 `offset`/`limit` 로 해당 finding 위치를 조회한다.
 3. **탐색 우선순위**: `severity: Critical/High` → `result: 취약` → `result: 정보` 순으로 처리한다.
 
-> ⚠️ **이 JSON은 자동스캔 페이지에 통합 렌더링된다.** 독립 보고서가 아님.
-> `confluence_page_map.json`의 data_protection finding 항목에 `supplemental_sources` 배열로 추가할 것.
+> ⚠️ **이 JSON은 자동스캔 결과와 통합된다.** LLM-Check 완료 후 `findings_DATA.json`에 병합하여 /sec-review 대상으로 전달.
 
 > 📋 **Finding 작성 기준**: `references/finding_writing_guide.md` 필수 준수
 > - `evidence.code_snippet`: 취약 코드 직접 인용 필수 (없으면 finding 미완성)
 > - `description`: 현황 → 보안 위협 → 현재 평가 3단 구어체 서술
 > - `recommendation`: 번호 목록(`1. 2. 3.`) 2개 이상, 구체적 코드 수정 방법 포함
+
+> 📋 **취약점 분류 기준**: `shared/references/vuln_taxonomy.md` 필수 참조
+> - `scope.type` 허용값 5종: `endpoint` / `file` / `config` / `dependency` / `global`
+> - **금지** scope.type 값 예시: `list`, `module`, `service`, `frontend-component`
+> - `diagnosis_method` 허용값 3종: `자동스캔(SAST)` / `교차검증(수동)` / `수동진단(LLM)`
 
 ---
 
@@ -203,6 +239,14 @@ LLM 보조 분석 (이 프롬프트)
 - 설정 파일명에 `real`, `prod`, `운영` 포함 → **운영 자격증명 확정**: `needs_review: false` 강제.
 
 > ⚠️ **주의**: `src/main/java/` 경로 findings에 `needs_review: true`를 절대 남기지 않는다. 운영 코드 내 리터럴은 코드 경로만으로 운영 키 확정 근거가 된다.
+
+> 🔍 **[휴리스틱 탐지 예외]** `needs_review: true`로 플래그된 `HARDCODED_SECRET` — 특히 `Key`, `InitialVector`, `IV`, `HASH_SALT`, `ECG_AES_KEY` 등 **도메인 전용 변수명 또는 고엔트로피 문자열 휴리스틱으로 탐지된 결과** — 는 `src/main/java/` 경로여도 무조건 Critical로 확정하지 말 것.
+> 코드 문맥을 직접 확인하여 다음 세 가지를 판별한 후 severity를 결정한다:
+> 1. **실제 사용 여부**: 해당 변수가 `Cipher.init()`, `new SecretKeySpec()`, `MessageDigest` 등 암호화 함수에 실제 전달되는가?
+> 2. **테스트/더미 여부**: 변수명, 주석, 파일 경로에 test/mock/dummy/sample 등 힌트가 있는가?
+> 3. **환경 구분**: `@Profile`, `application-local.yml`, `@ConditionalOnProperty` 등으로 로컬/개발 환경에만 활성화되는가?
+> → 조건 1 충족 + 조건 2·3 불충족 → `severity: Critical`, `needs_review: false` 확정
+> → 조건 2 또는 3 충족 → `severity: Informational` 또는 `Low`, `needs_review: false` 처리
 
 ---
 
@@ -392,7 +436,7 @@ task25.json DTO finding
 
 ### Step 8: TLS 클라이언트 설정 / gRPC 채널 보안 / Redis 직렬화 (Semgrep 스캔 결과 기반)
 
-> **파이프라인**: Phase 2에서 Semgrep SSC 피드백 룰이 사전 실행되어
+> **파이프라인**: Auto-Scan Phase에서 Semgrep SSC 피드백 룰이 사전 실행되어
 > `state/<prefix>/ssc_feedback_semgrep.json`에 결과가 저장된다.
 > LLM은 해당 JSON을 읽어 판정만 수행한다. grep 직접 실행 금지.
 
@@ -401,7 +445,7 @@ task25.json DTO finding
 ```
 1. state/<prefix>/ssc_feedback_semgrep.json 파일 존재 여부 확인
    - 존재: 아래 8-1~8-3 절차로 findings 판정
-   - 미존재: workflow.md Phase 2 Semgrep 스캔 단계를 먼저 수행 요청
+   - 미존재: workflow.md Auto-Scan Phase Semgrep 스캔 단계를 먼저 수행 요청
              (scan_data_protection.py 이후 Semgrep 추가 실행 필요)
 
 2. JSON 구조 확인:
@@ -423,22 +467,35 @@ task25.json DTO finding
 | `src/main/` + `verify=False` | **취약** (severity 3) |
 | 외부 결제사/금융사 통신에 적용 시 | severity 5로 상향 |
 
-**Finding 템플릿 (DATA-TLS-001)**:
+**Finding 템플릿**:
 
 ```json
 {
-  "finding_id": "DATA-TLS-001",
-  "category": "INSECURE_TLS_CLIENT",
+  "finding_id": "DATA-001",
   "title": "HTTP 클라이언트 SSL 인증서 검증 비활성화",
-  "severity": 4,
+  "severity": "High",
+  "risk_level": 4,
+  "category": "INSECURE_TLS_CLIENT",
+  "cwe_id": "CWE-295",
+  "owasp_category": "A02:2021 Cryptographic Failures",
   "result": "취약",
+  "diagnosis_method": "수동진단(LLM)",
+  "source": "llm-check",
+  "fn_detected": false,
+  "fp_corrected": false,
+  "scope": {
+    "type": "file",
+    "file": "<semgrep results[].path>",
+    "line": "<semgrep results[].start.line>"
+  },
+  "description": "SSL 인증서 검증이 비활성화되어 MITM 공격에 취약합니다.",
+  "recommendation": "loadTrustMaterial 제거. 필요 시 해당 CA 인증서만 TrustStore에 등록. NoopHostnameVerifier → DefaultHostnameVerifier 교체.",
   "evidence": {
     "file": "<semgrep results[].path>",
     "line": "<semgrep results[].start.line>",
     "code_snippet": "<Read 툴로 해당 파일 ±5줄 확인 후 기재>"
   },
-  "recommendation": "loadTrustMaterial 제거. 필요 시 해당 CA 인증서만 TrustStore에 등록. NoopHostnameVerifier → DefaultHostnameVerifier 교체.",
-  "diagnosis_method": "Semgrep(ssl-client-bypass) + LLM검증"
+  "needs_review": false
 }
 ```
 
@@ -457,23 +514,35 @@ task25.json DTO finding
 | 서비스 메시 불명확 / k8s manifest 미확인 | **정보** (severity 2, 검토필요) |
 | 서비스 메시 없음 확인 + 외부 서비스 통신 | **취약** (severity 3) |
 
-**Finding 템플릿 (DATA-TLS-002)**:
+**Finding 템플릿**:
 
 ```json
 {
-  "finding_id": "DATA-TLS-002",
-  "category": "INSECURE_TLS_CLIENT",
+  "finding_id": "DATA-002",
   "title": "gRPC 채널 평문 전송 — 서비스 메시 아키텍처 확인 필요",
-  "severity": 2,
+  "severity": "Low",
+  "risk_level": 2,
+  "category": "INSECURE_TLS_CLIENT",
+  "cwe_id": "CWE-295",
+  "owasp_category": "A02:2021 Cryptographic Failures",
   "result": "정보",
+  "diagnosis_method": "수동진단(LLM)",
+  "source": "llm-check",
+  "fn_detected": false,
+  "fp_corrected": false,
+  "scope": {
+    "type": "file",
+    "file": "<semgrep results[].path>",
+    "line": "<semgrep results[].start.line>"
+  },
+  "description": "gRPC 채널이 평문으로 전송됩니다. 서비스 메시(Istio/Linkerd) 적용 여부에 따라 취약/양호가 달라집니다.",
+  "recommendation": "인프라팀과 서비스 메시(Istio/Linkerd) 적용 여부 확인. 서비스 메시 없는 환경이면 useTransportSecurity() 적용 필요.",
   "evidence": {
     "file": "<semgrep results[].path>",
     "line": "<semgrep results[].start.line>",
     "code_snippet": "<Read 툴로 해당 파일 ±5줄 확인 후 기재>"
   },
-  "recommendation": "인프라팀과 서비스 메시(Istio/Linkerd) 적용 여부 확인. 서비스 메시 없는 환경이면 useTransportSecurity() 적용 필요.",
-  "manual_review_note": "MSA 인프라 아키텍처(k8s manifest, istio.io/inject 어노테이션) 확인 후 취약/양호 재판정 필요.",
-  "diagnosis_method": "Semgrep(grpc-plaintext-channel) + LLM검증"
+  "needs_review": true
 }
 ```
 
@@ -488,28 +557,102 @@ task25.json DTO finding
 | `RedisTemplate` + `setValueSerializer(new GenericJackson2JsonRedisSerializer())` 있음 | 양호 |
 | `ReactiveRedisTemplate` + `RedisSerializationContext` 없음 | **취약** (severity 3) |
 
-**Finding 템플릿 (DATA-DESER-001)**:
+**Finding 템플릿**:
 
 ```json
 {
-  "finding_id": "DATA-DESER-001",
-  "category": "UNSAFE_DESERIALIZATION",
+  "finding_id": "DATA-003",
   "title": "RedisTemplate 기본 JDK 직렬화 — 역직렬화 RCE 위험",
-  "severity": 4,
+  "severity": "High",
+  "risk_level": 4,
+  "category": "UNSAFE_DESERIALIZATION",
+  "cwe_id": "CWE-502",
+  "owasp_category": "A08:2021 Software and Data Integrity Failures",
   "result": "취약",
+  "diagnosis_method": "수동진단(LLM)",
+  "source": "llm-check",
+  "fn_detected": false,
+  "fp_corrected": false,
+  "scope": {
+    "type": "file",
+    "file": "<semgrep results[].path>",
+    "line": "<semgrep results[].start.line>"
+  },
+  "description": "RedisTemplate에 직렬화 설정이 없어 기본 JDK 직렬화가 사용됩니다. 악의적 직렬화 데이터 주입 시 RCE 가능합니다.",
+  "recommendation": "redisTemplate.setDefaultSerializer(new GenericJackson2JsonRedisSerializer()) 명시적 추가.",
   "evidence": {
     "file": "<semgrep results[].path>",
     "line": "<semgrep results[].start.line>",
     "code_snippet": "<Read 툴로 @Bean 메서드 전체 확인 후 기재>"
   },
-  "recommendation": "redisTemplate.setDefaultSerializer(new GenericJackson2JsonRedisSerializer()) 명시적 추가.",
-  "diagnosis_method": "Semgrep(redis-template-default-serializer) + LLM검증"
+  "needs_review": false
 }
 ```
 
 > **참고**: Semgrep 룰 원본 — `references/rules/semgrep/ssl-client-bypass.yaml`,
 > `grpc-plaintext-channel.yaml`, `redis-template-default-serializer.yaml`
-> Phase 2 실행 명령은 `workflow.md` Phase 2 "Semgrep SSC 피드백 룰 실행" 참조.
+> Auto-Scan Phase 실행 명령은 `workflow.md` Phase 2 "Semgrep SSC 피드백 룰 실행" 참조.
+
+---
+
+### Step 9: API 응답 내 UserInfo PII 직접 반환 확인 (API_RESPONSE_PII)
+
+> **목적**: 자동스캔(`scan_api_response_pii()`)은 패턴 기반 탐지이므로 LLM이 수동 확인하여 TP/FP 판정 및 심각도 보정을 수행한다.
+
+#### 9-0. 자동스캔 결과 확인
+
+`task25.json`의 `API_RESPONSE_PII` findings 확인:
+- `needs_review: true` → 아래 9-1~9-3 절차로 수동 검증
+- `result: "정보"` → 수동 검증 후 "취약" 상향 또는 FP 처리
+
+#### 9-1. 판정 흐름
+
+```
+API_RESPONSE_PII 자동탐지 건
+  ├─ 본인 정보 반환 API (Safe by Design)
+  │     → 인증된 사용자에게 본인 PII를 반환하는 것은 정상 → 양호(FP)
+  │
+  ├─ PII 비마스킹 + GET/POST 간 마스킹 불일치
+  │     → 동일 리소스 GET에서 마스킹하나 POST에서 누락 → 취약 (Medium)
+  │
+  ├─ PII 비마스킹 + 타인 조회 가능 경로
+  │     → 취약 (High)
+  │
+  └─ PII 비마스킹이나 내부 시스템 전용 (외부 노출 없음)
+        → 정보 (Low)
+```
+
+#### 9-2. 필수 확인 항목
+
+1. **해당 엔드포인트의 HTTP 메서드와 비즈니스 목적** 파악
+   - POST(생성/신청) vs GET(조회): 마스킹 일관성 비교
+   - 응답을 수신하는 클라이언트가 인증된 본인인지 확인
+
+2. **동일 리소스 다른 메서드와 마스킹 비교**
+   - 예: GET /resource → maskPhoneNumber() 있음, POST /resource → 없음 → **불일치, 취약**
+
+3. **탐지된 필드의 실제 PII 민감도**
+   - `mdn` → 전화번호 (High PII)
+   - `userName` → 실명 (High PII)
+   - `birthDate/birth` → 생년월일 (Medium PII)
+   - `mbrId` → 회원 식별자 (Low PII, 본인 정보면 Safe by Design 가능)
+   - `ciNo` → CI (Very High PII — KISA 고유식별정보)
+
+#### 9-3. Severity 기준
+
+| 조건 | Severity | Result |
+|---|---|---|
+| 전화번호(mdn) 또는 실명(userName) + 비마스킹 + GET/POST 불일치 | Medium | 취약 |
+| CI(ciNo) 비마스킹 노출 | High | 취약 |
+| 생년월일(birthDate) 비마스킹 | Low | 취약 |
+| mbrId 본인 반환 | Low | 정보 (Safe by Design 검토) |
+| 내부 전용 API (외부 노출 없음) | Low | 정보 |
+
+#### 9-4. RULE-5 — API_RESPONSE_PII finding 작성 기준
+
+- `code_snippet`: 취약한 할당 라인 + 마스킹이 적용된 다른 메서드 코드를 **대조** 제시
+- `description`: "POST 응답에 XXX 비마스킹 / GET 응답에는 maskXxx() 적용 → 일관성 결함" 명시
+- `category: "API_RESPONSE_PII"`, `cwe_id: "CWE-359"`
 
 ---
 
@@ -540,7 +683,14 @@ task25.json DTO finding
   □ check_id 별 결과 확인: ssl-client-bypass / grpc-plaintext-channel / redis-template-*
   □ 탐지 건 → Read 툴로 해당 파일 직접 확인 후 판정 (Semgrep 탐지만으로 취약 단정 금지)
   □ gRPC usePlaintext: 반드시 "정보/검토필요"로 분류 (취약 단정 금지 — MSA 아키텍처 확인 필요)
-  → 0건이면 "해당없음" 기록. Semgrep JSON 미존재 시 Phase 2 재실행 요청.
+  → 0건이면 "해당없음" 기록. Semgrep JSON 미존재 시 Auto-Scan Phase 재실행 요청.
+
+□ [Step 9] API_RESPONSE_PII 수동 검증 여부
+  □ task25.json API_RESPONSE_PII findings 확인 (자동탐지 결과)
+  □ 각 건: 본인 정보 반환 여부(Safe by Design) 확인
+  □ GET/POST 간 마스킹 일관성 비교 — 불일치 시 취약 상향
+  □ CI(ciNo) 탐지 건은 High로 상향 검토
+  □ FP(내부 전용 API, 본인 반환) vs TP(마스킹 불일치, 타인 조회 가능) 판정
 ```
 
 **병합 미적용 시 거부 조건:**
@@ -585,7 +735,7 @@ WEAK_CRYPTO / CORS / JWT 등 나머지 카테고리는 자동스캔 확정 항�
 
 ```json
 {
-  "task_id": "2-5",
+  "task_id": "data",
   "status": "completed",
   "findings": [
     {
@@ -609,7 +759,7 @@ WEAK_CRYPTO / CORS / JWT 등 나머지 카테고리는 자동스캔 확정 항�
       },
       "cwe_id": "CWE-798",
       "owasp_category": "A02:2021 Cryptographic Failures",
-      "diagnosis_method": "자동스캔(SAST) + 수동진단(LLM)",
+      "diagnosis_method": "교차검증(수동)",
       "result": "취약",
       "needs_review": false,
       "manual_review_note": "[케이스 A 확정] 운영 키 판별 근거 기재",
@@ -642,7 +792,7 @@ WEAK_CRYPTO / CORS / JWT 등 나머지 카테고리는 자동스캔 확정 항�
       },
       "cwe_id": "CWE-532",
       "owasp_category": "A09:2021 Security Logging and Monitoring Failures",
-      "diagnosis_method": "자동스캔(SAST) + 수동진단(LLM)",
+      "diagnosis_method": "교차검증(수동)",
       "result": "취약",
       "needs_review": false,
       "manual_review_note": "[케이스 B 확정] info/error 레벨 PII 직접 바인딩 확인. MaskingUtil 미적용.",
@@ -697,3 +847,68 @@ WEAK_CRYPTO / CORS / JWT 등 나머지 카테고리는 자동스캔 확정 항�
 - `evidence.code_snippet`: Read 툴로 직접 읽은 실제 코드만 허용 — 생성/추측 주석 금지
 - 파일을 직접 읽지 못한 경우: `needs_review: true` + `manual_review_note: "코드 미확인"` 표시
 - 자동스캔 `code_snippet`이 `"**** (마스킹)"` 상태인 경우, LLM 보완 finding 작성 시 반드시 Read 툴로 실제 파일을 읽어 evidence 첨부
+
+---
+
+## findings_DATA.json 생성 (LLM-Check Phase 최종 출력)
+
+LLM-Check Phase 완료 후 `state/<prefix>/findings_DATA.json`을 생성한다.
+
+### 절차
+
+1. `state/<prefix>/task25.json`의 `auto_findings[]` 로드
+2. 각 항목 LLM 교차검증 수행:
+   - **FP 판정**: `findings[]`에서 **제거**, `evidence_trail[]`에 `fp_corrected: true`로 기록
+   - **TP 확정**: description, code_snippet, evidence 보강 (마스킹 항목은 Read 툴로 실제 코드 확인)
+3. Auto-Scan 미탐지 취약점(F/N) 발견 시 신규 finding 추가:
+   - `fn_detected: true`, `source: "llm-check(fn-detected)"`
+4. finding_id 재부여: `DATA-001` 순번 (심각도 내림차순)
+5. `state/<prefix>/findings_DATA.json` 저장
+
+### 출력 스키마 (shared/references/output_schemas.md 참조)
+
+```json
+{
+  "task_id": "data",
+  "generated_at": "ISO8601",
+  "scan_coverage": {
+    "fn_disclaimer": "Auto-Scan은 정적 패턴 기반이므로 런타임 설정 주입(환경변수/Vault 등)·동적 암호화 선택은 탐지 불가"
+  },
+  "summary": {
+    "total": 0, "취약": 0, "정보": 0, "fn_detected": 0
+  },
+  "llm_checked": true,
+  "findings": [
+    {
+      "finding_id": "DATA-001",
+      "title": "",
+      "severity": "Critical|High|Medium|Low|Informational",
+      "risk_level": 5,
+      "category": "HARDCODED_SECRET|SENSITIVE_LOGGING|WEAK_CRYPTO|JWT_INCOMPLETE|DTO_EXPOSURE|CORS_MISCONFIG|SECURITY_HEADER|INSECURE_TLS_CLIENT|UNSAFE_DESERIALIZATION",
+      "cwe_id": "CWE-798|CWE-532|CWE-327|CWE-347|CWE-200|CWE-346|CWE-693|CWE-295|CWE-502",
+      "owasp_category": "A02:2021 Cryptographic Failures",
+      "result": "취약|정보",
+      "diagnosis_method": "자동스캔(SAST)|교차검증(수동)|수동진단(LLM)",
+      "source": "auto-scan|llm-check|llm-check(fn-detected)",
+      "fn_detected": false,
+      "fp_corrected": false,
+      "scope": {
+        "type": "file|config",
+        "endpoint": null,
+        "file": "path/to/Config.java",
+        "line": 42,
+        "module": null
+      },
+      "description": "한국어 설명",
+      "recommendation": "조치 방법",
+      "evidence": {
+        "file": "path/to/File.java",
+        "line": 42,
+        "code_snippet": "실제 코드 (마스킹 적용)"
+      },
+      "needs_review": false
+    }
+  ],
+  "evidence_trail": []
+}
+```

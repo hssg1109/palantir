@@ -8,7 +8,7 @@
 
 ### 컨텍스트
 보안 진단의 첫 단계로, **소스코드만을 기반으로** 진단 대상 자산을 식별합니다.
-이 결과는 이후 Phase 2 스캔 방식(스크립트 선택, 모듈 분리, 미지원 언어 판정)을 결정합니다.
+이 결과는 이후 Auto-Scan Phase 스캔 방식(스크립트 선택, 모듈 분리, 미지원 언어 판정)을 결정합니다.
 
 ---
 
@@ -85,7 +85,7 @@ find testbed/<project>/ -maxdepth 2 -name "build.gradle" | grep -v "^testbed/<pr
 
 PHP 파일이 주 언어인 경우:
 → `skills/sec-audit-static/references/unsupported_lang_targets.md` 확인
-→ Phase 2 자동 스캔 skip, 해당 없음으로 기록
+→ Auto-Scan Phase skip, 해당 없음으로 기록
 
 ---
 
@@ -140,7 +140,7 @@ git -C testbed/<project>/ log --format="%an %ae" -20 | sort | uniq -c | sort -rn
 ```
 
 **`repo_type` 값**: `backend` / `frontend` / `fullstack`
-**`unsupported_lang: true`** 이면 Phase 2 skip 후 진단 결과에 기록
+**`unsupported_lang: true`** 이면 Auto-Scan Phase skip 후 진단 결과에 기록
 
 ---
 

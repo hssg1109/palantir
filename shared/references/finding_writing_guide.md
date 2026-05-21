@@ -125,7 +125,7 @@ gender 값을 적절히 검증하고 안전한 방식으로 사용하도록 변�
 | **4** | 4 고위험 | High | XSS(운영), CSRF, 인증 우회, 민감정보 평문 노출 |
 | **3** | 3 중간 위험 | Medium | 설정 오류, 보안 수준 약화, 다른 취약점과 결합 악용 |
 | **2** | 2 저위험 | Low | 특정 조건에서 악용 가능, 정보성 취약 패턴 |
-| **1** | 1 매우 낮음 | Info | 운영 영향 없는 수준, 참고용 |
+| **1** | 1 매우 낮음 | Informational | 운영 영향 없는 수준, 참고용 |
 
 > ※ LLM 재판정으로 severity가 조정된 finding(예: 스캐너는 High, LLM이 저위험으로 판단)은
 >    판단 근거를 `manual_review_note`에 기재하고 등급을 실제 위험도에 맞게 조정한다.
@@ -140,17 +140,17 @@ gender 값을 적절히 검증하고 안전한 방식으로 사용하도록 변�
 **항목별 상세목록 테이블의 Finding ID 셀은 반드시 해당 섹션 3 상세 앵커로 링크한다.**
 
 - 앵커 이름 규칙: `detail-{finding-id-lowercase}`
-  예: `FILE-001` → 앵커 이름 `detail-file-001`, `INJ-LLM-001` → `detail-inj-llm-001`
+  예: `FILE-001` → 앵커 이름 `detail-file-001`, `INJ-001` → `detail-inj-001`
 - 섹션 3 상세에 `[[ANCHOR:detail-{id}]]` 마커 삽입 (publish_confluence.py가 Confluence anchor macro로 변환)
 - 항목별 상세목록 Finding ID 셀 HTML: `<a href="#detail-{id}">FINDING-ID</a>`
 
 ```html
 <!-- 항목별 상세목록 테이블 Finding ID 셀 — Confluence 네이티브 형식 필수 -->
-<td><ac:link ac:anchor="detail-inj-llm-001"><ac:plain-text-link-body><![CDATA[INJ-LLM-001]]></ac:plain-text-link-body></ac:link></td>
+<td><ac:link ac:anchor="detail-inj-001"><ac:plain-text-link-body><![CDATA[INJ-001]]></ac:plain-text-link-body></ac:link></td>
 
 <!-- 섹션 3 상세 앵커 (publish_confluence.py가 anchor macro로 변환) -->
-[[ANCHOR:detail-inj-llm-001]]
-#### INJ-LLM-001 — 제목
+[[ANCHOR:detail-inj-001]]
+#### INJ-001 — 제목
 ```
 > ⚠️ HTML `<table>` 내에서 `<a href="#...">` 방식은 Confluence Server에서 앵커 이동이 동작하지 않는다.
 
@@ -170,7 +170,12 @@ finding 하나를 완성하기 전에 아래를 모두 확인한다:
 [ ] recommendation — 번호 목록 (1. 2. ...) 2개 이상
 [ ] affected_endpoints — [{method, path, ...}] 구조로 영향 API 명시
 [ ] cwe_id / owasp_category — 기재 완료
-[ ] severity — 위험도 N 등급과 일치 확인 (4절 기준)
+[ ] severity — 영문 등급 기재 (Critical/High/Medium/Low/Informational)
+[ ] risk_level — 숫자 등급 (1~5) 필수 병기. severity와 일치 확인 (4절 기준)
+             예: severity="High" ↔ risk_level=4
+[ ] llm_checked — 최상위 필드가 true 인지 확인 (false이면 sec-review 진행 불가)
 ```
+
+> **⚠️ `risk_level` 누락 시 보고서 위험도 컬럼이 공란으로 출력된다. 반드시 포함.**
 
 코드 증적(`code_snippet`)이 없으면 finding을 미완성으로 간주한다.

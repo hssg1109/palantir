@@ -84,6 +84,12 @@ scan_api.py 결과를 기반으로 각 API endpoint에 대해
               FilterRegistrationBean / new XssEscapeServletFilter() / web.xml <filter-class> 교차 검증
               선언만 있고 등록 코드 없음 → filter_level "none" 강제 (선언≠동작 FN 방지)
             결과: 의존성 선언만으로 필터 동작 가정하는 false negative 제거
+  v3.0.0 - Finding 생성 이원화: Root Cause vs High-value Instance
+            _append_xss_type() 제거 — xss_type은 Phase 1/2 결과만 보유
+            Phase 4/5 결과를 phase_details["p4_redirect_finding"] / ["p5_persistent_finding"]으로 독립 저장
+            _build_xss_auto_findings_and_trail(): RC-1(전역 필터 미구현) / RC-2(View 미탐지) 그룹화
+            _xss_endpoint_to_auto_finding(): fp_corrected / llm_verdict / llm_reviewed_at / manual_review_note 필드 추가
+            _assign_xss_category(): redirect_xss 파라미터 추가 (Phase 4 누락 카테고리 수정)
   v2.7.0 - Fix 1: View XSS / Reflected XSS 상호 배타적 판정 (중복 카운트 방지)
             HTML_VIEW 분기 전체: view_xss에 판정 집중, reflected_xss → "해당없음" 강제
             unknown controller type 분기도 동일 적용
@@ -1456,45 +1462,37 @@ def build_global_filter_status(source_dir: Path) -> dict:
             ),
         }
 
+    # Lucy 미등록(lucy_registered=False)이면 보호 효과 없음.
+    # 이 경우 elif 체인을 계속 탐색하여 Jackson 등 후순위 필터를 인식해야 한다.
+    # found_lucy_effective=False로 처리 → Lucy 미등록 경고는 아래에서 filter_detail에 후속 추가.
+    found_lucy_effective = found_lucy and lucy_registered
+
     # 종합 판정 (공인 라이브러리 우선)
-    if found_lucy:
-        # ── Lucy 등록 여부 교차 검증 ────────────────────────────────────────────
-        # build.gradle/pom.xml에 의존성 선언만 있고 실제 FilterRegistrationBean/
-        # web.xml <filter-class> 등록 코드가 없는 경우 → 필터 미동작 → none 처리
-        if not lucy_registered:
-            filter_type   = "Lucy XSS (미등록 — 의존성 선언만)"
+    if found_lucy_effective:
+        # ── Lucy 정상 등록 확인 → multipart bypass 검증 ──────────────────────
+        bypass_risk = lucy_multipart.get("bypass_risk") if lucy_multipart else None
+        if bypass_risk is True:
+            filter_type   = "Lucy XSS Filter (Multipart 우회 위험)"
             filter_detail = (
-                "lucy-xss-servlet 라이브러리가 build.gradle/pom.xml에 선언되어 있으나, "
-                "FilterRegistrationBean 등록 코드 또는 web.xml <filter-class> 매핑이 "
-                "발견되지 않음. XssEscapeServletFilter가 실제 Filter Chain에 등록되지 않아 "
-                "필터가 동작하지 않음 — 선언만으로는 보호 효과 없음."
+                "Lucy XSS Servlet Filter 적용 중이나, MultipartFilter가 앞단에 배치되어 "
+                "multipart/form-data 요청 파라미터가 Lucy 필터를 우회할 수 있습니다. "
+                f"상세: {lucy_multipart['detail']}"
             )
-            filter_level = "none"
+            filter_level = "inbound_multipart_risk"
+        elif bypass_risk is None:
+            filter_type   = "Lucy XSS Filter (Multipart 체인 불명확)"
+            filter_detail = (
+                "Lucy XSS Servlet Filter 적용 중. "
+                f"multipart/form-data 우회 가능성: {lucy_multipart['detail'] if lucy_multipart else '확인 불가'}"
+            )
+            filter_level = "inbound_multipart_risk"
         else:
-            # ── 정상 등록 확인 → multipart bypass 검증 ──────────────────────
-            bypass_risk = lucy_multipart.get("bypass_risk") if lucy_multipart else None
-            if bypass_risk is True:
-                filter_type   = "Lucy XSS Filter (Multipart 우회 위험)"
-                filter_detail = (
-                    "Lucy XSS Servlet Filter 적용 중이나, MultipartFilter가 앞단에 배치되어 "
-                    "multipart/form-data 요청 파라미터가 Lucy 필터를 우회할 수 있습니다. "
-                    f"상세: {lucy_multipart['detail']}"
-                )
-                filter_level = "inbound_multipart_risk"
-            elif bypass_risk is None:
-                filter_type   = "Lucy XSS Filter (Multipart 체인 불명확)"
-                filter_detail = (
-                    "Lucy XSS Servlet Filter 적용 중. "
-                    f"multipart/form-data 우회 가능성: {lucy_multipart['detail'] if lucy_multipart else '확인 불가'}"
-                )
-                filter_level = "inbound_multipart_risk"
-            else:
-                filter_type   = "Lucy XSS Filter"
-                filter_detail = (
-                    "Lucy XSS Servlet Filter 적용 중. "
-                    f"MultipartFilter 순서 정상 확인: {lucy_multipart['detail'] if lucy_multipart else 'N/A'}"
-                )
-                filter_level = "inbound"
+            filter_type   = "Lucy XSS Filter"
+            filter_detail = (
+                "Lucy XSS Servlet Filter 적용 중. "
+                f"MultipartFilter 순서 정상 확인: {lucy_multipart['detail'] if lucy_multipart else 'N/A'}"
+            )
+            filter_level = "inbound"
     elif found_antisamy:
         filter_type  = "AntiSamy"
         filter_detail = "OWASP AntiSamy HTML sanitizer 적용 중."
@@ -1535,6 +1533,23 @@ def build_global_filter_status(source_dir: Path) -> dict:
         filter_type  = "없음"
         filter_detail = "XSS 전역 필터 미발견 — 취약 가능"
         filter_level = "none"
+
+    # Lucy 미등록 후속 처리: filter_detail에 경고 추가 (이미 Jackson 등 다른 필터가 잡혔을 수 있음)
+    if found_lucy and not lucy_registered:
+        _lucy_unreg = (
+            "lucy-xss-servlet 라이브러리가 build.gradle/pom.xml에 선언되어 있으나 "
+            "FilterRegistrationBean/web.xml 등록 코드 없음 — Servlet Filter Chain 미동작."
+        )
+        if filter_level == "none":
+            filter_type   = "Lucy XSS (미등록 — 의존성 선언만)"
+            filter_detail = (
+                "lucy-xss-servlet 라이브러리가 build.gradle/pom.xml에 선언되어 있으나, "
+                "FilterRegistrationBean 등록 코드 또는 web.xml <filter-class> 매핑이 "
+                "발견되지 않음. XssEscapeServletFilter가 실제 Filter Chain에 등록되지 않아 "
+                "필터가 동작하지 않음 — 선언만으로는 보호 효과 없음."
+            )
+        else:
+            filter_detail = f"{filter_detail} [참고] Lucy XSS 미등록: {_lucy_unreg}"
 
     # jackson_requestbody_only는 is_inbound=False — @RequestParam 경로 미커버
     is_inbound = filter_level in ("inbound", "inbound_multipart_risk")
@@ -2490,7 +2505,7 @@ def scan_dom_xss_global(source_dir: Path) -> dict:
 
 # 판정 순위 (숫자가 클수록 더 나쁜 결과)
 _VERDICT_RANK = {"해당없음": 0, "양호": 1, "정보": 2, "취약": 3}
-_SEV_RANK     = {"N/A": 0, "Info": 1, "Low": 2, "Medium": 3, "High": 4, "Critical": 5}
+_SEV_RANK     = {"N/A": 0, "Informational": 1, "Low": 2, "Medium": 3, "High": 4, "Critical": 5}
 
 
 def _worst_verdict(*verdicts: str) -> str:
@@ -2498,13 +2513,20 @@ def _worst_verdict(*verdicts: str) -> str:
     return max(verdicts, key=lambda v: _VERDICT_RANK.get(v, 0))
 
 
-def _assign_xss_category(result: str, xss_type: str, persistent_risk: str = "") -> str:
+def _assign_xss_category(
+    result: str,
+    xss_type: str,
+    persistent_risk: str = "",
+    redirect_xss: str = "",
+) -> str:
     """xss_category 값 결정
+
+    v3.0.0: Phase 4/5가 xss_type을 직접 오염시키지 않으므로
+    persistent_risk / redirect_xss 파라미터로 판정.
 
     취약:
       실제위협     — Reflected XSS, View XSS (직접 렌더링)
       잠재적위협   — Persistent XSS (저장소 오염), Redirect XSS
-      인코딩누락   — 인코딩 처리 불명확
     정보:
       수동확인필요 — 판정 불가, Lucy 우회 가능성
     양호:
@@ -2515,7 +2537,10 @@ def _assign_xss_category(result: str, xss_type: str, persistent_risk: str = "") 
             return "실제위협"
         if "Persistent" in xss_type or persistent_risk in ("취약", "잠재"):
             return "잠재적위협"
-        if "Redirect" in xss_type:
+        if "Redirect" in xss_type or redirect_xss in ("취약", "정보"):
+            return "잠재적위협"
+        # Phase 5/4만 취약 원인인 경우 (xss_type은 Phase 1/2 결과만 보유)
+        if persistent_risk not in ("", "없음"):
             return "잠재적위협"
         return "실제위협"
     if result == "정보":
@@ -2743,7 +2768,7 @@ def judge_xss_endpoint(endpoint: dict,
                 out["view_xss"]      = "정보"
                 out.update({
                     "result":       "정보",
-                    "severity":     "Info",
+                    "severity":     "Informational",
                     "xss_type":     "View XSS (인코딩 처리 불명확)",
                     "diagnosis_detail": (
                         f"View 파일({view_file.name}) 확인 — "
@@ -2756,7 +2781,7 @@ def judge_xss_endpoint(endpoint: dict,
             out["view_xss"]      = "정보"
             out.update({
                 "result":       "정보",
-                "severity":     "Info",
+                "severity":     "Informational",
                 "xss_type":     "HTML_VIEW (View 파일 미탐지)",
                 "diagnosis_detail": (
                     f"@Controller View 반환 패턴 확인 — "
@@ -2795,10 +2820,23 @@ def judge_xss_endpoint(endpoint: dict,
 
         out["redirect_xss"] = redirect_verdict
 
+        # v3.0.0: Redirect finding은 phase_details["p4_redirect_finding"]에 독립 저장.
+        # xss_type은 Phase 1/2 결과만 반영하여 복합 타입 오염 방지.
+        out["phase_details"]["p4_redirect_finding"] = {
+            "xss_type":       "[잠재적위협] Redirect XSS",
+            "severity":       redirect_severity,
+            "result":         redirect_verdict,
+            "diagnosis_detail": (
+                "Open Redirect / Redirect XSS — "
+                "사용자 입력이 리다이렉트 대상으로 사용됨. "
+                "화이트리스트 검증 필요."
+            ),
+            "needs_review":   not high_conf,
+            "evidence":       p4["findings"][:3],
+        }
+
         if _SEV_RANK.get(redirect_severity, 0) > _SEV_RANK.get(out["severity"], 0):
             prev_detail = out["diagnosis_detail"]
-            # View 파일 탐색 실패 메시지가 Redirect 판정 설명에 오염되지 않도록 필터링
-            # (HTML_VIEW Phase 2에서 "View 파일 자동 탐지 실패..." 등의 메시지가 남아있을 수 있음)
             _redirect_prev = (
                 prev_detail
                 if prev_detail
@@ -2810,7 +2848,7 @@ def judge_xss_endpoint(endpoint: dict,
             out.update({
                 "result":   redirect_verdict,
                 "severity": redirect_severity,
-                "xss_type": _append_xss_type(out["xss_type"], "[잠재적위협] Redirect XSS"),
+                # xss_type 수정 없음 — Phase 1/2 원본 유지
                 "diagnosis_detail": (
                     (_redirect_prev + " | " if _redirect_prev else "")
                     + "Open Redirect / Redirect XSS — "
@@ -2846,7 +2884,6 @@ def judge_xss_endpoint(endpoint: dict,
         elif risk == "취약":
             # Persistent XSS 위험 확정 — Worst-case 강제 승급
             out["persistent_xss"] = "취약"
-            # taint 경로 자동 추적 성공 여부로 severity 차등화
             tr = p5.get("taint_result") or {}
             taint_chain = p5.get("call_chain", [])
             write_confirmed = (tr.get("taint_confirmed") is True) or bool(taint_chain)
@@ -2856,15 +2893,24 @@ def judge_xss_endpoint(endpoint: dict,
                 out.update({
                     "result":   "취약",
                     "severity": sev,
-                    "xss_type": _append_xss_type(
-                        out["xss_type"], "[잠재적위협] Persistent XSS (저장소 오염)"
-                    ),
+                    # v3.0.0: xss_type 수정 없음 — Phase 1/2 원본 유지, 복합 타입 오염 방지
                     "diagnosis_detail": (
                         (prev_detail + " | " if prev_detail else "")
                         + p5["reason"]
                     ),
                     "needs_review": not write_confirmed,
                 })
+            # v3.0.0: Persistent finding 독립 저장 (Root Cause / Instance 분기에서 소비)
+            out["phase_details"]["p5_persistent_finding"] = {
+                "xss_type":        "[잠재적위협] Persistent XSS (저장소 오염)",
+                "taint_confirmed": write_confirmed,
+                "severity":        sev,
+                "result":          "취약",
+                "diagnosis_detail": p5["reason"],
+                "needs_review":    not write_confirmed,
+                "taint_chain":     taint_chain,
+                "write_method":    tr.get("write_method", ""),
+            }
             out["evidence"].append({
                 "phase":       "persistent",
                 "taint_chain": taint_chain,
@@ -2878,27 +2924,43 @@ def judge_xss_endpoint(endpoint: dict,
                 out.update({
                     "result":   "취약",
                     "severity": "Medium",
-                    "xss_type": _append_xss_type(
-                        out["xss_type"], "[잠재적위협] Persistent XSS (저장소 오염)"
-                    ),
+                    # v3.0.0: xss_type 수정 없음
                     "diagnosis_detail": (
                         (prev_detail + " | " if prev_detail else "")
                         + p5.get("reason", "POST/PUT + 자유 텍스트 입력 + 전역 필터 없음")
                     ),
                     "needs_review": True,
                 })
+            out["phase_details"]["p5_persistent_finding"] = {
+                "xss_type":        "[잠재적위협] Persistent XSS (저장소 오염)",
+                "taint_confirmed": False,
+                "severity":        "Medium",
+                "result":          "취약",
+                "diagnosis_detail": p5.get("reason", "POST/PUT + 자유 텍스트 입력 + 전역 필터 없음"),
+                "needs_review":    True,
+                "taint_chain":     [],
+                "write_method":    "",
+            }
         elif risk == "lucy_bypass":
             out["persistent_xss"] = "정보"
             if out["result"] == "양호":
                 out.update({
                     "result":           "정보",
                     "severity":         "Low",
-                    "xss_type":         _append_xss_type(
-                        out["xss_type"], "Lucy Multipart 우회 가능성"
-                    ),
+                    # v3.0.0: xss_type 수정 없음
                     "diagnosis_detail": p5["reason"],
                     "needs_review":     True,
                 })
+            out["phase_details"]["p5_persistent_finding"] = {
+                "xss_type":        "Lucy Multipart 우회 가능성",
+                "taint_confirmed": False,
+                "severity":        "Low",
+                "result":          "정보",
+                "diagnosis_detail": p5["reason"],
+                "needs_review":    True,
+                "taint_chain":     [],
+                "write_method":    "",
+            }
         elif risk == "정보":
             # Step 3: 커스텀 필터 발견 → 정보 분류 (안전성 불명확)
             out["persistent_xss"] = "정보"
@@ -2907,16 +2969,23 @@ def judge_xss_endpoint(endpoint: dict,
                 out.update({
                     "result":   "정보",
                     "severity": "Medium",
-                    "xss_type": _append_xss_type(
-                        out["xss_type"],
-                        "[정보] Persistent XSS (커스텀 XSS 필터 수동 점검 필요)"
-                    ),
+                    # v3.0.0: xss_type 수정 없음
                     "diagnosis_detail": (
                         (prev_detail + " | " if prev_detail else "")
                         + p5.get("reason", "커스텀 XSS 필터 안전성 수동 점검 필요")
                     ),
                     "needs_review": True,
                 })
+            out["phase_details"]["p5_persistent_finding"] = {
+                "xss_type":        "[정보] Persistent XSS (커스텀 XSS 필터 수동 점검 필요)",
+                "taint_confirmed": False,
+                "severity":        "Medium",
+                "result":          "정보",
+                "diagnosis_detail": p5.get("reason", "커스텀 XSS 필터 안전성 수동 점검 필요"),
+                "needs_review":    True,
+                "taint_chain":     [],
+                "write_method":    "",
+            }
         else:
             out["persistent_xss"] = "해당없음"
     else:
@@ -2925,19 +2994,473 @@ def judge_xss_endpoint(endpoint: dict,
     # ── xss_category 결정 ─────────────────────────────────────
     out["xss_category"] = _assign_xss_category(
         out["result"], out["xss_type"],
-        p5.get("risk", "없음") if is_write else ""
+        p5.get("risk", "없음") if is_write else "",
+        out.get("redirect_xss", "해당없음"),
     )
 
     return out
 
 
-def _append_xss_type(current: str, new_type: str) -> str:
-    """XSS 타입 문자열에 새 타입 추가 (중복 제거)"""
-    if not current or current == "None":
-        return new_type
-    if new_type in current:
-        return current
-    return f"{current} / {new_type}"
+# _append_xss_type() 는 v3.0.0에서 제거됨.
+# Phase 4/5 결과는 phase_details["p4_redirect_finding"] /
+# phase_details["p5_persistent_finding"] 에 독립 저장되며,
+# xss_type 은 Phase 1/2 (Controller 분류 + View 렌더링) 결과만 반영한다.
+
+
+# ============================================================
+#  9-b. auto_findings / evidence_trail 생성
+# ============================================================
+
+_XSS_CWE_MAP = {
+    "Redirect": "CWE-601",
+    "redirect": "CWE-601",
+}
+_XSS_DEFAULT_CWE = "CWE-79"
+
+_XSS_CATEGORY_SEVERITY = {
+    "실제위협":     "High",
+    "잠재적위협":   "Medium",
+    "수동확인필요": "Informational",
+    "인코딩누락":   "Medium",
+    "안전확인":     "N/A",
+    "해당없음":     "N/A",
+}
+
+_XSS_CATEGORY_TITLE = {
+    "실제위협":     "크로스사이트 스크립팅 (XSS) — 실제위협",
+    "잠재적위협":   "크로스사이트 스크립팅 (XSS) — 잠재적위협",
+    "수동확인필요": "크로스사이트 스크립팅 (XSS) — 수동확인필요",
+    "인코딩누락":   "크로스사이트 스크립팅 (XSS) — 인코딩누락",
+}
+
+_XSS_RECOMMENDATION = (
+    "출력 데이터에 HTML 엔티티 인코딩을 적용하고, "
+    "Content-Security-Policy 헤더를 설정하세요. "
+    "JSP의 경우 <c:out> 또는 fn:escapeXml()을 사용하고, "
+    "Thymeleaf의 경우 th:text(자동 이스케이프)를 사용하세요."
+)
+_REDIRECT_RECOMMENDATION = (
+    "리다이렉트 대상 URL을 화이트리스트로 검증하거나, "
+    "외부 입력값을 리다이렉트 경로에 직접 사용하지 마세요."
+)
+
+
+def _xss_endpoint_to_auto_finding(d: dict, seq: int) -> dict:
+    """endpoint_diagnoses 취약/정보 record → XSS finding object."""
+    xss_type  = d.get("xss_type", "") or ""
+    category  = d.get("xss_category", "") or ""
+    severity  = d.get("severity") or _XSS_CATEGORY_SEVERITY.get(category, "Informational")
+    if severity == "N/A":
+        severity = "Informational"
+
+    # CWE 결정: Redirect XSS → CWE-601, 그 외 → CWE-79
+    cwe = _XSS_DEFAULT_CWE
+    for kw, cwe_val in _XSS_CWE_MAP.items():
+        if kw.lower() in xss_type.lower():
+            cwe = cwe_val
+            break
+
+    title = _XSS_CATEGORY_TITLE.get(category, f"크로스사이트 스크립팅 (XSS) — {xss_type or category}")
+    recommendation = _REDIRECT_RECOMMENDATION if cwe == "CWE-601" else _XSS_RECOMMENDATION
+
+    # evidence에서 코드 스니펫 추출
+    evidence = d.get("evidence") or []
+    snippet = ""
+    snippet_file = d.get("process_file", "")
+    snippet_line = None
+    for ev in evidence:
+        if isinstance(ev, dict) and ev.get("snippet"):
+            snippet = ev["snippet"]
+            snippet_file = ev.get("file", snippet_file)
+            snippet_line = ev.get("line")
+            break
+
+    ep = f"{d.get('http_method', '')} {d.get('request_mapping', '')}".strip()
+
+    finding: dict = {
+        "finding_id":        f"XSS-AUTO-{seq:03d}",
+        "finding_type":      "instance",
+        "title":             title,
+        "severity":          severity,
+        "category":          f"XSS/{xss_type}" if xss_type and xss_type != "None" else "XSS",
+        "cwe_id":            cwe,
+        "result":            d.get("result", "취약"),
+        "diagnosis_method":  "auto-scan",
+        "source":            "auto-scan",
+        "fn_detected":       False,
+        # ── v3.0.0: LLM In-place Update 필드 (초기값 null/false) ──
+        "fp_corrected":      False,
+        "llm_verdict":       None,   # "TP" | "FP" | "needs_review"
+        "llm_reviewed_at":   None,
+        "manual_review_note": None,
+        # ────────────────────────────────────────────────────────────
+        "scope": {
+            "type":     "endpoint",
+            "endpoint": ep,
+            "file":     snippet_file or d.get("process_file", ""),
+            "line":     snippet_line,
+            "module":   None,
+        },
+        "description":      d.get("diagnosis_detail", "") or f"XSS 취약점 감지: {xss_type}",
+        "recommendation":   recommendation,
+        "code_snippet":     snippet,
+        "evidence":         evidence[:3],
+        "needs_review":     d.get("needs_review", False),
+    }
+    return finding
+
+
+def _dom_xss_to_auto_finding(f: dict, seq: int) -> dict:
+    """DOM XSS global scan finding item → XSS finding object."""
+    return {
+        "finding_id":       f"XSS-AUTO-{seq:03d}",
+        "finding_type":     "instance",
+        "title":            "DOM 기반 크로스사이트 스크립팅 (DOM XSS)",
+        "severity":         "Medium",
+        "category":         "XSS/DOM XSS",
+        "cwe_id":           "CWE-79",
+        "result":           "정보",
+        "diagnosis_method": "auto-scan",
+        "source":           "auto-scan",
+        "fn_detected":      False,
+        "fp_corrected":     False,
+        "llm_verdict":      None,
+        "llm_reviewed_at":  None,
+        "manual_review_note": None,
+        "scope": {
+            "type":     "file",
+            "endpoint": None,
+            "file":     f.get("file", ""),
+            "line":     f.get("line"),
+            "module":   None,
+        },
+        "description":      f"DOM XSS 잠재 패턴 감지: {f.get('type', '')} — {f.get('snippet', '')[:100]}",
+        "recommendation":   (
+            "innerHTML, document.write 등 DOM 조작 API에 사용자 입력을 직접 전달하지 마세요. "
+            "DOMPurify 등 검증된 sanitizer를 사용하거나 textContent를 사용하세요."
+        ),
+        "code_snippet":     f.get("snippet", ""),
+        "evidence":         [f],
+        "needs_review":     not f.get("has_safe_ctx", False),
+    }
+
+
+def _build_persistent_rc_finding(ep_list: list[tuple], seq: int) -> dict:
+    """N개 Persistent XSS(taint 미확정) 엔드포인트 → Root Cause Finding 1건.
+
+    v3.0.0: 동일 루트 원인(전역 XSS 필터 미구현)으로 발생한 모든 저장 엔드포인트를
+    1건의 RC Finding으로 압축하고, affected_endpoints[] 에 열거한다.
+    """
+    count = len(ep_list)
+    write_confirmed_count = sum(
+        1 for _, p5f in ep_list
+        if p5f.get("taint_chain") or p5f.get("write_method")
+    )
+
+    affected_eps = []
+    for d, p5f in ep_list:
+        ep_str = f"{d.get('http_method', '')} {d.get('request_mapping', '')}".strip()
+        affected_eps.append({
+            "endpoint":    ep_str,
+            "file":        d.get("process_file", ""),
+            "xss_type":    p5f.get("xss_type", "[잠재적위협] Persistent XSS (저장소 오염)"),
+            "taint_chain": p5f.get("taint_chain", []),
+            "reason":      (p5f.get("diagnosis_detail") or "")[:120],
+        })
+
+    return {
+        "finding_id":    f"XSS-AUTO-{seq:03d}",
+        "finding_type":  "root_cause",
+        "title":         (
+            f"전역 XSS 필터 미구현 — "
+            f"Persistent XSS 저장 엔드포인트 {count}건 미보호"
+        ),
+        "severity":      "High",
+        "category":      "XSS/FilterMisconfiguration",
+        "cwe_id":        "CWE-693",
+        "result":        "취약",
+        "diagnosis_method": "auto-scan",
+        "source":        "auto-scan",
+        "fn_detected":   False,
+        "fp_corrected":  False,
+        "llm_verdict":   None,
+        "llm_reviewed_at": None,
+        "manual_review_note": None,
+        "scope": {
+            "type":     "global",
+            "endpoint": None,
+            "file":     None,
+            "line":     None,
+            "module":   None,
+        },
+        "instance_count":      count,
+        "affected_endpoints":  affected_eps,
+        "description": (
+            f"전역 XSS 필터(Lucy XSS Filter / AntiSamy / ESAPI 등)가 미구현 상태에서 "
+            f"자유 텍스트 입력을 받는 POST/PUT/PATCH 엔드포인트 {count}건이 DB에 데이터를 저장합니다. "
+            "저장된 데이터가 관리자 화면·프론트엔드·연동 시스템에서 HTML로 출력될 경우 "
+            f"Stored XSS가 실현됩니다. "
+            f"(Taint 자동 추적 확정: {write_confirmed_count}건 / "
+            f"미확정(보수적 포함): {count - write_confirmed_count}건)"
+        ),
+        "recommendation": (
+            "1. Lucy XSS Servlet Filter 또는 OWASP AntiSamy를 전역 Filter Chain에 등록하십시오.\n"
+            "2. REST JSON API는 Jackson ObjectMapper에 XSSStringDeserializer를 전역 등록하십시오.\n"
+            "3. @RequestParam/@ModelAttribute 파라미터에는 Servlet 레벨 필터(HttpServletRequestWrapper)를 추가하십시오."
+        ),
+        "code_snippet": "",
+        "evidence":     [],
+        "needs_review": True,
+    }
+
+
+def _build_htmlview_rc_finding(ep_list: list[dict], seq: int) -> dict:
+    """HTML_VIEW 파일 미탐지 / 수동확인필요 엔드포인트 → Root Cause Finding 1건.
+
+    v3.0.0: 스캐너가 View 파일 자동 탐지에 실패하거나 인코딩 처리 패턴을 판정하지
+    못한 엔드포인트를 1건의 RC Finding으로 그룹화한다.
+    """
+    count = len(ep_list)
+    affected_eps = []
+    for d in ep_list:
+        ep_str = f"{d.get('http_method', '')} {d.get('request_mapping', '')}".strip()
+        p2 = d.get("phase_details", {}).get("phase2_view", {}) or {}
+        affected_eps.append({
+            "endpoint":  ep_str,
+            "file":      d.get("process_file", ""),
+            "xss_type":  d.get("xss_type", ""),
+            "view_name": p2.get("view_name", ""),
+        })
+
+    return {
+        "finding_id":    f"XSS-AUTO-{seq:03d}",
+        "finding_type":  "root_cause",
+        "title":         f"@Controller View 렌더링 — 출력 인코딩 수동 확인 필요 ({count}건)",
+        "severity":      "Informational",
+        "category":      "XSS/ViewXSS",
+        "cwe_id":        "CWE-79",
+        "result":        "정보",
+        "diagnosis_method": "auto-scan",
+        "source":        "auto-scan",
+        "fn_detected":   False,
+        "fp_corrected":  False,
+        "llm_verdict":   None,
+        "llm_reviewed_at": None,
+        "manual_review_note": None,
+        "scope": {
+            "type":     "global",
+            "endpoint": None,
+            "file":     None,
+            "line":     None,
+            "module":   None,
+        },
+        "instance_count":     count,
+        "affected_endpoints": affected_eps,
+        "description": (
+            f"@Controller가 HTML View를 반환하는 {count}개 엔드포인트에서 "
+            "자동 스캐너가 View 파일(JSP/Thymeleaf)의 출력 인코딩 패턴을 자동 판정하지 못했습니다. "
+            "View 파일 경로 자동 탐지 실패 또는 인코딩 처리 패턴이 불명확한 경우입니다. "
+            "각 엔드포인트 View 파일에서 ${value} 직접 출력 / th:utext / "
+            "<c:out escapeXml=false> 여부를 수동으로 확인하십시오."
+        ),
+        "recommendation": (
+            "1. JSP: ${value} 직접 출력을 <c:out value='${value}'/> 또는 fn:escapeXml()로 교체하십시오.\n"
+            "2. Thymeleaf: th:utext를 th:text로 교체하십시오.\n"
+            "3. WEB-INF 외부 JSP는 URL 직접 접근 가능하므로 별도 점검이 필요합니다."
+        ),
+        "code_snippet": "",
+        "evidence":     [],
+        "needs_review": True,
+    }
+
+
+def _build_redirect_instance_finding(d: dict, p4f: dict, seq: int) -> dict:
+    """Phase 4 Redirect XSS → CWE-601 독립 Instance Finding."""
+    ep_str = f"{d.get('http_method', '')} {d.get('request_mapping', '')}".strip()
+    return {
+        "finding_id":    f"XSS-AUTO-{seq:03d}",
+        "finding_type":  "instance",
+        "title":         "Open Redirect / Redirect XSS",
+        "severity":      p4f.get("severity", "Medium"),
+        "category":      "XSS/RedirectXSS",
+        "cwe_id":        "CWE-601",
+        "result":        p4f.get("result", "정보"),
+        "diagnosis_method": "auto-scan",
+        "source":        "auto-scan",
+        "fn_detected":   False,
+        "fp_corrected":  False,
+        "llm_verdict":   None,
+        "llm_reviewed_at": None,
+        "manual_review_note": None,
+        "scope": {
+            "type":     "endpoint",
+            "endpoint": ep_str,
+            "file":     d.get("process_file", ""),
+            "line":     None,
+            "module":   None,
+        },
+        "description":     p4f.get("diagnosis_detail", "사용자 입력이 리다이렉트 대상으로 사용됨."),
+        "recommendation":  _REDIRECT_RECOMMENDATION,
+        "code_snippet":    "",
+        "evidence":        p4f.get("evidence", [])[:3],
+        "needs_review":    p4f.get("needs_review", True),
+    }
+
+
+def _build_persistent_instance_finding(d: dict, p5f: dict, seq: int) -> dict:
+    """Taint 확정 Persistent XSS → High-value Instance Finding."""
+    ep_str = f"{d.get('http_method', '')} {d.get('request_mapping', '')}".strip()
+    taint_chain = p5f.get("taint_chain", [])
+    chain_str   = " → ".join(taint_chain) if taint_chain else ""
+
+    snippet = ""
+    snippet_file = d.get("process_file", "")
+    for ev in d.get("evidence", []):
+        if isinstance(ev, dict) and ev.get("snippet"):
+            snippet      = ev["snippet"]
+            snippet_file = ev.get("file", snippet_file)
+            break
+
+    return {
+        "finding_id":    f"XSS-AUTO-{seq:03d}",
+        "finding_type":  "instance",
+        "title":         "Persistent XSS — DB 저장 경로 확정 (Taint 추적 완료)",
+        "severity":      "High",
+        "category":      "XSS/PersistentXSS",
+        "cwe_id":        "CWE-79",
+        "result":        "취약",
+        "diagnosis_method": "auto-scan",
+        "source":        "auto-scan",
+        "fn_detected":   False,
+        "fp_corrected":  False,
+        "llm_verdict":   None,
+        "llm_reviewed_at": None,
+        "manual_review_note": None,
+        "scope": {
+            "type":     "endpoint",
+            "endpoint": ep_str,
+            "file":     snippet_file,
+            "line":     None,
+            "module":   None,
+        },
+        "description": (
+            f"[Taint 경로 확정] "
+            f"{chain_str or 'Controller → Service → Repository'} — "
+            f"{p5f.get('diagnosis_detail', '')}"
+        ),
+        "recommendation":  _XSS_RECOMMENDATION,
+        "code_snippet":    snippet,
+        "evidence":        d.get("evidence", [])[:3],
+        "needs_review":    False,
+    }
+
+
+def _build_xss_auto_findings_and_trail(
+    diagnoses: list[dict], dom_xss_scan: dict
+) -> tuple[list[dict], list[dict]]:
+    """endpoint_diagnoses + dom_xss_scan → (auto_findings[], evidence_trail[]).
+
+    v3.0.0: 두 레벨 Finding 구조
+    ─ Root Cause (RC): 동일 구조 결함에서 비롯된 대규모 취약군 → 1건으로 압축
+        · RC-1  전역 XSS 필터 미구현 (Persistent XSS, taint 미확정)
+        · RC-2  @Controller View 파일 자동 탐지 실패 / 인코딩 판정 불가
+    ─ Instance: 자동 분석으로 확정된 고위험 케이스 → 개별 Finding
+        · Persistent XSS (taint_confirmed=True)
+        · 실제위협 View/Reflected XSS (Phase 1/2 직접 확인)
+        · Redirect XSS per-endpoint (CWE-601 독립)
+        · DOM XSS per-file
+    """
+    auto_findings:  list[dict] = []
+    evidence_trail: list[dict] = []
+    seq = 1
+
+    # ── 1단계: 진단 결과 분류 ────────────────────────────────────
+    persistent_unconfirmed: list[tuple]  = []   # RC-1 후보
+    htmlview_unresolved:    list[dict]   = []   # RC-2 후보
+    instance_primary:       list[dict]   = []   # 실제위협 Phase 1/2 Instance
+    redirect_instances:     list[tuple]  = []   # Redirect Instance (CWE-601)
+    persistent_instances:   list[tuple]  = []   # Persistent Instance (taint 확정)
+
+    for d in diagnoses:
+        result   = d.get("result", "양호")
+        xss_type = d.get("xss_type", "")
+        cat      = d.get("xss_category", "")
+        p4f = d.get("phase_details", {}).get("p4_redirect_finding")
+        p5f = d.get("phase_details", {}).get("p5_persistent_finding")
+
+        # Phase 4: Redirect → 항상 개별 Instance (CWE-601 별도)
+        if p4f:
+            redirect_instances.append((d, p4f))
+
+        # Phase 5: Persistent
+        if p5f:
+            if p5f.get("taint_confirmed"):
+                persistent_instances.append((d, p5f))   # High-value Instance
+            else:
+                persistent_unconfirmed.append((d, p5f)) # RC 그룹
+
+        # Phase 1/2 1차 결과 분류
+        if result in ("취약", "정보"):
+            # HTML_VIEW 파일 미탐지 / 수동확인필요 → RC-2
+            is_htmlview_unresolved = (
+                ("HTML_VIEW" in xss_type and "미탐지" in xss_type)
+                or (result == "정보" and cat == "수동확인필요" and not p5f and not p4f)
+                or ("View XSS (인코딩 처리 불명확)" in xss_type)
+            )
+            if is_htmlview_unresolved:
+                htmlview_unresolved.append(d)
+            elif cat == "실제위협":
+                instance_primary.append(d)    # 확정 View/Reflected XSS Instance
+            elif result in ("취약", "정보") and not p5f and not p4f:
+                # Phase 1/2만 취약 원인인 그 외 케이스
+                instance_primary.append(d)
+
+        # 양호 → evidence_trail
+        if result == "양호":
+            evidence_trail.append({
+                "finding_id":       f"XSS-TRAIL-{len(evidence_trail)+1:03d}",
+                "result":           "양호",
+                "endpoint":         f"{d.get('http_method', '')} {d.get('request_mapping', '')}".strip(),
+                "file":             d.get("process_file", ""),
+                "xss_type":         xss_type,
+                "xss_category":     cat,
+                "diagnosis_detail": d.get("diagnosis_detail", "")[:200],
+                "fp_corrected":     False,
+            })
+
+    # ── 2단계: Root Cause findings 생성 ─────────────────────────
+    # RC-1: 전역 XSS 필터 미구현 (Persistent XSS 미확정 그룹)
+    if persistent_unconfirmed:
+        auto_findings.append(_build_persistent_rc_finding(persistent_unconfirmed, seq))
+        seq += 1
+
+    # RC-2: @Controller View 파일 미탐지 / 인코딩 판정 불가 그룹
+    if htmlview_unresolved:
+        auto_findings.append(_build_htmlview_rc_finding(htmlview_unresolved, seq))
+        seq += 1
+
+    # ── 3단계: Instance findings 생성 ───────────────────────────
+    # Phase 1/2 확정 실제위협 (View XSS, Reflected XSS)
+    for d in instance_primary:
+        auto_findings.append(_xss_endpoint_to_auto_finding(d, seq))
+        seq += 1
+
+    # Persistent XSS (taint_confirmed=True) — High-value Instance
+    for d, p5f in persistent_instances:
+        auto_findings.append(_build_persistent_instance_finding(d, p5f, seq))
+        seq += 1
+
+    # Redirect XSS per-endpoint (CWE-601)
+    for d, p4f in redirect_instances:
+        auto_findings.append(_build_redirect_instance_finding(d, p4f, seq))
+        seq += 1
+
+    # ── 4단계: DOM XSS global findings ──────────────────────────
+    for dom_f in dom_xss_scan.get("findings", []):
+        auto_findings.append(_dom_xss_to_auto_finding(dom_f, seq))
+        seq += 1
+
+    return auto_findings, evidence_trail
 
 
 # ============================================================
@@ -3093,7 +3616,7 @@ def run_xss_diagnosis(source_dir: Path,
         else:
             judgment = {
                 "result":           "정보",
-                "severity":         "Info",
+                "severity":         "Informational",
                 "xss_type":         "Controller 미탐지",
                 "xss_category":     "수동확인필요",
                 "diagnosis_detail": "Controller 파일 탐색 실패 — 수동 검토 필요.",
@@ -3173,8 +3696,14 @@ def run_xss_diagnosis(source_dir: Path,
         print(f"  {label}: 양호={cnt['양호']} / 취약={cnt['취약']} / 정보={cnt['정보']} / 해당없음={cnt['해당없음']}")
     print(f"\n[DOM XSS 전역 스캔] {dom_xss_scan['summary']}")
 
+    # auto_findings / evidence_trail 생성
+    diagnoses_dicts = [asdict(d) for d in diagnoses]
+    auto_findings, evidence_trail = _build_xss_auto_findings_and_trail(
+        diagnoses_dicts, dom_xss_scan
+    )
+
     return {
-        "task_id": "2-3",
+        "task_id": "xss",
         "status":  "completed",
         "scan_metadata": {
             "source_dir":               str(source_dir),
@@ -3195,10 +3724,12 @@ def run_xss_diagnosis(source_dir: Path,
              if d.result != "양호" or k not in ("phase_details", "evidence")}
             for d in diagnoses
         ],
+        "auto_findings":  auto_findings,
+        "evidence_trail": evidence_trail,
         "summary": {
-            "total_endpoints": total,
-            "xss":             stats,
-            "xss_category":    cat_stats,
+            "total_endpoints":     total,
+            "xss":                 stats,
+            "xss_category":        cat_stats,
             "per_type": {
                 **per_type,
                 "dom_xss": (
@@ -3206,8 +3737,10 @@ def run_xss_diagnosis(source_dir: Path,
                     f"{dom_xss_scan['summary']}"
                 ),
             },
-            "판정률(%)":   rate,
-            "수동검토":    review,
+            "판정률(%)":            rate,
+            "수동검토":             review,
+            "auto_findings_count": len(auto_findings),
+            "evidence_trail_count": len(evidence_trail),
         },
     }
 
