@@ -32,24 +32,41 @@ Gradle / npm 프로젝트를 모두 지원하며, CVE 탐지 후 LLM이 소스�
 - `shared/references/large_repo_multi_module.md` - 대형 repo / 멀티 모듈 진단 전략
 - `shared/references/unsupported_lang_targets.md` - 자동 스캔 미지원 언어 (PHP 등)
 
+### ⚠️ 사전 필수 — 소스코드 Clone
+
+> testbed/ 에 소스코드가 없으면 진단을 시작할 수 없다.
+> **WSL에서 직접 아래 명령을 실행한다.** clone_repo.py가 자동으로 PowerShell(Windows git)을 경유하여 Bitbucket에 접근한다.
+
+```bash
+# WSL(Ubuntu) 터미널에서 실행
+python3 tools/new_scan.py <repo> --skill sca --clone <PROJECT> <REPO>
+# 예: python3 tools/new_scan.py ocb-community-api --skill sca --clone OCBWEBVIEW ocb-community-api
+```
+
+실행 결과로 출력되는 `state/<repo>/sca/<YYYYMMDD_HHMM>/` 경로를 skill 실행 시 입력할 것.
+
+testbed/ 에 소스코드가 없으면 **위 명령을 직접 실행하고 clone 완료 후 진단을 이어서 진행**한다.
+
+---
+
 ### 실행 원칙 (CRITICAL — 반드시 준수)
 
 > **자율 완주 (Autonomous Execution)**: 실행 중에는
 > "do you want to proceed?", "계속할까요?", "다음 단계로 진행할까요?" 등
 > **어떠한 확인 질문도 하지 않는다.**
 >
-> - Phase 1 → Phase 2 → Phase 3 전 구간을 중단 없이 진행한다.
+> - 자산 식별 → Auto-Scan → LLM-Check 전 구간을 중단 없이 진행한다.
 > - 스크립트 실패·빌드 오류·파일 없음 등 예상 범위 내 오류는 fallback을 자동 적용하고 계속 진행한다.
 > - 예외: 토큰/자격증명 누락처럼 사람만 해결할 수 있는 blocking 오류 발생 시에만 보고 후 대기한다.
 
 ### Step 2: Execute tasks
 
-**Phase 1**: 자산 식별 (빌드 시스템 판별 목적).
+**Phase 1 — 자산 식별 (Asset Identification)**
 - `shared/references/task_prompts/task_11_asset_identification.md` 절차 실행
 - 빌드 시스템 판별: `build.gradle` / `build.gradle.kts` (Gradle) vs `package-lock.json` / `yarn.lock` (npm)
 - 멀티 모듈인 경우 루트 `build.gradle` 위치 및 서브모듈 목록 확인
 
-**Phase 2**: SCA 의존성 스캔.
+**Auto-Scan Phase — SCA 의존성 스캔 (Python 스크립트)**
 
 `references/task_prompts/task_sca.md` 전체 절차 준수.
 
@@ -64,7 +81,7 @@ python3 shared/scripts/scan_sca_gradle_tree.py <src> \
 - npm: `package-lock.json` 파싱 → 의존성 목록 추출 → CVE 조회
 - 출력: `state/<prefix>/sca.json`
 
-**Phase 3-SCA**: LLM CVE 관련성 검토.
+**LLM-Check Phase (SCA)**: LLM CVE 관련성 검토.
 
 `references/task_prompts/task_sca_llm_review.md` 전체 절차 준수.
 
@@ -124,6 +141,32 @@ Phase 3-SCA 완료 후 `state/<prefix>/summary_sca.md` 를 생성한다.
 - `sca_llm.json`의 관련성 판정(관련/검토필요/무관)을 우선 적용; 없으면 `sca.json`의 탐지 결과 사용
 - 한줄 설명은 `sca_llm.json`의 한국어 CVE 설명에서 첫 문장 추출
 - 무관(FP)은 통계에만 포함, 목록에는 미기재
+
+### Step 4-1: LLM-Check 완료 확인 — sec-review 전 필수 게이트
+
+> **HARD RULE**: `sca_llm.json` 미존재 상태로 sec-review 진행 금지.
+> CVE 관련성 검토(LLM-Check) 없이는 FP CVE가 그대로 리뷰 대상에 포함된다.
+> `findings_SCA.json` 생성 시 반드시 `llm_checked: true` 설정.
+
+확인 스크립트:
+```bash
+python3 -c "
+import pathlib, sys
+prefix = 'state/<prefix>'
+has_llm = pathlib.Path(f'{prefix}/sca_llm.json').exists()
+findings = pathlib.Path(f'{prefix}/findings_SCA.json')
+if not has_llm:
+    print('[BLOCK] sca_llm.json 없음 — LLM CVE 관련성 검토 먼저 수행', file=sys.stderr); sys.exit(1)
+if findings.exists():
+    import json
+    d = json.loads(findings.read_text())
+    if not d.get('llm_checked', False):
+        print('[BLOCK] findings_SCA.json llm_checked=false', file=sys.stderr); sys.exit(1)
+print('[OK] LLM-Check 완료 확인')
+"
+```
+
+통과 조건 충족 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
 
 ## Resources
 

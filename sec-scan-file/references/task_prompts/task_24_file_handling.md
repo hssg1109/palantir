@@ -3,7 +3,7 @@
 **역할**: 당신은 보안 진단 전문가입니다.
 **입력 파일**: `state/<prefix>/task24.json` (scan_file_processing.py 자동스캔 결과)
 **출력 파일**: `state/<prefix>/task24_llm.json` (LLM 수동분석 보완 — supplemental)
-**게시 방식**: 별도 Confluence 페이지 X → `<prefix>_task24.json` finding 페이지의 `supplemental_sources`로 통합
+**게시 방식**: `findings_FILE.json`으로 통합하여 /sec-review 대상으로 전달
 
 ---
 
@@ -18,13 +18,17 @@
    - 다운로드·RFI도 마찬가지로 해당 배열 섹션만 조회한다.
 3. **탐색 우선순위**: `result: vulnerable` → `result: info` → `needs_review: true` 순으로 처리한다.
 
-> ⚠️ **이 JSON은 자동스캔 페이지에 통합 렌더링된다.** 독립 보고서가 아님.
-> `confluence_page_map.json`의 file_handling finding 항목에 `supplemental_sources` 배열로 추가할 것.
+> ⚠️ **이 JSON은 자동스캔 결과와 통합된다.** LLM-Check 완료 후 `findings_FILE.json`에 병합하여 /sec-review 대상으로 전달.
 
 > 📋 **Finding 작성 기준**: `references/finding_writing_guide.md` 필수 준수
 > - `evidence.code_snippet`: 취약 코드 직접 인용 필수 (없으면 finding 미완성)
 > - `description`: 현황 → 보안 위협 → 현재 평가 3단 구어체 서술
 > - `recommendation`: 번호 목록(`1. 2. 3.`) 2개 이상, 구체적 코드 수정 방법 포함
+
+> 📋 **취약점 분류 기준**: `shared/references/vuln_taxonomy.md` 필수 참조
+> - `scope.type` 허용값 5종: `endpoint` / `file` / `config` / `dependency` / `global`
+> - **금지** scope.type 값 예시: `list`, `module`, `service`, `frontend-component`
+> - `diagnosis_method` 허용값 3종: `자동스캔(SAST)` / `교차검증(수동)` / `수동진단(LLM)`
 
 ---
 
@@ -45,19 +49,31 @@
 
 ```json
 {
-  "id": "FILE-SCOPE-001",
+  "finding_id": "FILE-001",
   "title": "파일 처리 관련 엔드포인트/기능 없음 — <모듈명>",
-  "severity": "Low",
-  "category": "파일 처리 (File Handling) — 범위 확인",
-  "description": "진단 대상 모듈(<모듈명>) 내 파일 업로드(MultipartFile), 파일 다운로드(FileInputStream/Resource), 파일 경로 직접 처리(LFI) 패턴을 자동스캔 및 수동 확인한 결과 해당 기능이 존재하지 않음.",
-  "affected_files": [],
+  "severity": "Informational",
+  "risk_level": 1,
+  "category": "파일 처리 범위 확인",
   "cwe_id": "N/A",
-  "owasp_category": "N/A",
-  "diagnosis_method": "자동스캔(SAST) + 수동진단(LLM)",
-  "result": "해당없음",
-  "needs_review": false,
-  "manual_review_note": "<구체적 확인 근거 — 예: MultipartFile, FileInputStream 패턴 0건 확인>",
-  "recommendation": "해당없음 — 파일 처리 기능 미구현. 향후 추가 시 확장자 whitelist, UUID 파일명, MIME 검증 적용 필요."
+  "owasp_category": "A04:2021 Insecure Design",
+  "result": "정보",
+  "diagnosis_method": "교차검증(수동)",
+  "source": "llm-check",
+  "fn_detected": false,
+  "fp_corrected": false,
+  "scope": {
+    "type": "global",
+    "file": "",
+    "line": 0
+  },
+  "description": "진단 대상 모듈(<모듈명>) 내 파일 업로드(MultipartFile), 파일 다운로드(FileInputStream/Resource), 파일 경로 직접 처리(LFI) 패턴을 자동스캔 및 수동 확인한 결과 해당 기능이 존재하지 않음.",
+  "recommendation": "파일 처리 기능 미구현 확인. 향후 추가 시 확장자 whitelist, UUID 파일명, MIME 검증 적용 필요.",
+  "evidence": {
+    "file": "",
+    "line": 0,
+    "code_snippet": "<구체적 확인 근거 — 예: MultipartFile, FileInputStream 패턴 0건 확인>"
+  },
+  "needs_review": false
 }
 ```
 
@@ -107,9 +123,24 @@ API 목록 → Controller → Service → 파일 처리 로직
 
 | 저장 경로 상황 | 판정 |
 |---|---|
-| Web Document Root 외부 (NAS, S3, `/data/uploads/` 등) + 다운로드 전용 서블릿 경유 | **양호 (근본 방어)** |
+| Web Document Root 외부 (NAS, S3, `/data/uploads/` 등) + 다운로드 전용 서블릿 경유 | **웹쉘 직접 실행에 한해 양호 (근본 방어)** — 아래 ⚠️ 주의사항 필수 확인 |
 | Web Document Root 내부 (`/webapps/upload/`, `/static/` 등) + 코드 레벨 필터만 존재 | **취약 (코드 필터 우회 시 직접 실행 가능)** |
 | 저장 경로 설정 코드 미확인 | `needs_review: true` — `@Value` 경로 설정 또는 `application.yml` 확인 요청 |
+
+> ⚠️ **NAS / 외부 저장소 아키텍처 적용 범위 주의**
+>
+> "NAS/S3 저장 = 양호"는 **웹쉘 URL 직접 실행 위험에 한정**된 판단이다.
+> 아래 취약점은 NAS 저장 여부와 무관하게 **별도로 확인하고 반드시 보고**해야 한다:
+>
+> | 취약점 유형 | NAS 저장 시 위험 | 판정 |
+> |---|---|---|
+> | MIME 타입 / magic bytes 검증 부재 | polyglot 파일 우회, 콘텐츠 타입 혼동 가능 | **Medium — 별도 finding 필수** |
+> | 확장자 전용 검증 (`getOriginalFilename()` 기반) | 확장자 위조로 허용 타입 우회 가능 | **Medium — 별도 finding 필수** |
+> | 파일명 난수화(UUID) 미적용 | 원본 파일명 예측 가능, 열거 공격 | **Low — 별도 finding 필수** |
+> | HTML 파일 인라인 서빙 (Content-Disposition 누락) | Stored XSS (브라우저 렌더링) | **High — XSS 스캔과 교차 보고** |
+>
+> **NAS 아키텍처를 이유로 위 항목을 FP 처리하는 것은 금지**한다.
+> 각 항목은 웹쉘 실행과 별개의 공격 표면이므로 독립적으로 finding을 생성한다.
 
 **recommendation 필수 포함 문구:**
 ```
@@ -217,7 +248,7 @@ URL을 통한 직접 실행(Execute)이 불가하여 웹쉘 공격을 원천 차
 
 ```json
 {
-  "task_id": "2-4",
+  "task_id": "file",
   "status": "completed",
   "findings": [
     {
@@ -448,4 +479,65 @@ URL Whitelist 검증 로직의 구현 결함(정규식 오류, 서브도메인 �
 
 [View Resolver Bean 설정]
 (붙여넣기 — 있는 경우)
+```
+
+---
+
+## findings_FILE.json 생성 (LLM-Check Phase 최종 출력)
+
+LLM-Check Phase 완료 후 `state/<prefix>/findings_FILE.json`을 생성한다.
+
+### 절차
+
+1. `state/<prefix>/file.json`의 `auto_findings[]` 로드
+2. 각 항목 LLM 교차검증 수행:
+   - **FP 판정**: `findings[]`에서 **제거**, `evidence_trail[]`에 `fp_corrected: true`로 기록
+   - **TP 확정**: description, code_snippet, evidence 보강
+3. Auto-Scan 미탐지 취약점(F/N) 발견 시 신규 finding 추가:
+   - `fn_detected: true`, `source: "llm-check(fn-detected)"`
+4. finding_id 재부여: `FILE-001` 순번 (심각도 내림차순)
+5. `state/<prefix>/findings_FILE.json` 저장
+
+### 출력 스키마 (shared/references/output_schemas.md 참조)
+
+```json
+{
+  "task_id": "file",
+  "llm_checked": true,
+  "generated_at": "ISO8601",
+  "scan_coverage": {
+    "fn_disclaimer": "Auto-Scan은 정적 패턴 기반이므로 동적 파일 경로·스트림 기반 업로드는 탐지 불가"
+  },
+  "summary": {
+    "total": 0, "취약": 0, "정보": 0, "fn_detected": 0
+  },
+  "findings": [
+    {
+      "finding_id": "FILE-001",
+      "title": "",
+      "severity": "Critical|High|Medium|Low|Informational",
+      "risk_level": 5,
+      "category": "파일 업로드 취약점|파일 다운로드 경로 조작|원격 파일 포함|파일 처리 범위 확인",
+      "cwe_id": "CWE-434|CWE-22|CWE-918|N/A",
+      "owasp_category": "A04:2021 Insecure Design|A01:2021 Broken Access Control|A10:2021 Server-Side Request Forgery (SSRF)",
+      "result": "취약|정보",
+      "diagnosis_method": "자동스캔(SAST)|교차검증(수동)|수동진단(LLM)",
+      "source": "auto-scan|llm-check|llm-check(fn-detected)",
+      "fn_detected": false,
+      "fp_corrected": false,
+      "scope": {
+        "type": "endpoint|file|config|global",
+        "endpoint": "(upload param: file)",
+        "file": "path/to/Controller.java",
+        "line": 42,
+        "module": null
+      },
+      "description": "한국어 설명",
+      "recommendation": "조치 방법",
+      "evidence": {"file": "path/to/Controller.java", "line": 42, "code_snippet": "실제 코드"},
+      "needs_review": false
+    }
+  ],
+  "evidence_trail": []
+}
 ```

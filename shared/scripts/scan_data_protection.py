@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 # ============================================================
 #  0. 공통 유틸
@@ -154,6 +154,42 @@ _S_BASE64_SECRET_NAMES_RE = re.compile(
 # Base64 특성 문자 포함 여부 필터 — 단순 alphanumeric 제외
 _S_BASE64_CHARS_RE = re.compile(r'[+/=]')
 
+# ── [보완 4] 암호화 키/IV/Salt 변수명 직접 탐지 ──────────────────────────────
+# 기존 _S_GENERIC_SECRET_RE 미커버 변수명:
+#   Key, InitialVector, ECG_AES_KEY, HASH_SALT, IV 등 도메인 전용 네이밍
+# 모든 매치는 needs_review=True — FP 방지를 위해 코드 문맥 수동 확인 필수
+_S_CRYPTO_KEY_RE = re.compile(
+    r'(?i)(?:(?:private\s+)?(?:static\s+)?(?:final\s+)?|(?:final\s+)?(?:static\s+)?(?:private\s+)?)'
+    r'(?:String|byte\[\])\s+'
+    r'(?:'
+    r'(?:\w+_?)?aes_?key|ecg_?aes_?key|des_?key|hmac_?key|crypto_?key|enc_?key|encrypt_?key'
+    r'|initialVector|init_?vector|initialization_?vector'
+    r'|(?<![Gg]et)(?<![Ss]et)IV\b'
+    r'|hash_?salt|salt\b'
+    r'|(?<![Gg]et)(?<![Ss]et)Key\b'
+    r')\s*='
+    r'\s*["\']([A-Za-z0-9+/=_\-!@#$%^&*.()\{\}]{8,})["\']',
+    re.MULTILINE,
+)
+# 고엔트로피 판별용 — 단순 반복 문자열 FP 제거
+_S_ENTROPY_UNIQUE_THRESHOLD = 4  # 유니크 문자 수 최소값
+
+
+# ── [P] API 응답 내 UserInfo PII 직접 반환 탐지 ────────────────────────────────
+# 서비스 레이어에서 userInfo.<sensitiveField> → 응답 DTO 필드 직접 할당 패턴
+# 마스킹 함수 없이 할당 시 API 응답에 PII 비마스킹 노출 위험 (CWE-359)
+_P_USERINFO_PII_RE = re.compile(
+    r'\buserInfo\.(mdn|userName|birthDate|birth\b|ciNo|ocbCardNo|mbrId)\b',
+    re.IGNORECASE,
+)
+# 마스킹 함수 — 동일 라인 또는 인접 라인에 존재하면 보호됨
+_P_MASK_FUNC_RE = re.compile(
+    r'(?:maskPhoneNumber|maskName|maskBirthDate|maskEmail|maskCard'
+    r'|MaskingUtils\.mask|maskingUtil\.mask'
+    r'|\.mask\s*\()\s*\(',
+    re.IGNORECASE,
+)
+
 
 # ── [L] 민감정보 로깅 탐지 ──────────────────────────────────────────────────
 
@@ -170,6 +206,7 @@ _PII_VAR_NAMES = (
     r'|pin|pinCode'
     r'|rsaKey|privateKey|secretKey'
     r'|accountNo|account_?no|bankAccount'
+    r'|cpn|pn\b|calling\b|called\b|callee\b|caller\b'
 )
 
 # ── [L] 로그 허용 목록 / 보호 필수 목록 (FP 필터링) ─────────────────────────
@@ -439,6 +476,16 @@ _D_TOSTRING_EXCLUDE_LIST_RE = re.compile(
 )
 # 필드 레벨 @ToString.Exclude
 _D_TOSTRING_FIELD_EXCL_RE = re.compile(r'@ToString\.Exclude\b')
+
+# ── [보완 5] 복호화 결과 → VO 필드 할당 탐지 ─────────────────────────────────
+# 생성자/메서드 내 AES.decrypt() / decipher() 결과를 this.field에 직접 할당하는 패턴
+# → 복호화된 PII가 VO에 저장되어 API 응답에 평문 노출될 가능성 (CWE-312)
+# 모든 매치는 needs_review=True — 실제 API 응답 포함 여부 수동 확인 필수
+_D_DECRYPTED_FIELD_ASSIGN_RE = re.compile(
+    r'this\.\w+\s*=\s*(?:[A-Za-z]+\.)?(?:decrypt|decipher|decode)\s*\(',
+    re.IGNORECASE,
+)
+
 # 클래스 선언 전 N줄 내에 @ToString/@Data가 있는지 확인용 (per-class context)
 _D_CLASS_DECL_RE = re.compile(
     r'(?:@ToString\b|@Data\b)[^\n]*(?:\n[^\n]*){0,8}(?:public|protected|private|abstract|final|\s)+class\s+',
@@ -527,7 +574,7 @@ class DPFinding:
     finding_id: str
     category: str           # HARDCODED_SECRET / SENSITIVE_LOGGING / WEAK_CRYPTO /
                             # JWT_INCOMPLETE / DTO_EXPOSURE / CORS_MISCONFIG / SECURITY_HEADER
-    severity: str           # Critical / High / Medium / Low / Info
+    severity: str           # Critical / High / Medium / Low / Informational
     title: str
     description: str
     file: str
@@ -545,7 +592,7 @@ class DPFinding:
 class DPScanResult:
     """전체 스캔 결과"""
     version: str = VERSION
-    task_id: str = "2-5"
+    task_id: str = "data"
     status: str = "completed"
     source_dir: str = ""
     scanned_at: str = ""
@@ -635,6 +682,7 @@ def _make_id(category: str, n: int) -> str:
         "DTO_EXPOSURE": "DTO",
         "CORS_MISCONFIG": "COR",
         "SECURITY_HEADER": "HDR",
+        "API_RESPONSE_PII": "PII",
     }
     return f"DATA-{abbr.get(category, 'XXX')}-{n:03d}"
 
@@ -688,7 +736,7 @@ def scan_hardcoded_secrets(source_dir: Path) -> list[DPFinding]:
             if ln in safe_lines:
                 continue
             _add("HARDCODED_SECRET",
-                 "Info" if is_test else "Critical",
+                 "Informational" if is_test else "Critical",
                  "AWS Access Key ID 하드코딩",
                  f"AWS Access Key ID 패턴({m.group()[:8]}...)이 소스코드에 평문 존재.",
                  rel, ln, _masked_snippet(content, m.start()),
@@ -703,7 +751,7 @@ def scan_hardcoded_secrets(source_dir: Path) -> list[DPFinding]:
             if ln in safe_lines:
                 continue
             _add("HARDCODED_SECRET",
-                 "Info" if is_test else "Critical",
+                 "Informational" if is_test else "Critical",
                  "AWS Secret Access Key 하드코딩",
                  "AWS Secret Access Key가 코드에 평문 리터럴로 존재.",
                  rel, ln, _masked_snippet(content, m.start()),
@@ -716,7 +764,7 @@ def scan_hardcoded_secrets(source_dir: Path) -> list[DPFinding]:
         for m in _S_GCP_KEY_RE.finditer(content):
             ln = _line_of(content, m.start())
             _add("HARDCODED_SECRET",
-                 "Info" if is_test else "Critical",
+                 "Informational" if is_test else "Critical",
                  "GCP Service Account Private Key 하드코딩",
                  "GCP 서비스 계정 private_key가 소스코드에 포함.",
                  rel, ln, "-----BEGIN PRIVATE KEY (마스킹)",
@@ -751,7 +799,7 @@ def scan_hardcoded_secrets(source_dir: Path) -> list[DPFinding]:
             if ln in safe_lines:
                 continue
             _add("HARDCODED_SECRET",
-                 "Info" if is_test else "High",
+                 "Informational" if is_test else "High",
                  "DB 비밀번호 하드코딩",
                  "데이터베이스 비밀번호가 소스코드에 평문 리터럴로 존재.",
                  rel, ln, "password = \"****\" (마스킹)",
@@ -792,7 +840,7 @@ def scan_hardcoded_secrets(source_dir: Path) -> list[DPFinding]:
             if not _S_BASE64_CHARS_RE.search(val):
                 continue
             _add("HARDCODED_SECRET",
-                 "Info" if is_test else "High",
+                 "Informational" if is_test else "High",
                  "Base64 인코딩 시크릿 하드코딩",
                  (f"Base64 인코딩된 시크릿이 소스코드에 하드코딩됨 ({len(val)}자). "
                   f"디코딩 시 원본 키 복원 가능. 운영 키 여부 추가 확인 필요."),
@@ -801,6 +849,59 @@ def scan_hardcoded_secrets(source_dir: Path) -> list[DPFinding]:
                  "@Value(\"${key.property}\") 참조 + Jasypt ENC(...) 암호화 또는 Vault/KMS 이관.",
                  result="정보" if is_test else "취약",
                  needs_review=True)
+
+        # [보완 4] 암호화 키/IV/Salt 직접 탐지
+        # AES_KEY, ECG_AES_KEY, Key, InitialVector, HASH_SALT, IV 등 도메인 전용 변수명
+        # 항상 needs_review=True — 오탐 방지를 위해 코드 문맥 수동 확인 필수
+        for m in _S_CRYPTO_KEY_RE.finditer(content):
+            ln = _line_of(content, m.start())
+            if ln in safe_lines or ln in already_flagged_lines:
+                continue
+            val = m.group(1)
+            # 유니크 문자 수가 임계값 미만이면 단순 반복/더미 값 가능성 → 그래도 needs_review
+            unique_chars = len(set(val))
+            severity = "High" if unique_chars >= _S_ENTROPY_UNIQUE_THRESHOLD else "Medium"
+            _add("HARDCODED_SECRET",
+                 "Informational" if is_test else severity,
+                 "암호화 키/IV/Salt 하드코딩 (휴리스틱)",
+                 (f"암호화 키 또는 IV/Salt 변수에 리터럴 값이 하드코딩됨 ({len(val)}자). "
+                  f"운영 키 여부 및 실제 암호화 함수 전달 여부 확인 필요."),
+                 rel, ln, _masked_snippet(content, m.start()),
+                 "CWE-798", "A02:2021 Cryptographic Failures",
+                 "환경변수(@Value) 또는 KMS/Vault로 이관. 현재 키 로테이션 고려.",
+                 result="정보" if is_test else "취약",
+                 needs_review=True)
+
+        # [보완 4-b] 암호화 유틸 클래스 파일 휴리스틱
+        # 파일명이 AES/Crypt/Cipher 등 암호화 관련이면 모든 static final String 필드 검사
+        _CRYPTO_FILENAME_RE = re.compile(
+            r'(?i)(?:AES|Crypt|Cipher|Crypto|Encrypt|Decrypt|Hash)',
+        )
+        if _CRYPTO_FILENAME_RE.search(fp.stem):
+            _STATIC_FINAL_STR_RE = re.compile(
+                r'(?:private\s+|public\s+|protected\s+)?(?:static\s+)?(?:final\s+)?'
+                r'String\s+(\w+)\s*=\s*["\']([A-Za-z0-9+/=_\-!@#$%^&*.()\{\}]{8,})["\']',
+                re.MULTILINE,
+            )
+            for m2 in _STATIC_FINAL_STR_RE.finditer(content):
+                ln2 = _line_of(content, m2.start())
+                if ln2 in safe_lines or ln2 in already_flagged_lines:
+                    continue
+                var_name = m2.group(1)
+                val2 = m2.group(2)
+                if len(set(val2)) < _S_ENTROPY_UNIQUE_THRESHOLD:
+                    continue  # 단순 반복 문자열 — FP 가능성 높음
+                already_flagged_lines.add(ln2)
+                _add("HARDCODED_SECRET",
+                     "Informational" if is_test else "High",
+                     f"암호화 유틸 클래스 내 하드코딩 상수 ({var_name})",
+                     (f"암호화 관련 클래스({fp.name})의 static 상수 `{var_name}`에 "
+                      f"리터럴 값 하드코딩. 운영 키 여부 수동 확인 필요."),
+                     rel, ln2, _masked_snippet(content, m2.start()),
+                     "CWE-798", "A02:2021 Cryptographic Failures",
+                     "환경변수(@Value) 또는 KMS/Vault로 이관.",
+                     result="정보" if is_test else "취약",
+                     needs_review=True)
 
     # ── 프로퍼티/YAML 파일 스캔 ─────────────────────────────────
     # i18n / 예외 메시지 파일 판별: 파일명에 message/error/exception/locale 포함 시 FP 제외 대상
@@ -881,7 +982,7 @@ def scan_sensitive_logging(source_dir: Path) -> list[DPFinding]:
     [레벨 차등화]
       info/warn/error/fatal → result="취약", severity="High"  (상용 환경 노출 위험)
       debug/trace           → result="정보", severity="Low"   (개발/검증계 노출 위험)
-      System.out            → result="정보", severity="Info"
+      System.out            → result="정보", severity="Informational"
     """
     findings: list[DPFinding] = []
     counter = [0]
@@ -1003,7 +1104,7 @@ def scan_sensitive_logging(source_dir: Path) -> list[DPFinding]:
             findings.append(DPFinding(
                 finding_id=_make_id("SENSITIVE_LOGGING", counter[0]),
                 category="SENSITIVE_LOGGING",
-                severity="Info",
+                severity="Informational",
                 title=f"System.out 민감정보 직접 출력 — {len(hits)}건 ({rel.split('/')[-1]})",
                 description=(
                     f"System.out.println으로 민감정보가 직접 출력됨. "
@@ -1028,7 +1129,7 @@ def scan_sensitive_logging(source_dir: Path) -> list[DPFinding]:
             findings.append(DPFinding(
                 finding_id=_make_id("SENSITIVE_LOGGING", counter[0]),
                 category="SENSITIVE_LOGGING",
-                severity="Info",
+                severity="Informational",
                 title=f"민감정보 로깅 (마스킹 유틸 근접 확인 필요) — {len(hits)}건 ({rel.split('/')[-1]})",
                 description=(
                     "로그 구문에 민감정보가 포함되나 근접 컨텍스트에서 마스킹 유틸 호출 확인. "
@@ -1469,6 +1570,9 @@ def scan_dto_exposure(source_dir: Path, api_inventory: Optional[dict] = None) ->
     # dto_class → [(field_snippet, file, line, has_lombok)]
     dto_exposed: dict[str, list[tuple[str, str, int, bool]]] = {}
 
+    # [보완 5] 복호화 결과 → VO 필드 할당 수집: [(rel, line, snippet)]
+    decrypt_assign_hits: list[tuple[str, int, str]] = []
+
     dto_pattern = re.compile(
         r'(?i)(?:Dto|Response|Result|VO|View|Info|Payload)\.(java|kt)$'
     )
@@ -1497,7 +1601,12 @@ def scan_dto_exposure(source_dir: Path, api_inventory: Optional[dict] = None) ->
             stripped = line.strip()[:120]
             dto_exposed.setdefault(class_name, []).append((stripped, rel, i, has_lombok))
 
-    if not dto_exposed:
+        # [보완 5] 복호화 결과 → VO 필드 직접 할당 탐지
+        for m in _D_DECRYPTED_FIELD_ASSIGN_RE.finditer(content):
+            ln = _line_of(content, m.start())
+            decrypt_assign_hits.append((rel, ln, content.splitlines()[ln - 1].strip()[:120]))
+
+    if not dto_exposed and not decrypt_assign_hits:
         return []
 
     # ── Step 2: 엔드포인트 매핑 ──────────────────────────────────────────
@@ -1559,9 +1668,9 @@ def scan_dto_exposure(source_dir: Path, api_inventory: Optional[dict] = None) ->
         safe_by_design = is_token_endpoint and all_fields_are_token_fields
 
         if safe_by_design:
-            sev = "Info"
+            sev = "Informational"
             result = "정보"
-        # severity: external + no_auth → High, external + auth → Medium, admin → Medium, internal → Info
+        # severity: external + no_auth → High, external + auth → Medium, admin → Medium, internal → Informational
         elif ep_type == "external" and not auth_req:
             sev = "High"
             result = "취약"
@@ -1572,7 +1681,7 @@ def scan_dto_exposure(source_dir: Path, api_inventory: Optional[dict] = None) ->
             sev = "Medium"
             result = "정보"
         else:
-            sev = "Info"
+            sev = "Informational"
             result = "정보"
 
         # 노출 필드 요약
@@ -1637,7 +1746,7 @@ def scan_dto_exposure(source_dir: Path, api_inventory: Optional[dict] = None) ->
         findings.append(DPFinding(
             finding_id=_make_id("DTO_EXPOSURE", counter[0]),
             category="DTO_EXPOSURE",
-            severity="Info",
+            severity="Informational",
             title=f"엔드포인트 매핑 불가 DTO 민감 필드 ({len(unmapped_dto_fields)}건) — FP 검토 필요",
             description=(
                 f"HTTP 엔드포인트로 역추적되지 않은 DTO 클래스의 민감 필드 {len(unmapped_dto_fields)}건이 탐지됨.\n"
@@ -1662,6 +1771,36 @@ def scan_dto_exposure(source_dir: Path, api_inventory: Optional[dict] = None) ->
                     for f in unmapped_dto_fields
                 ],
             },
+        ))
+
+    # ── Step 5: 복호화 결과 → VO 필드 할당 Finding ───────────────────────
+    # [보완 5] AES.decrypt() / decipher() 결과를 this.field에 직접 할당하는 생성자 패턴
+    # 복호화된 PII가 VO에 저장되어 API 응답에 평문 노출될 가능성 (CWE-312)
+    for rel_hit, ln_hit, snippet_hit in decrypt_assign_hits:
+        counter[0] += 1
+        findings.append(DPFinding(
+            finding_id=_make_id("DTO_EXPOSURE", counter[0]),
+            category="DTO_EXPOSURE",
+            severity="Medium",
+            title="복호화 결과 VO 필드 직접 할당 — API 응답 평문 노출 가능 (CWE-312)",
+            description=(
+                "VO/DTO 생성자에서 AES.decrypt() 또는 유사 복호화 함수의 결과를 "
+                "`this.field`에 직접 할당. 해당 VO가 API 응답으로 직렬화될 경우 "
+                "복호화된 PII(전화번호, 개인식별정보 등)가 평문으로 노출됨."
+            ),
+            file=rel_hit,
+            line=ln_hit,
+            code_snippet=snippet_hit,
+            cwe_id="CWE-312",
+            owasp_category="A02:2021 Cryptographic Failures",
+            recommendation=(
+                "1. 해당 VO가 API 응답 직렬화 경로에 포함되는지 확인.\n"
+                "2. 응답 시 마스킹 함수 적용 또는 @JsonIgnore로 민감 필드 제외.\n"
+                "3. 복호화는 실제 사용 시점까지 지연(lazy decryption) 고려."
+            ),
+            result="취약",
+            needs_review=True,
+            evidence={"decrypt_assignment": snippet_hit},
         ))
 
     return findings
@@ -1810,6 +1949,84 @@ def scan_toString_exposure(source_dir: Path) -> list[DPFinding]:
                 ),
                 result="취약",
                 needs_review=False,
+            ))
+
+    return findings
+
+
+# ============================================================
+#  8-b. [P] API 응답 내 UserInfo PII 비마스킹 직접 반환 탐지
+# ============================================================
+
+def scan_api_response_pii(source_dir: Path) -> list[DPFinding]:
+    """서비스 레이어에서 userInfo PII 필드를 마스킹 없이 응답 DTO에 할당하는 패턴 탐지.
+
+    탐지 조건:
+      - *Service*.kt / *Service*.java 파일에서
+      - `userInfo.(mdn|userName|birthDate|birth|ciNo|ocbCardNo|mbrId)` 패턴이
+      - 대입(=) 표현식 우변에 위치하며
+      - 동일 라인 ±2줄 내에 마스킹 함수 호출이 없는 경우
+    """
+    findings: list[DPFinding] = []
+    counter = [0]
+
+    for fp in _iter_sources(source_dir):
+        # *Service* 파일만 대상 (Controller에도 적용 가능하나 주요 패턴은 서비스 레이어)
+        if "Service" not in fp.name and "Controller" not in fp.name:
+            continue
+        if _is_test_file(fp):
+            continue
+
+        content = _read(fp)
+        lines = content.splitlines()
+
+        for i, line in enumerate(lines):
+            m = _P_USERINFO_PII_RE.search(line)
+            if not m:
+                continue
+            # 대입 문맥 확인 (= 오른쪽에 userInfo.xxx 위치)
+            eq_idx = line.find("=")
+            pii_idx = m.start()
+            if eq_idx < 0 or pii_idx < eq_idx:
+                continue
+            # ±2줄 컨텍스트에서 마스킹 함수 호출 여부 확인
+            ctx_start = max(0, i - 2)
+            ctx_end   = min(len(lines), i + 3)
+            context   = "\n".join(lines[ctx_start:ctx_end])
+            if _P_MASK_FUNC_RE.search(context):
+                continue  # 마스킹 적용 → 양호
+
+            pii_field = m.group(1)
+            lineno    = i + 1
+            counter[0] += 1
+            findings.append(DPFinding(
+                finding_id=_make_id("API_RESPONSE_PII", counter[0]),
+                category="API_RESPONSE_PII",
+                severity="Medium",
+                title=(
+                    f"API 응답 내 UserInfo PII 비마스킹 직접 반환 — "
+                    f"{fp.name}:{lineno} (userInfo.{pii_field})"
+                ),
+                description=(
+                    f"서비스 레이어({fp.name}:{lineno})에서 userInfo.{pii_field}이(가) "
+                    "마스킹 함수 없이 응답 DTO 필드에 직접 할당됩니다. "
+                    "해당 엔드포인트 HTTP 응답 body에 PII가 평문으로 포함될 수 있습니다. "
+                    "수동 확인 필요 — 본인 정보 반환(Safe by Design) 여부 및 "
+                    "GET/POST 간 마스킹 일관성 점검."
+                ),
+                file=_rel(fp, source_dir),
+                line=lineno,
+                code_snippet=line.strip()[:200],
+                cwe_id="CWE-359",
+                owasp_category="A01:2021 Broken Access Control",
+                recommendation=(
+                    f"1. [필수] maskPhoneNumber() 등 마스킹 함수 적용 — "
+                    f"userInfo.{pii_field} → mask(userInfo.{pii_field}) 형태.\n"
+                    "2. [점검] 동일 리소스 GET/POST 간 마스킹 처리 일관성 확인.\n"
+                    "3. [일괄] 동일 패턴으로 userInfo PII를 반환하는 다른 엔드포인트 점검."
+                ),
+                result="정보",
+                needs_review=True,
             ))
 
     return findings
@@ -2074,7 +2291,7 @@ def scan_security_headers(source_dir: Path) -> tuple[list[DPFinding], dict]:
         findings.append(DPFinding(
             finding_id=_make_id("SECURITY_HEADER", counter[0]),
             category="SECURITY_HEADER",
-            severity="Info",
+            severity="Informational",
             title="Content-Security-Policy (CSP) 헤더 미설정",
             description=(
                 "Spring Security Config에서 CSP 헤더 설정을 찾을 수 없음. "
@@ -2097,7 +2314,7 @@ def scan_security_headers(source_dir: Path) -> tuple[list[DPFinding], dict]:
         findings.append(DPFinding(
             finding_id=_make_id("SECURITY_HEADER", counter[0]),
             category="SECURITY_HEADER",
-            severity="Info",
+            severity="Informational",
             title="HSTS (HTTP Strict-Transport-Security) 미설정",
             description=(
                 "HSTS 헤더 미설정. HTTPS 강제 없이 HTTP 다운그레이드 공격 가능."
@@ -2118,11 +2335,66 @@ def scan_security_headers(source_dir: Path) -> tuple[list[DPFinding], dict]:
 
 
 # ============================================================
+#  10-b. auto_findings / evidence_trail 생성
+# ============================================================
+
+_DP_CONFIG_CATEGORIES = {"CORS_MISCONFIG", "SECURITY_HEADER"}
+_DP_GLOBAL_CATEGORIES = {"CORS_MISCONFIG", "SECURITY_HEADER"}
+
+
+def _dp_scope_type(f: DPFinding) -> str:
+    if f.category in _DP_CONFIG_CATEGORIES:
+        return "config"
+    return "file"
+
+
+def _dp_finding_to_auto_finding(f: DPFinding) -> dict:
+    """DPFinding → 표준 finding object (auto_findings용)."""
+    d = asdict(f)
+    d["source"]           = "auto-scan"
+    d["diagnosis_method"] = "auto-scan"
+    d["fn_detected"]      = False
+    d["scope"] = {
+        "type":     _dp_scope_type(f),
+        "endpoint": None,
+        "file":     f.file,
+        "line":     f.line,
+        "module":   None,
+    }
+    return d
+
+
+def _build_data_auto_findings_and_trail(
+    all_findings: list[DPFinding],
+) -> tuple[list[dict], list[dict]]:
+    """DPFinding 리스트 → (auto_findings[], evidence_trail[])."""
+    auto_findings: list[dict] = []
+    evidence_trail: list[dict] = []
+
+    for f in all_findings:
+        if f.result in ("취약", "정보"):
+            auto_findings.append(_dp_finding_to_auto_finding(f))
+        else:
+            evidence_trail.append({
+                "finding_id":  f.finding_id,
+                "category":    f.category,
+                "result":      f.result,
+                "file":        f.file,
+                "line":        f.line,
+                "title":       f.title,
+                "description": f.description[:200],
+                "fp_corrected": False,
+            })
+
+    return auto_findings, evidence_trail
+
+
+# ============================================================
 #  11. 통계 요약 생성
 # ============================================================
 
 def _build_summary(all_findings: list[DPFinding]) -> dict:
-    sev_order  = ["Critical", "High", "Medium", "Low", "Info"]
+    sev_order  = ["Critical", "High", "Medium", "Low", "Informational"]
     cat_labels = {
         "HARDCODED_SECRET": "하드코딩 시크릿",
         "SENSITIVE_LOGGING": "민감정보 로깅",
@@ -2131,6 +2403,7 @@ def _build_summary(all_findings: list[DPFinding]) -> dict:
         "DTO_EXPOSURE":      "DTO 민감정보 노출",
         "CORS_MISCONFIG":    "CORS 오설정",
         "SECURITY_HEADER":   "보안 헤더 미설정",
+        "API_RESPONSE_PII":  "API 응답 PII 비마스킹 노출",
     }
 
     by_sev = {s: 0 for s in sev_order}
@@ -2207,7 +2480,7 @@ def main():
     parser.add_argument("-o", "--output", default="state/task25_result.json",
                         help="결과 출력 경로 (기본: state/task25_result.json)")
     parser.add_argument("--skip", nargs="*", default=[],
-                        choices=["secret", "logging", "crypto", "jwt", "dto", "tostring", "cors", "header"],
+                        choices=["secret", "logging", "crypto", "jwt", "dto", "tostring", "cors", "header", "apipii"],
                         help="특정 진단 항목 건너뛰기")
     args = parser.parse_args()
 
@@ -2255,6 +2528,10 @@ def main():
         print("  [D+] Lombok @ToString PII 노출 스캔...")
         all_findings.extend(scan_toString_exposure(source_dir))
 
+    if "apipii" not in skip:
+        print("  [P] API 응답 UserInfo PII 비마스킹 반환 스캔...")
+        all_findings.extend(scan_api_response_pii(source_dir))
+
     cors_findings, cors_status = [], {}
     if "cors" not in skip:
         print("  [R] CORS 오설정 스캔...")
@@ -2270,20 +2547,29 @@ def main():
         global_status["security_headers"] = header_status
 
     summary = _build_summary(all_findings)
+    auto_findings, evidence_trail = _build_data_auto_findings_and_trail(all_findings)
 
     result = DPScanResult(
         source_dir=str(source_dir),
         scanned_at=datetime.now().isoformat(),
-        summary=summary,
+        summary={
+            **summary,
+            "auto_findings_count":  len(auto_findings),
+            "evidence_trail_count": len(evidence_trail),
+        },
         findings=[asdict(f) for f in all_findings],
         global_status=global_status,
     )
 
+    result_dict = asdict(result)
+    result_dict["auto_findings"]  = auto_findings
+    result_dict["evidence_trail"] = evidence_trail
+
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(asdict(result), f, ensure_ascii=False, indent=2)
-    _write_llm_summary(asdict(result), out_path)
+        json.dump(result_dict, f, ensure_ascii=False, indent=2)
+    _write_llm_summary(result_dict, out_path)
 
     print(f"\n[완료] 총 {summary['total']}건 발견 "
           f"(취약 {summary['by_result']['취약']} / "

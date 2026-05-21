@@ -36,6 +36,16 @@ from scan_injection_patterns import (
     SSI_PATTERNS, scan_file, matches_glob,
 )
 
+# ── Rule Registry (Rule/Engine 분리 아키텍처) ─────────────────────────────
+from scan_injection_rules import (
+    RULE_REGISTRY,
+    CATCH_ALL_SQL_KEYWORD_RE,
+    CATCH_ALL_DYNAMIC_RE,
+    SAFE_BINDING_ANNOTATION_RE,
+    TAINT_COMPONENT_SUFFIXES as _RULE_TAINT_SUFFIXES,
+    detect_dynamic_sql_in_body,
+)
+
 
 # ============================================================
 #  0. JPA / Spring Data 상수
@@ -58,6 +68,36 @@ JPA_CONVENTION_PREFIXES = (
     'readBy', 'getBy', 'queryBy', 'searchBy', 'streamBy',
     'findFirst', 'findTop', 'findDistinct',
 )
+
+# ============================================================
+#  0-R2DBC. R2DBC / Reactive Repository 상수
+# ============================================================
+
+# R2DBC Repository 인터페이스 타입 (Spring Data R2DBC + Kotlin Coroutine)
+R2DBC_REPOSITORY_TYPES = (
+    'ReactiveCrudRepository', 'ReactiveSortingRepository',   # Spring Data Reactive
+    'R2dbcRepository',                                        # Spring Data R2DBC 전용
+    'CoroutineCrudRepository', 'CoroutineRepository',         # Kotlin Coroutine 기반
+    'ReactiveMongoRepository',                                # MongoDB Reactive
+)
+
+# DatabaseClient 직접 사용 클래스 감지 (필드 선언 또는 생성자 주입)
+_DC_FIELD_RE = re.compile(
+    r'(?:private\s+(?:val|var)\s+\w+\s*:\s*DatabaseClient'   # Kotlin: private val client: DatabaseClient
+    r'|DatabaseClient\s+\w+\b'                                # Java: DatabaseClient client
+    r'|@Autowired[^;]*DatabaseClient)',                        # @Autowired DatabaseClient
+    re.DOTALL,
+)
+
+# DatabaseClient SQL 문자열 연결 취약 패턴
+_DC_SQL_CONCAT_RE = re.compile(
+    r'\.(?:sql|execute)\s*\(\s*(?:"[^"]*"\s*\+|\w[^)]*\+)',  # .sql("..." + var) or .sql(query +)
+    re.DOTALL | re.IGNORECASE,
+)
+
+# DatabaseClient 안전 바인딩 확인
+_DC_BIND_RE = re.compile(r'\.bind\s*\(')
+_DC_NAMED_PARAM_RE = re.compile(r':\w+')
 
 # [Phase 12] Controller→Service 위임 추적 대상 컴포넌트 접미사
 # [Phase 17] 'Port' 추가: Hexagonal Architecture (Port & Adapter 패턴) 지원
@@ -389,7 +429,7 @@ class EndpointDiagnosis:
     platform: str = "WEB"
     check_item: str = "SQL인젝션"
     result: str = "양호"         # 양호 / 취약 / 정보 / N/A
-    severity: str = "Risk 2"
+    severity: str = "Low"
     threat: str = "DB정보 유출"
 
     # API 정보
@@ -1154,13 +1194,52 @@ def build_mybatis_index(source_dir: Path, extra_source_dirs: list = None) -> dic
 
 
 def _is_jpa_repository(content: str) -> bool:
-    """JPA Repository 인터페이스인지 확인 (Java extends / Kotlin : 구문 모두 지원)"""
+    """JPA Repository 인터페이스인지 확인 (하위호환 유지).
+    내부적으로 RULE_REGISTRY의 spring_jpa 룰을 사용한다.
+    """
+    rule = RULE_REGISTRY.get("spring_jpa")
+    if rule:
+        return rule.is_db_layer_class(content)
+    # fallback
     return bool(re.search(
         r'(?:extends|:)\s*(?:JpaRepository|CrudRepository|PagingAndSortingRepository|'
-        r'JpaSpecificationExecutor|MongoRepository|'
-        r'ReactiveCrudRepository|ReactiveSortingRepository)\s*[<,]',
+        r'JpaSpecificationExecutor|MongoRepository)\s*[<,]',
         content
     ))
+
+
+def _is_r2dbc_repository(content: str) -> bool:
+    """R2DBC / Reactive Repository 인터페이스인지 확인 (하위호환 유지).
+    내부적으로 RULE_REGISTRY의 r2dbc 룰을 사용한다.
+    """
+    rule = RULE_REGISTRY.get("r2dbc")
+    if rule:
+        return rule.is_db_layer_class(content)
+    # fallback
+    pattern = r'(?:extends|:)\s*(?:' + '|'.join(re.escape(t) for t in R2DBC_REPOSITORY_TYPES) + r')\s*[<,\s{]'
+    return bool(re.search(pattern, content))
+
+
+def _is_databaseclient_class(content: str) -> bool:
+    """DatabaseClient 직접 주입 클래스 확인 (하위호환 유지)."""
+    return bool(_DC_FIELD_RE.search(content))
+
+
+def _get_db_layer_frameworks(content: str, filename: str = "") -> list:
+    """content에 해당하는 모든 프레임워크 룰 반환 (RULE_REGISTRY 기반).
+
+    Returns:
+        매칭된 FrameworkRule 목록 (여러 프레임워크 혼용 가능)
+    """
+    matched = []
+    for rule in RULE_REGISTRY.values():
+        if rule.lang_globs and filename:
+            ext_ok = any(filename.endswith(g.replace("*", "")) for g in rule.lang_globs)
+            if not ext_ok:
+                continue
+        if rule.is_db_layer_class(content):
+            matched.append(rule)
+    return matched
 
 
 def _is_jpa_safe_method(method_name: str) -> bool:
@@ -1229,10 +1308,13 @@ def _analyze_jpa_query(content: str, method_name: str) -> list:
     # ── 최종 판정 ─────────────────────────────────────────────────────────────
     if has_concat:
         native_tag = " (nativeQuery=true)" if is_native else ""
+        # has_concat 의미: "문자열 리터럴" + "식별자(변수)" 패턴 확인됨 (리터럴+리터럴 제외).
+        # 동시에 :namedParam 이 있으면 일부 파라미터는 안전하지만 직접 결합 파라미터가 존재.
+        safe_note = " [안전 바인딩 동일 컨텍스트 발견 — LLM 검토]" if (has_named_param or has_positional) else ""
         ops.append(DbOperation(
             method=method_name,
             access_type="raw_concat",
-            detail=f"취약: @Query{native_tag} - 쿼리 문자열 '+' 결합으로 파라미터 직접 삽입",
+            detail=f"취약: @Query{native_tag} - 쿼리 문자열 '+' 결합으로 파라미터 직접 삽입{safe_note}",
             is_vulnerable=True,
         ))
     elif has_named_param or has_positional:
@@ -1252,6 +1334,216 @@ def _analyze_jpa_query(content: str, method_name: str) -> list:
             detail=f"양호: @Query{native_tag} - 정적 쿼리 (파라미터 직접 삽입 없음)",
             is_vulnerable=False,
         ))
+    return ops
+
+
+def _analyze_databaseclient_method(
+    method_body: str,
+    method_name: str,
+    content: str,
+    file_path: str,
+) -> list:
+    """Spring Data R2DBC DatabaseClient 직접 SQL 실행 패턴 분석
+
+    취약 패턴:
+      - .sql("..." + var)  또는 .sql(queryVar)  — 문자열 연결/변수 삽입
+      - .execute("..." + var)                  — execute() 직접 연결
+      - .toString() 결과를 sql()에 삽입        — 변수화된 SQL
+    양호 패턴:
+      - .sql(literal).bind(":param", val)      — named bind
+      - .sql(literal).bind(0, val)             — positional bind
+      - :param 이 쿼리 리터럴 안에 존재         — named parameter
+    """
+    ops: list = []
+
+    # ── R2dbcEntityTemplate ORM 체인 — 전부 양호 ─────────────────────────────
+    _ENTITY_TEMPLATE_RE = re.compile(
+        r'\bR2dbcEntityTemplate\b|\bEntityTemplate\b'
+        r'|\.select\s*\(|\.insert\s*\(|\.update\s*\(|\.delete\s*\('
+    )
+    if _ENTITY_TEMPLATE_RE.search(method_body):
+        ops.append(DbOperation(
+            method=method_name,
+            access_type="orm",
+            detail="양호: R2dbcEntityTemplate ORM 체인 — SQL 직접 조합 없음",
+            is_vulnerable=False,
+        ))
+
+    # ── DatabaseClient.sql() / .execute() 분석 ───────────────────────────────
+    # 1) .sql("..." + var)  or  .sql(queryVar)  or  .execute("..." + var)
+    concat_matches = _DC_SQL_CONCAT_RE.findall(method_body)
+    if concat_matches:
+        for _ in concat_matches:
+            ops.append(DbOperation(
+                method=method_name,
+                access_type="raw_concat",
+                detail="취약: DatabaseClient.sql()/execute() — 문자열 연결 또는 변수 직접 삽입",
+                is_vulnerable=True,
+            ))
+        return ops  # 취약 확정 → 이하 양호 판정 불필요
+
+    # 2) .sql(plainVar) — 단일 변수 (리터럴 없이 변수만)
+    #    .sql(someQuery)  where someQuery is an identifier (not a "..." literal)
+    _DC_VAR_SQL_RE = re.compile(
+        r'\.(?:sql|execute)\s*\(\s*(\w+)\s*\)',
+        re.DOTALL,
+    )
+    var_matches = _DC_VAR_SQL_RE.findall(method_body)
+    # filter out string-literal-only calls handled above
+    # if var is a plain identifier (not "..."), it's potentially vulnerable
+    for var in var_matches:
+        # skip common safe constants: all-caps or ending with Query literal
+        if re.match(r'^"', var):
+            continue
+        ops.append(DbOperation(
+            method=method_name,
+            access_type="raw_concat",
+            detail=f"취약 가능성: DatabaseClient.sql({var}) — 동적 변수 삽입 (바인딩 확인 필요)",
+            is_vulnerable=True,
+        ))
+    if var_matches:
+        return ops
+
+    # 3) Named parameter or .bind() usage — safe
+    # Check for .sql("SELECT ... :param ...").bind(...)
+    _DC_LITERAL_SQL_RE = re.compile(
+        r'\.(?:sql|execute)\s*\(\s*"([^"]*)"',
+        re.DOTALL,
+    )
+    lit_matches = _DC_LITERAL_SQL_RE.findall(method_body)
+    for query_lit in lit_matches:
+        has_named = bool(_DC_NAMED_PARAM_RE.search(query_lit))
+        has_bind  = bool(_DC_BIND_RE.search(method_body))
+        if has_named or has_bind:
+            ops.append(DbOperation(
+                method=method_name,
+                access_type="bind",
+                detail="양호: DatabaseClient.sql(literal) + .bind()/:param 바인딩 사용",
+                is_vulnerable=False,
+            ))
+        else:
+            ops.append(DbOperation(
+                method=method_name,
+                access_type="raw_concat",
+                detail="취약 가능성: DatabaseClient.sql(literal) — 파라미터 바인딩 미확인",
+                is_vulnerable=True,
+            ))
+
+    return ops
+
+
+def _catch_all_db_sink_scan(
+    method_body: str,
+    method_name: str,
+    class_content: str,
+    file_path: str,
+    frameworks: list,          # list[FrameworkRule] from _get_db_layer_frameworks()
+) -> list:
+    """Catch-All Sink 탐지 — DB 계층 클래스에서 SQL+동적결합 패턴을 함수명 무관하게 포착.
+
+    FN 방어 2번 요구사항 구현:
+      - frameworks 중 catch_all=True인 룰이 하나라도 있으면 활성화
+      - 실행 함수명과 무관하게 메서드 본문에서 SQL 키워드 + 동적 결합 패턴 탐지
+      - 안전 바인딩이 함께 있어도 탐지를 억제하지 않고 evidence에 주석으로만 기록
+
+    Returns: list[DbOperation]
+    """
+    # catch_all=True 프레임워크가 없으면 패스
+    if not any(r.catch_all for r in frameworks):
+        return []
+
+    # RULE_REGISTRY의 명시적 sink_pattern으로 이미 잡힌 경우 중복 방지
+    # → 호출자(analyze_repository_method)가 명시적 패턴 우선 실행 후 Catch-All 실행
+    hits = detect_dynamic_sql_in_body(method_body)
+    if not hits:
+        return []
+
+    ops = []
+    for hit in hits:
+        has_safe = hit["has_safe_binding"]
+
+        # 안전 바인딩이 동일 컨텍스트에 있어도 취약 후보로 보고 (Fail-Open)
+        # — safe 존재 시 detail에 주석 추가, LLM이 최종 판단
+        safe_note = ""
+        if has_safe:
+            safe_note = " [주의: 안전 바인딩 패턴도 동일 맥락에서 발견 — LLM 최종 판단 필요]"
+
+        ops.append(DbOperation(
+            method=method_name,
+            access_type="raw_concat",
+            detail=(
+                f"취약 후보(Catch-All): DB 계층 메서드에서 SQL+동적결합 탐지"
+                f" (line {hit['line_no']})"
+                f"{safe_note}"
+            ),
+            line=hit["line_no"],
+            code_snippet=hit["snippet"],
+            is_vulnerable=True,
+            taint_confirmed=None,  # LLM이 확인
+        ))
+
+    return ops
+
+
+def _apply_explicit_sink_patterns(
+    method_body: str,
+    method_name: str,
+    class_content: str,
+    file_path: str,
+    frameworks: list,
+) -> list:
+    """RULE_REGISTRY의 명시적 sink_patterns를 메서드 본문에 적용.
+
+    Returns: list[DbOperation]
+    """
+    filename = Path(file_path).name if file_path else ""
+    ops = []
+
+    for rule in frameworks:
+        for sp in rule.sink_patterns:
+            # file_glob 필터
+            globs = sp.get("file_glob", rule.lang_globs)
+            if globs and filename:
+                if not any(filename.endswith(g.replace("*", "")) for g in globs):
+                    continue
+
+            # context_check (선택)
+            if "context_check" in sp:
+                ctx_window = sp.get("context_window", 5)
+                lines = method_body.splitlines()
+                ctx_re = re.compile(sp["context_check"], re.IGNORECASE | re.DOTALL)
+                # 메서드 전체에서 컨텍스트 확인
+                if not ctx_re.search(method_body):
+                    # [Fail-Open] context_check 미매칭이어도 클래스 레벨로 확장 시도
+                    if not ctx_re.search(class_content):
+                        continue
+
+            pattern_re = re.compile(sp["pattern"], re.IGNORECASE | re.DOTALL)
+            for m in pattern_re.finditer(method_body):
+                # 매칭된 줄 번호 계산
+                line_no = method_body[:m.start()].count("\n") + 1
+                snippet = method_body.splitlines()[line_no - 1].strip() if line_no <= len(method_body.splitlines()) else m.group(0)[:120]
+
+                # 안전 바인딩 존재 여부 (Fail-Open: 탐지 억제 금지 — 주석만)
+                window_start = max(0, m.start() - 300)
+                window_end   = min(len(method_body), m.end() + 300)
+                window_text  = method_body[window_start:window_end]
+                has_safe = rule.has_safe_binding(window_text)
+
+                safe_note = ""
+                if has_safe:
+                    safe_note = " [안전 바인딩 동일 컨텍스트 발견 — LLM 검토]"
+
+                ops.append(DbOperation(
+                    method=method_name,
+                    access_type=sp.get("access_type", "raw_concat"),
+                    detail=sp["detail"] + safe_note,
+                    line=line_no,
+                    code_snippet=snippet,
+                    is_vulnerable=sp.get("is_vulnerable", True),
+                    taint_confirmed=None,
+                ))
+
     return ops
 
 
@@ -1756,10 +2048,98 @@ def _trace_internal_methods(svc_content: str, method_name: str,
     return []
 
 
+# ── 비-JVM 언어 가드 상수 ──────────────────────────────────────────────────
+# 이 확장자를 가진 파일은 Spring 3-Tier 추적 대상이 아니다.
+# trace_endpoint 진입 시 즉시 Fail-Open 반환.
+_NON_JVM_EXTENSIONS = frozenset({
+    '.js', '.ts', '.mjs', '.cjs', '.jsx', '.tsx',
+    '.py', '.php', '.rb', '.go', '.rs',
+})
+
+
+def _scan_non_jvm_file(file_path: Path, source_dir: Path) -> list[dict]:
+    """비-JVM 파일에서 RULE_REGISTRY 패턴으로 SQL Injection 후보를 스캔한다.
+
+    scan_file() 을 재사용하여 RULE_REGISTRY.sink_patterns 중
+    파일 확장자가 일치하는 룰만 적용한다.
+    Catch-All 탐지도 함께 수행.
+    반환 형식: [{"rule_id", "rule_name", "line", "snippet", ...}, ...]
+    """
+    if not file_path.exists():
+        return []
+
+    filename = file_path.name
+    all_hits: list[dict] = []
+
+    # 1) RULE_REGISTRY 명시 Sink 패턴 적용
+    for rule in RULE_REGISTRY.values():
+        if not rule.lang_globs:
+            continue
+        ext_ok = any(filename.endswith(g.replace("*", "")) for g in rule.lang_globs)
+        if not ext_ok:
+            continue
+        for sp in rule.sink_patterns:
+            pat = {
+                "id":      sp["id"],
+                "name":    sp["name"],
+                "desc":    sp.get("detail", ""),
+                "pattern": sp["pattern"],
+                "category": f"SQL Injection / {rule.framework_id}",
+            }
+            for opt in ("file_glob", "file_content_check", "context_check", "context_window"):
+                if opt in sp:
+                    pat[opt] = sp[opt]
+            for finding in scan_file(file_path, [pat], [], 3):
+                all_hits.append({
+                    "rule_id":   sp["id"],
+                    "rule_name": sp["name"],
+                    "line":      finding.line,
+                    "snippet":   finding.code_snippet,
+                    "needs_review": finding.needs_review,
+                })
+
+    # 2) Catch-All 동적 SQL 탐지
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+        for hit in detect_dynamic_sql_in_body(content):
+            all_hits.append({
+                "rule_id":          "CATCH_ALL_DYNAMIC_SQL",
+                "rule_name":        "동적 SQL (Catch-All)",
+                "line":             hit["line_no"],
+                "snippet":          hit["snippet"],
+                "has_safe_binding": hit["has_safe_binding"],
+                "needs_review":     True,
+            })
+    except Exception:
+        pass
+
+    return all_hits
+
+
 def trace_endpoint(endpoint: dict, source_dir: Path,
                    class_index: dict, mybatis_index: dict = None,
                    impl_index: dict = None) -> dict:
     """단일 endpoint에 대해 Controller → Service → Repository 추적"""
+
+    # ── 비-JVM 언어 가드 ────────────────────────────────────────────────────
+    # JS/TS/Python/PHP 등은 Spring 3-Tier 파싱 대상이 아니다.
+    # 억지로 추적을 시도하면 에러이거나 조용한 FN이 된다.
+    # 대신 해당 파일을 RULE_REGISTRY 패턴으로 직접 스캔한 결과를 반환.
+    _file_field_raw = endpoint.get("file", "").split(":")[0]
+    if _file_field_raw:
+        _file_ext = Path(_file_field_raw).suffix.lower()
+        if _file_ext in _NON_JVM_EXTENSIONS:
+            _candidate = source_dir / _file_field_raw
+            _non_jvm_hits = _scan_non_jvm_file(_candidate, source_dir)
+            return {
+                "service_calls": [],
+                "repository_calls": [],
+                "db_operations": [],
+                "non_jvm": True,
+                "non_jvm_ext": _file_ext,
+                "non_jvm_findings": _non_jvm_hits,
+            }
+
     result = {
         "service_calls": [],
         "repository_calls": [],
@@ -2705,20 +3085,35 @@ def analyze_repository_method(content: str, method_name: str,
                                mybatis_index: dict = None,
                                source_dir: Path = None,
                                tainted_names: set = None) -> list:
-    """Repository 메서드의 DB 접근 패턴을 분석하여 진단 유형 결정
+    """Repository 메서드의 DB 접근 패턴을 분석하여 진단 유형 결정.
 
-    우선순위:
-      1. 메서드 본문에서 직접 사용하는 DB 접근 패턴 확인
-      2. 양호/취약 패턴이 공존 시 메서드의 주된 작업 기준으로 판정
-      3. ORM(.using(entity)) > bind > criteria > raw_concat 순으로 판정
+    [리메이크] RULE_REGISTRY 기반 Generic Orchestrator:
+      - 프레임워크별 하드코딩 제거 → RULE_REGISTRY 순회
+      - Fail-Open: 안전 패턴이 있어도 취약 후보를 유지
+      - Catch-All: DB 계층 클래스에서 SQL+동적결합을 함수명 무관 탐지
+
+    판정 우선순위:
+      1. MyBatis DAO (sqlMapClientTemplate 등) — iBatis 호환 유지
+      2. MyBatis Mapper 어노테이션 (@Select/${}  등)
+      3. MyBatis XML 매핑 조회
+      4. 메서드 본문 없는 인터페이스:
+         a. MyBatis Mapper 명명 관례 → XML 미발견 시 양호 추정
+         b. RULE_REGISTRY 프레임워크 내장 인터페이스 메서드 → 양호/취약 판정
+      5. 메서드 본문 있는 구현 클래스:
+         a. RULE_REGISTRY 명시적 sink_patterns 적용
+         b. Catch-All Sink 탐지 (catch_all=True 프레임워크)
+         c. 기존 Kotlin/Java SQL Builder 분석 (하위호환 유지)
+
     tainted_names: Phase 24 위치 인덱스 기반 전파로 도달한 오염 변수명 집합
     """
     if mybatis_index is None:
         mybatis_index = {}
 
     ops = []
+    fp_str = str(file_path) if file_path else ""
+    filename = Path(fp_str).name if fp_str else ""
 
-    # --- 0단계: DAO/sqlMapClientTemplate 패턴 우선 확인 ---
+    # ── 0단계: DAO/sqlMapClientTemplate 패턴 우선 확인 ──────────────────────
     if mybatis_index and re.search(
         r'(?:sqlMapClientTemplate|sqlMapClient|getSqlMapClientTemplate|'
         r'sqlSession(?:Template)?|getSqlSession)',
@@ -2728,14 +3123,12 @@ def analyze_repository_method(content: str, method_name: str,
         if dao_ops:
             return dao_ops
 
-    # --- 0-1단계: MyBatis Mapper Interface (어노테이션 기반) ---
-    # @Select/@Insert/@Update/@Delete 어노테이션이 있는 interface 메서드
+    # ── 0-1단계: MyBatis Mapper Interface (어노테이션 기반) ──────────────────
     annotation_ops = _analyze_mybatis_annotations(content, method_name, mybatis_index)
     if annotation_ops:
         return annotation_ops
 
-    # --- 0-2단계: MyBatis Mapper Interface (XML 매핑) ---
-    # 메서드 본문이 없는 interface → mybatis_index에서 매핑 확인
+    # ── 0-2단계: MyBatis Mapper Interface (XML 매핑) ─────────────────────────
     method_body = extract_method_body(content, method_name)
     if not method_body:
         # interface일 가능성 → MyBatis XML 매핑 시도
@@ -2744,16 +3137,11 @@ def analyze_repository_method(content: str, method_name: str,
             if xml_ops:
                 return xml_ops
 
-        # --- [Phase 10/18] Mapper interface fallback: XML 미발견 시 MyBatis 안전 추정 ---
-        # [Phase 18] CRUD 접두사 제한 제거: Mapper/Dao 클래스의 모든 메서드에 적용
-        # 이유: XML 스캔에서 ${}를 탐지했다면 mybatis_index에 이미 반영됨.
-        #       XML 미발견 = 안전한 #{} 사용 or 정적 SQL 이므로 safe 추정 가능.
+        # --- [Mapper/Dao 명명 관례] XML 미발견 시 MyBatis 안전 추정 ---
         class_name = extract_class_name(content)
         if class_name and class_name.endswith(('Mapper', 'Dao', 'DAO')) \
                 and not _is_jpa_repository(content):
-            # [P1] @Mapper 어노테이션 확인: 어노테이션 기반 MyBatis 인터페이스 → 양호 확정
             has_mapper_annot = bool(re.search(r'@Mapper\b', content))
-            # ${}가 파일 내에 단 한 곳도 없으면 안전한 XML 전용 Mapper
             has_dollar_brace = bool(re.search(r'\$\{', content))
             if has_mapper_annot and not has_dollar_brace:
                 return [DbOperation(
@@ -2770,28 +3158,85 @@ def analyze_repository_method(content: str, method_name: str,
                 is_vulnerable=False,
             )]
 
-        # --- 0-3단계: JPA Repository 내장 메서드 확인 ---
-        if _is_jpa_repository(content):
+        # ── 0-3단계: RULE_REGISTRY 프레임워크 내장 인터페이스 메서드 ──────────
+        # (JPA, R2DBC, Kotlin Coroutine Repository 등 — 메서드 본문 없는 인터페이스)
+        frameworks = _get_db_layer_frameworks(content, filename)
+        if frameworks:
+            # 프레임워크 내장 메서드 (findBy*, save 등) 판정
             if _is_jpa_safe_method(method_name):
+                fw_names = "/".join(r.framework_id for r in frameworks)
                 return [DbOperation(
                     method=method_name,
                     access_type="jpa_builtin",
-                    detail=f"양호: JPA 내장 메서드 ({method_name}) - PreparedStatement 자동 바인딩",
+                    detail=f"양호: [{fw_names}] 내장 메서드 ({method_name}) - 자동 바인딩",
                     is_vulnerable=False,
                 )]
-            # @Query 어노테이션 확인
+            # @Query 어노테이션 명시적 확인 (JPA/R2DBC 공통)
             query_ops = _analyze_jpa_query(content, method_name)
             if query_ops:
                 return query_ops
-            # JPA 규칙 기반 메서드 (findBy* 등) 중 미매칭 → 안전으로 추정
+            # 규칙 기반 파생 쿼리 (findByXxx 등) → 안전
+            if any(method_name.startswith(p) for p in JPA_CONVENTION_PREFIXES):
+                fw_names = "/".join(r.framework_id for r in frameworks)
+                return [DbOperation(
+                    method=method_name,
+                    access_type="jpa_builtin",
+                    detail=f"양호: [{fw_names}] 파생 쿼리 메서드 ({method_name})",
+                    is_vulnerable=False,
+                )]
+            # 그 외 인터페이스 메서드 — RULE_REGISTRY 명시적 패턴 적용
+            # (인터페이스이므로 catch_all 미적용 — 본문 없음)
+            explicit_ops = _apply_explicit_sink_patterns(
+                content, method_name, content, fp_str, frameworks
+            )
+            if explicit_ops:
+                return explicit_ops
+            # 미매칭 → 안전 추정 (interface 메서드는 프레임워크가 바인딩 처리)
+            fw_names = "/".join(r.framework_id for r in frameworks)
             return [DbOperation(
                 method=method_name,
                 access_type="jpa_builtin",
-                detail=f"양호: JPA Repository 인터페이스 메서드 ({method_name})",
+                detail=f"양호: [{fw_names}] Repository 인터페이스 메서드 ({method_name})",
                 is_vulnerable=False,
             )]
 
         return ops
+
+    # ── 메서드 본문(method_body) 있는 구현 클래스 분석 ───────────────────────
+
+    # ── [RULE_REGISTRY] 0-4단계: 매칭 프레임워크 확인 ──────────────────────
+    frameworks = _get_db_layer_frameworks(content, filename)
+
+    # ── [RULE_REGISTRY] 0-5단계: 명시적 Sink 패턴 적용 ─────────────────────
+    if frameworks:
+        explicit_ops = _apply_explicit_sink_patterns(
+            method_body, method_name, content, fp_str, frameworks
+        )
+        if explicit_ops:
+            # 취약 패턴이 하나라도 있으면 즉시 반환 (Worst-Case 원칙)
+            has_vuln = any(o.is_vulnerable for o in explicit_ops)
+            if has_vuln:
+                return explicit_ops
+            # 모두 양호 → catch_all로 추가 검사
+            ops.extend(explicit_ops)
+
+    # ── [Catch-All] 0-6단계: DB 계층 클래스 SQL+동적결합 Catch-All 탐지 ────
+    if frameworks:
+        catch_ops = _catch_all_db_sink_scan(
+            method_body, method_name, content, fp_str, frameworks
+        )
+        if catch_ops:
+            return catch_ops
+
+    # ── [DatabaseClient 레거시] R2DBC 직접 SQL 분석 (하위호환 유지) ─────────
+    # RULE_REGISTRY r2dbc 룰이 이미 처리하지만, 세밀한 bind/named-param 분석은
+    # 기존 _analyze_databaseclient_method()가 더 정밀함 → fallback으로 유지
+    if _is_databaseclient_class(content):
+        dc_ops = _analyze_databaseclient_method(
+            method_body, method_name, content, fp_str
+        )
+        if dc_ops:
+            return dc_ops
 
     lines = method_body.splitlines()
 
@@ -3493,6 +3938,25 @@ def judge_endpoint(trace_result: dict, endpoint: dict) -> dict:
       0: 양호        — 안전한 DB 접근 패턴
     """
 
+    # ── 비-JVM 언어: 추적 불가 → Fail-Open 정보 반환 ────────────────────────
+    if trace_result.get("non_jvm"):
+        ext = trace_result.get("non_jvm_ext", "")
+        findings = trace_result.get("non_jvm_findings", [])
+        vuln_count = sum(1 for f in findings if not f.get("has_safe_binding", False))
+        detail = (
+            f"비-JVM 언어({ext}) — Spring 3-Tier 추적 불가, 수동 검토 필요. "
+            f"패턴 스캔 후보 {len(findings)}건 (safe_binding 미확인 {vuln_count}건)"
+        )
+        return {
+            "result": "정보",
+            "diagnosis_type": f"추적 불가 - 비-JVM 언어 ({ext})",
+            "diagnosis_detail": detail,
+            "filter_type": "N/A",
+            "filter_detail": "N/A",
+            "needs_review": True,
+            "evidence": findings,
+        }
+
     # [Phase 16] 제거(deprecated) 엔드포인트 → 양호
     handler = endpoint.get("handler", "")
     if handler.startswith("제거") or handler == "":
@@ -3938,19 +4402,19 @@ def judge_endpoint(trace_result: dict, endpoint: dict) -> dict:
 
 
 def _judgment_to_severity(judgment: dict) -> str:
-    """진단 결과 dict → Risk 등급 문자열 변환 (공식 취약점 등급 기준)
-    - [실제] SQL Injection 확인 → Risk 5 (Critical)
-    - [잠재] 취약 구조 (수동확인) → Risk 4 (High)
-    - 양호 / 정보 → Risk 2 (Low)
+    """진단 결과 dict → severity 변환 (주요 정보통신기반시설 보호지침 기준)
+    - [실제] SQL Injection 확인 → Critical (5등급)
+    - [잠재] 취약 구조 (수동확인) → High (4등급)
+    - 양호 / 정보 → Low (2등급)
     """
     if judgment.get("result") != "취약":
-        return "Risk 2"
+        return "Low"
     dt = judgment.get("diagnosis_type", "")
     if "[실제]" in dt:
-        return "Risk 5"
+        return "Critical"
     elif "[잠재]" in dt:
-        return "Risk 4"
-    return "Risk 5"  # 기본 취약 → Risk 5
+        return "High"
+    return "Critical"  # 기본 취약 → Critical
 
 
 # ============================================================
@@ -3998,17 +4462,182 @@ def scan_global_patterns(source_dir: Path, context_lines: int = 3) -> dict:
         "os_command_injection": {
             "total": len(cmd_findings),
             # result/severity 필드 주입 — 통계 집계 누락 방지 + 공식 등급 반영
-            "findings": [{**asdict(f), "result": "정보", "severity": "Risk 5"} for f in cmd_findings],
+            "findings": [{**asdict(f), "result": "정보", "severity": "Critical"} for f in cmd_findings],
         },
         "ssi_injection": {
             "total": len(ssi_findings),
-            "findings": [{**asdict(f), "result": "정보", "severity": "Risk 5"} for f in ssi_findings],
+            "findings": [{**asdict(f), "result": "정보", "severity": "Critical"} for f in ssi_findings],
         },
     }
 
 
 # ============================================================
-#  7. 메인 로직
+#  7. auto_findings / evidence_trail 정규화
+#     (findings_injection.json 초안 생성용)
+# ============================================================
+
+_INJECTION_CWE: dict = {
+    "SQL인젝션":   "CWE-89",
+    "XPath인젝션": "CWE-643",
+    "LDAP인젝션":  "CWE-90",
+}
+
+_INJECTION_RECOMMENDATION = (
+    "PreparedStatement 또는 MyBatis #{} 바인딩으로 교체하여 파라미터화 쿼리를 적용하세요. "
+    "동적 정렬 컬럼이 불가피한 경우 Allowlist 검증 후 사용하세요."
+)
+_OS_COMMAND_RECOMMENDATION = (
+    "외부 입력을 OS 명령에 직접 포함하지 마세요. "
+    "ProcessBuilder에 인자를 배열로 전달하고, 허용 명령 Allowlist를 적용하세요."
+)
+_SSI_RECOMMENDATION = (
+    "SSI include 지시문에 사용자 입력이 포함되지 않도록 입력값을 검증하고 "
+    "서버 설정에서 SSI를 비활성화하세요."
+)
+
+
+def _endpoint_to_auto_finding(d: dict, seq: int) -> dict:
+    """endpoint_diagnoses 레코드(취약/정보) → auto finding 객체."""
+    method_path = f"{d.get('http_method', '')} {d.get('request_mapping', '')}".strip()
+    check_item  = d.get("check_item", "SQL인젝션")
+    diag_type   = d.get("diagnosis_type", "")
+    title       = f"{check_item} — {diag_type}" if diag_type else check_item
+
+    # evidence에서 파일·라인·snippet 추출
+    evlist   = d.get("evidence") or []
+    first_ev = evlist[0] if evlist and isinstance(evlist[0], dict) else {}
+    snippet  = first_ev.get("code_snippet") or first_ev.get("snippet") or ""
+    ev_file  = d.get("process_file") or first_ev.get("file") or ""
+    ev_line  = first_ev.get("line") or first_ev.get("lines")
+
+    return {
+        "finding_id": f"INJ-AUTO-{seq:03d}",
+        "title": title,
+        "severity": d.get("severity", "High"),
+        "category": check_item,
+        "cwe_id": _INJECTION_CWE.get(check_item, "CWE-89"),
+        "owasp_category": "A03:2021 Injection",
+        "result": d.get("result"),
+        "diagnosis_method": "자동스캔(SAST)",
+        "source": "auto-scan",
+        "fn_detected": False,
+        "scope": {
+            "type": "endpoint",
+            "endpoint": method_path,
+            "handler": d.get("handler", ""),
+            "affected_file": ev_file,
+            "affected_line": ev_line,
+        },
+        "description": d.get("diagnosis_detail", ""),
+        "recommendation": _INJECTION_RECOMMENDATION,
+        "code_snippet": snippet,
+        "evidence": {
+            "file": ev_file,
+            "lines": str(ev_line) if ev_line is not None else "",
+            "code_snippet": snippet,
+            "taint_confirmed": d.get("taint_confirmed"),
+            "db_operations": d.get("db_operations", []),
+        },
+        "needs_review": d.get("needs_review", False),
+    }
+
+
+def _global_to_auto_finding(f: dict, category: str, cwe: str, seq: int) -> dict:
+    """global_findings 개별 항목 → auto finding 객체."""
+    recommendation = (
+        _OS_COMMAND_RECOMMENDATION if "OS" in category else _SSI_RECOMMENDATION
+    )
+    return {
+        "finding_id": f"INJ-AUTO-{seq:03d}",
+        "title": f"{category} — {f.get('pattern_id') or f.get('pattern_name') or '패턴 감지'}",
+        "severity": f.get("severity", "Critical"),
+        "category": category,
+        "cwe_id": cwe,
+        "owasp_category": "A03:2021 Injection",
+        "result": f.get("result", "정보"),
+        "diagnosis_method": "자동스캔(SAST)",
+        "source": "auto-scan",
+        "fn_detected": False,
+        "scope": {
+            "type": "global",
+            "affected_file": f.get("file", ""),
+            "affected_line": f.get("line"),
+        },
+        "description": f.get("description") or f.get("reason") or f.get("judgment") or "",
+        "recommendation": recommendation,
+        "code_snippet": f.get("code_snippet") or f.get("snippet") or "",
+        "evidence": {
+            "file": f.get("file", ""),
+            "lines": str(f.get("line", "")),
+            "code_snippet": f.get("code_snippet") or f.get("snippet") or "",
+        },
+        "needs_review": True,
+    }
+
+
+def _build_auto_findings_and_trail(
+    diagnoses: list[dict],
+    global_findings: dict,
+) -> tuple[list[dict], list[dict]]:
+    """
+    endpoint_diagnoses + global_findings →
+      auto_findings  : 취약·정보 항목 (LLM-Check 검증 후 /sec-review 대상)
+      evidence_trail : 양호·N/A 항목 감사 증적
+    """
+    auto_findings: list[dict] = []
+    evidence_trail: list[dict] = []
+    seq = 1
+    trail_seq = 1
+
+    # ── endpoint_diagnoses ─────────────────────────────────
+    for d in diagnoses:
+        result = d.get("result", "양호")
+        if result in ("취약", "정보"):
+            auto_findings.append(_endpoint_to_auto_finding(d, seq))
+            seq += 1
+        else:
+            # 양호 / N/A → evidence_trail (증적 보존)
+            method_path = (
+                f"{d.get('http_method', '')} {d.get('request_mapping', '')}".strip()
+            )
+            evidence_trail.append({
+                "trail_id": f"TRAIL-{trail_seq:03d}",
+                "result": "양호",
+                "source": "auto-scan",
+                "fp_corrected": False,
+                "scope": {
+                    "type": "endpoint",
+                    "endpoint": method_path,
+                    "handler": d.get("handler", ""),
+                },
+                "diagnosis_method": "자동스캔(SAST)",
+                "diagnosis_detail": (
+                    d.get("diagnosis_detail") or d.get("diagnosis_type") or result
+                ),
+                "finding_id": None,
+                "original_severity": None,
+            })
+            trail_seq += 1
+
+    # ── global_findings: OS Command Injection ──────────────
+    for f in global_findings.get("os_command_injection", {}).get("findings", []):
+        auto_findings.append(
+            _global_to_auto_finding(f, "OS Command Injection", "CWE-78", seq)
+        )
+        seq += 1
+
+    # ── global_findings: SSI Injection ─────────────────────
+    for f in global_findings.get("ssi_injection", {}).get("findings", []):
+        auto_findings.append(
+            _global_to_auto_finding(f, "SSI Injection", "CWE-97", seq)
+        )
+        seq += 1
+
+    return auto_findings, evidence_trail
+
+
+# ============================================================
+#  8. 메인 로직
 # ============================================================
 
 def load_api_inventory(inventory_path: Path, modules: list = None) -> list:
@@ -4156,8 +4785,14 @@ def run_diagnosis(source_dir: Path, inventory_path: Path,
                 sqli_stats[d.result] = sqli_stats.get(d.result, 0) + 1
             print(f"  Joern 병합 후 통계: {sqli_stats}")
 
+    # ── auto_findings / evidence_trail 생성 ──────────────────
+    diagnoses_dicts = [asdict(d) for d in diagnoses]
+    auto_findings, evidence_trail = _build_auto_findings_and_trail(
+        diagnoses_dicts, global_findings
+    )
+
     return {
-        "task_id": "2-2",
+        "task_id": "injection",
         "status": "completed",
         "scan_metadata": {
             "source_dir": str(source_dir),
@@ -4183,6 +4818,10 @@ def run_diagnosis(source_dir: Path, inventory_path: Path,
             for d in diagnoses
         ],
         "global_findings": global_findings,
+        # ── 정규화 finding (LLM-Check 전 초안) ─────────────────────────────────────────
+        # 취약·정보 항목만 포함. LLM-Check Phase가 FP 제거·override 후 findings_injection.json 생성.
+        "auto_findings": auto_findings,
+        "evidence_trail": evidence_trail,
         "summary": {
             "total_endpoints": len(diagnoses),
             "sqli": sqli_stats,
@@ -4193,6 +4832,8 @@ def run_diagnosis(source_dir: Path, inventory_path: Path,
                 "total": global_findings["ssi_injection"]["total"]
             },
             "needs_review": review_count,
+            "auto_findings_count": len(auto_findings),
+            "evidence_trail_count": len(evidence_trail),
         },
         "executed_at": datetime.now().isoformat(),
     }

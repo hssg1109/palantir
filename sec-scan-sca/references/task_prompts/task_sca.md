@@ -16,12 +16,12 @@
 ./gradlew dependencies --configuration runtimeClasspath > state/<prefix>/dep_tree.log
 
 # JAR 존재 시
-python3 tools/scripts/scan_sca.py <src> --jar state/<prefix>/build_manifest_primary.jar \
-    --project <name> --poc -o state/<prefix>/sca.json
+python3 shared/scripts/scan_sca_gradle_tree.py <src> --jar state/<prefix>/build_manifest_primary.jar \
+    --project <name> -o state/<prefix>/sca.json
 
 # Gradle dep tree 기반 (빌드 실패 시 대체)
-python3 tools/scripts/scan_sca.py <src> --dep-tree state/<prefix>/dep_tree.log \
-    --project <name> --poc --publish -o state/<prefix>/sca.json
+python3 shared/scripts/scan_sca_gradle_tree.py <src> --dep-tree state/<prefix>/dep_tree.log \
+    --project <name> -o state/<prefix>/sca.json
 ```
 
 ### Step 2. CVE 조회 및 필터링
@@ -52,6 +52,11 @@ python3 tools/scripts/scan_sca.py <src> --dep-tree state/<prefix>/dep_tree.log \
 
 ### Step 4. 결과 그룹화 및 정렬
 
+- **동일 라이브러리 복수 CVE 병합 (HARD RULE)**: 같은 `group:artifact` + `version` 조합에 CVE가 여러 건인 경우 1개 finding으로 통합한다.
+  - `scope.cve_id`: 심각도/CVSS 최상위 CVE를 대표 ID로 기재
+  - `scope.affected_cves`: 해당 라이브러리의 모든 CVE를 배열로 기재 (`[{cve_id, cvss, severity}]`)
+  - `severity`: 개별 CVE 중 최대값 적용 (합산 금지)
+  - `title`: `<라이브러리> <버전> (<대표CVE> 외 N건)` 형식 사용 (CVE 2건 이상 시)
 - 라이브러리별 1행 (CVE 여러 건을 한 셀에)
 - 정렬: CRITICAL → HIGH, 동일 심각도 내 적용 → 제한적 → 조건미충족
 

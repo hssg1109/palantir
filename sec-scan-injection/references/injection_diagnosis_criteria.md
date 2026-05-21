@@ -2,32 +2,73 @@
 
 Framework/ORM별 SQL Injection 진단 기준. scan_injection_enhanced.py (v3.2+)에서 자동 적용.
 
-## 1. MyBatis — ${}  4단계 판정 매트릭스 (v3.2+)
+---
 
-> `${}` 탐지 시 즉시 취약 판정하지 않고, 아래 4단계 Taint Flow 분석을 수행한다.
+## 0. Finding 단위 기준 (전체 공통)
 
-| 단계 | 상태 | 조건 | 판정 | 스캐너 access_type |
-|------|------|------|------|--------------------|
-| **Step 1** | 탐지 (Base State) | XML 파일 내 `${param}` 존재 | `[잠재적 위협]` — taint 역추적 시작 | — |
-| **Step 2** | Source 확인 | `${}` 변수가 HTTP 파라미터에서 유래하지 않음 (시스템 내부값, 상수, UUID 등) | `정보(Info)` — 외부 조작 불가 | `mybatis_dynamic_review` |
-| **Step 3** | Context 확인 | 외부 입력이 도달하나 **방어 로직** 존재 | `양호(FP)` — SQL Injection 페이로드 삽입 불가 | `mybatis_dynamic_safe` |
-| **Step 4** | 최종 판정 | String 입력이 검증 없이 `${}` 에 직삽 | `취약(TP)` — SQL Injection 확정 | `mybatis_unsafe` |
+### 0.1 Mapper 파일 단위 Finding
 
-### Step 3 방어 로직 인정 기준
+> **Mapper XML 파일 1개 = Finding 1개.**
 
-| 방어 패턴 | 예시 | 판정 |
-|-----------|------|------|
-| Enum 클래스 타입 캐스팅 | `SortDirection.valueOf(param)`, `OrderType.ASC` | 양호 |
-| `Integer` / `Long` 등 숫자형 타입 강제 | `Integer pageSize`, `Long.parseLong(param)` | 양호 |
-| `if-else` / `switch` 화이트리스트 치환 | `if (sort.equals("ASC")) "ASC" else "DESC"` | 양호 |
+- 동일 mapper 파일 내에 `${}` 가 여러 SQL 구문에 걸쳐 존재해도 **파일 단위로 1건**으로 집계
+- Finding ID 형식: `INJ-{REPO_ABBR}-MAPPER-{NNN}`
+- Finding 내 `affected_sqls` 배열에 해당 파일 내 모든 영향 SQL ID 나열
 
-### 변수명 분류 기준 (스캐너 자동 적용)
+### 0.2 Mapper Finding 판정 계층
 
-| 분류 | 변수명 패턴 | 기본 판정 (방어 없을 때) |
-|------|------------|--------------------------|
-| **동적 바인딩** | `orderBy`, `sortColumn`, `direction`, `tableName`, `limit`, `offset` 등 | Step 2/3 경계 → `정보` (Review Needed) |
-| **일반 입력** | 그 외 (`keyword`, `name`, `status` 등) | Step 4 → `취약` |
+| 계층 | 조건 | 판정 | 심각도 |
+|------|------|------|--------|
+| **Tier 1** | `${}` 패턴이 mapper 파일에 존재 (어떤 이유든) | **잠재적 취약** | Low-Medium |
+| **Tier 2** | Tier 1 + HTTP 파라미터가 `${}` 변수에 직접 도달하는 경로 확인 | **매우 취약 — 즉시 조치** | High |
+| **양호** | `#{}` 만 사용 (mapper 파일 전체에 `${}` 없음) | **양호** | — |
 
+> `정보(Info)` / `양호(FP)` 다운그레이드는 **불허**. `${}` 가 있으면 최소 Tier 1.
+> 방어 로직 존재, MBG 자동 생성 코드, 내부 상수 전달 등은 Tier 2 제외 사유이나 **Tier 1 해제 사유가 아님**.
+
+### 0.3 TSAFE 적용 예시 (기대 출력)
+
+`/sec-scan-injection` 실행 시 tsafety_common 14개 mapper 파일에 대해 아래와 같이 출력된다:
+
+```
+[INJ-COMMON-MAPPER-001] 잠재적 취약 (Tier 1)
+  파일: src/main/resources/mappers/TAppCfgMapper.xml
+  패턴: ${criterion.condition}, ${orderByClause}
+  설명: MBG 생성 패턴. 현재 호출 경로에서 사용자 입력 도달 미확인(Tier 1).
+        Tier 2 상향 여부는 서비스 레포별 호출 경로 확인 필요.
+
+[INJ-COMMON-MAPPER-002] 잠재적 취약 (Tier 1)
+  파일: src/main/resources/mappers/TAppCheckMapper.xml
+  ...
+(동일 패턴 — 14개 mapper 파일 각각 1 finding)
+```
+
+서비스 레포(restwas_safenumber2.5 등)에서 `${orderByClause}` 에 `@RequestParam` 값이 도달하는
+호출 경로가 확인되면 해당 mapper finding이 **Tier 2 (매우 취약)**으로 상향된다.
+
+---
+
+## 1. MyBatis — ${} 판정 기준 (2단계 Tier)
+
+> **`${}` 는 사용자 입력 도달 여부와 무관하게 항상 취약 파일로 판정한다.**
+> `#{}` (PreparedStatement 바인딩)만 양호.
+
+| Tier | 조건 | 판정 | 스캐너 access_type |
+|------|------|------|--------------------|
+| **Tier 1** | Mapper XML / Annotation에 `${param}` 패턴 존재 (어떤 경우도 해당) | `잠재적 취약` — 최소 등급. 사용자 입력 도달 여부와 무관하게 취약 파일로 분류 | `mybatis_dynamic_review`, `mybatis_dynamic_safe` |
+| **Tier 2** | `${}` 변수에 HTTP 파라미터(`@RequestParam`, `@PathVariable`, `@RequestBody` 등) 사용자 입력이 직접 도달하는 경로 확인 | `매우 취약` — 즉시 조치 필요 | `mybatis_unsafe` |
+
+### Tier 구분 기준
+
+| 분류 | 예시 | 판정 |
+|------|------|------|
+| `#{}` 바인딩 | `WHERE id = #{id}` | **양호** — PreparedStatement, SQL Injection 불가 |
+| `${}` + 사용자 입력 도달 | `ORDER BY ${sortCol}` ← `request.getParameter("sort")` | **Tier 2: 매우 취약** |
+| `${}` + 내부 상수/하드코딩값 전달 | `${criterion.condition}` ← MBG 생성 `"pn like"` 문자열 | **Tier 1: 잠재적 취약** |
+| `${}` + Enum 화이트리스트 방어 | `${direction}` ← `SortDirection.ASC.name()` | **Tier 1: 잠재적 취약** (방어 로직이 있어도 `${}` 사용 자체가 취약 구조) |
+
+> **이전 기준(4단계 매트릭스)의 `정보(Info)` / `양호(FP)` 다운그레이드는 폐기.**
+> 방어 로직 존재 여부, 사용자 입력 여부는 Tier 1/2 구분에만 사용 — `${}`가 있는 한 "양호" 판정 불가.
+>
 > `#{param}` 은 PreparedStatement 바인딩 → 항상 **양호**.
 
 ---
@@ -136,18 +177,18 @@ fun buildQuery(): String {
 
 ## 7. MyBatis / iBatis (v3.0+)
 
-> **`${}` 판정은 Section 1의 4단계 매트릭스를 따른다.** 아래는 패턴 분류 참조용.
+> **`${}` 판정은 Section 1의 2단계 Tier 기준을 따른다.** `${}`가 있으면 최소 Tier 1(잠재적 취약), 사용자 입력 도달 시 Tier 2(매우 취약).
 
-| 패턴 | 초기 분류 | 최종 판정 | 설명 |
-|------|----------|-----------|------|
-| `#{param}` (XML/Annotation) | 양호 | 양호 | PreparedStatement 바인딩 |
-| `${param}` (XML/Annotation) | 잠재적 위협 | Step 1→4 매트릭스 적용 | 문자열 직접 치환 — taint 추적 필수 |
-| `#param#` (iBATIS 2.0 XML) | 양호 | 양호 | Legacy PreparedStatement 바인딩 |
-| `$param$` (iBATIS 2.0 XML) | 잠재적 위협 | Step 1→4 매트릭스 적용 | Legacy 직접 치환 |
-| `@Select("... #{param} ...")` | 양호 | 양호 | Mapper interface 어노테이션 바인딩 |
-| `@Select("... ${param} ...")` | 잠재적 위협 | Step 1→4 매트릭스 적용 | Mapper interface 어노테이션 직접 삽입 |
-| `SqlMapClientTemplate` + `#{}` XML | 양호 | 양호 | DAO → XML 간접 바인딩 |
-| `SqlMapClientTemplate` + `${}` XML | 잠재적 위협 | Step 1→4 매트릭스 적용 | DAO → XML 간접 직접 삽입 |
+| 패턴 | 판정 | 설명 |
+|------|------|------|
+| `#{param}` (XML/Annotation) | **양호** | PreparedStatement 바인딩 |
+| `${param}` (XML/Annotation) | **잠재적 취약 (Tier 1) 이상** | 문자열 직접 치환 — 사용자 입력 도달 여부로 Tier 1/2 구분 |
+| `#param#` (iBATIS 2.0 XML) | **양호** | Legacy PreparedStatement 바인딩 |
+| `$param$` (iBATIS 2.0 XML) | **잠재적 취약 (Tier 1) 이상** | Legacy 직접 치환 |
+| `@Select("... #{param} ...")` | **양호** | Mapper interface 어노테이션 바인딩 |
+| `@Select("... ${param} ...")` | **잠재적 취약 (Tier 1) 이상** | Mapper interface 어노테이션 직접 삽입 |
+| `SqlMapClientTemplate` + `#{}` XML | **양호** | DAO → XML 간접 바인딩 |
+| `SqlMapClientTemplate` + `${}` XML | **잠재적 취약 (Tier 1) 이상** | DAO → XML 간접 직접 삽입 |
 
 ### MyBatis XML Mapper 추적 방식
 
@@ -161,12 +202,12 @@ fun buildQuery(): String {
 | access_type | 판정 | 스캐너 동작 |
 |---|---|---|
 | `mybatis_safe` / `ibatis_safe` | **양호** | `#{}` 바인딩 확인 |
-| `mybatis_dynamic_safe` | **양호 (FP)** | Step 3: Enum/Integer/화이트리스트 방어 로직 확인 |
-| `mybatis_dynamic_review` | **정보** | Step 2/3: 동적 바인딩 변수 (order/sort 등), 수동 검증 필요 |
-| `mybatis_unsafe` / `ibatis_unsafe` | **취약** | Step 4: 일반 변수 검증 없이 직삽 |
+| `mybatis_dynamic_safe` | **잠재적 취약 (Tier 1)** | `${}` 존재 — 방어 로직 있어도 취약 구조 (이전 "양호(FP)" 폐기) |
+| `mybatis_dynamic_review` | **잠재적 취약 (Tier 1)** | `${}` 존재 — 수동 검증으로 Tier 1/2 확정 (이전 "정보" 폐기) |
+| `mybatis_unsafe` / `ibatis_unsafe` | **매우 취약 (Tier 2)** | 사용자 입력 직삽 확인 — 즉시 조치 필요 |
 
 - XML mapper 전체가 `#{}` 만 사용 시 → 해당 namespace의 모든 endpoint **양호**
-- `_assess_mybatis_dollar_verdict()` 함수가 caller(서비스/DAO) 코드에서 방어 패턴을 탐색하여 Step 3 자동 적용
+- `${}` 가 하나라도 있으면 → Tier 1 최소 등급, 사용자 입력 경로 추적으로 Tier 2 확정
 
 ### XML 파싱 정책 (v3.1+)
 
@@ -262,7 +303,7 @@ rg "(redisTemplate|StringRedisTemplate|RedisRepository|@Cacheable)" \
 # → DB 관련 없고 Redis만 있으면 DB 없음
 ```
 
-### 9.3 추적 실패 API 취약 여부 갱신 절차 (LLM Phase 3-2 수행)
+### 9.3 추적 실패 API 취약 여부 갱신 절차 (LLM LLM-Check Phase 2 수행)
 
 1. **1-A-2 DB 로직 없음 분리**: 먼저 `해당없음(DB접근없음)` 케이스를 확정하여 분리
 2. **나머지 그룹별 대표 샘플 코드 확인**: Controller → Service → DAO → SQL (3~5개/그룹)
@@ -282,6 +323,7 @@ rg "(redisTemplate|StringRedisTemplate|RedisRepository|@Cacheable)" \
 2. **하드코딩 여부**: Service/Controller에서 고정값만 전달되는지 확인
 3. **타입 안전성**: `long`, `int` 등 숫자 타입은 SQL Injection 불가
 4. **코드 활성화 여부**: 주석 처리(`/* */`)된 코드는 "정보(비활성 코드)"로 분류
+   - ⚠️ **OS Command / SSI 예외**: 호출부 없는 dead code라도 **취약 (Medium)** 판정. `shared/references/cross_verification.md` Step 3 예외 규칙 참조.
 5. **경로 도달 여부**: switch/if 분기에서 실제 취약 메서드 호출 경로에 도달하는지 확인
 
 → 상세 절차는 `references/cross_verification.md` 참조

@@ -3,7 +3,7 @@
 **역할**: 당신은 보안 진단 전문가입니다.
 **입력 파일**: `state/<prefix>/xss.json` (scan_xss.py 자동스캔 결과)
 **출력 파일**: `state/<prefix>/task23_llm.json` (LLM 수동분석 보완 — supplemental)
-**게시 방식**: 별도 Confluence 페이지 X → `<prefix>_xss.json` finding 페이지의 `supplemental_sources`로 통합
+**게시 방식**: `findings_XSS.json`으로 통합하여 /sec-review 대상으로 전달
 
 ---
 
@@ -19,29 +19,57 @@
 3. **탐색 우선순위**: `xss_category: 실제위협` → `잠재적위협` → `수동확인필요` 순으로 처리한다.
    - 요약본의 `samples_by_category` 에서 카테고리별 대표 케이스를 먼저 확인한다.
 
-> ⚠️ **이 JSON은 자동스캔 페이지에 통합 렌더링된다.** 독립 보고서가 아님.
-> `confluence_page_map.json`의 xss finding 항목에 `supplemental_sources` 배열로 추가할 것.
+> ⚠️ **이 JSON은 자동스캔 결과와 통합된다.** LLM-Check 완료 후 `findings_XSS.json`에 병합하여 /sec-review 대상으로 전달.
 
 > 📋 **Finding 작성 기준**: `references/finding_writing_guide.md` 필수 준수
 > - `evidence.code_snippet`: 취약 코드 직접 인용 필수 (없으면 finding 미완성)
 > - `description`: 현황 → 보안 위협 → 현재 평가 3단 구어체 서술
 > - `recommendation`: 번호 목록(`1. 2. 3.`) 2개 이상, 구체적 코드 수정 방법 포함
 
+> 📋 **취약점 분류 기준**: `shared/references/vuln_taxonomy.md` 필수 참조
+> - `category` / `cwe_id` / `owasp_category` / 기본 `severity` / `scope.type` 은 이 표를 기준으로 결정
+> - **금지** category 값 예시: `XSS`, `크로스 사이트 스크립팅`, `Persistent/Reflected XSS`, `Stored XSS`, `XSS필터`, `xss_filter`
+
 ---
 
 ### 진단 프로세스 (2단계)
 
-> 토큰 절약을 위해 **스크립트 자동 진단 → LLM 검증** 2단계로 진행합니다.
+> 토큰 절약을 위해 **스크립트 자동 진단 → LLM In-place 업데이트** 2단계로 진행합니다.
 
 #### 1단계: 스크립트 자동 진단 (사전 실행)
 
 ```bash
-python3 tools/scripts/scan_xss.py <source_dir> \
+python3 shared/scripts/scan_xss.py <source_dir> \
     --api-inventory state/{prefix}_api_inventory.json \
     -o state/{prefix}_xss.json
 ```
 
-#### 2단계: LLM 검증 (이 프롬프트의 역할)
+#### 2단계: LLM 검증 및 findings_XSS.json 생성 (이 프롬프트의 역할)
+
+> **LLM은 `xss.json`의 auto_findings[]를 검토한 뒤 `findings_XSS.json`을 새로 작성한다.**
+> xss.json은 Auto-Scan 원본 증적으로 보존하며 수정하지 않는다.
+>
+> **LLM이 채워야 하는 finding별 필드:**
+> - `fp_corrected`: true | false  — FP 확정 시 true
+> - `llm_verdict`: `"TP"` | `"FP"` | `"needs_review"` — LLM 최종 판정
+> - `llm_reviewed_at`: ISO8601 타임스탬프 (현재 시각)
+> - `manual_review_note`: 판정 근거 요약 (코드 경로 또는 FP 이유, 비워두지 않음)
+>
+> **Root Cause finding (`finding_type: "root_cause"`) 처리:**
+> - `affected_endpoints[]` 배열에서 대표 샘플 3-5건을 직접 코드 추적하여
+>   Taint 확정 여부와 Data Type(String/Integer/Enum)을 검증한다.
+> - 전체 그룹의 대표 판정을 `llm_verdict`에 기록하고,
+>   `manual_review_note`에 "확정 N건 / FP M건 / 추가 검토 K건" 형식으로 기재한다.
+> - FP가 과반이면 `fp_corrected: true` + `llm_verdict: "FP"`로 설정한다.
+>
+> **findings_XSS.json 생성 절차:**
+> 1. `xss.json`의 `auto_findings[]` 전체를 읽는다.
+> 2. 각 finding을 순서대로 LLM 검토한다.
+> 3. **TP/needs_review 항목** → findings[] 에 포함. `llm_verdict`, `manual_review_note`, `evidence.taint_flow` 채움.
+> 4. **FP 항목** → findings[] 제외, evidence_trail[] 에 기록 (`fp_corrected: true`).
+> 5. LLM이 신규 발굴한 취약점 → findings[] 에 추가 (`source: "llm-check"`).
+> 6. findings[] severity 내림차순 정렬 후 finding_id 최종 부여 (XSS-001, XSS-002, ...).
+> 7. `state/<prefix>/findings_XSS.json` 저장 (`llm_checked: true`).
 
 스크립트 결과 JSON을 로드하여 아래 항목을 검토합니다:
 
@@ -95,7 +123,7 @@ Task 2-1에서 추출한 API 인벤토리를 기반으로 **Persistent XSS**, **
 
 > **View XSS는 두 레이어를 모두 포함한다.** 레이어별 탐지 방법과 스캐너 한계를 구분하여 적용한다.
 
-#### A. 서버사이드 템플릿 View XSS (scan_xss.py Phase 2)
+#### A. 서버사이드 템플릿 View XSS (scan_xss.py Step 2)
 
 - **대상**: `.jsp`, `.html`(Thymeleaf), `.ftl`(FreeMarker), `.vm`(Velocity) 등 서버가 렌더링하는 View 파일
 - **탐지**: `scan_xss.py`가 Controller → View 파일을 추적하여 naked EL / 미이스케이핑 자동 탐지
@@ -177,6 +205,8 @@ API 목록 → Controller (@Controller/@RestController 판별)
 - `filter_level: insufficient` (Lucy 있으나 설정 미흡): `skipXss=false` 설정, multipartFilter 추가 등 구체 설정 명시
 - `filter_level: none` + REST JSON 서버: "저장 시점 Jackson ObjectMapper 커스텀 또는 Lucy JSON 모드" 권고
 
+> ⚠️ 위 항목은 Lucy 설정 기준이다. 실제 recommendation 작성은 아래 **"대응방안(recommendation) 작성 기준"** 섹션을 따른다.
+
 ---
 
 ### ⚠️ Persistent XSS 식별 3원칙 (오탐 방지 필수 적용)
@@ -226,11 +256,7 @@ Kafka, RabbitMQ 등 비동기 메시지 브로커로 전송되는 데이터는 *
 > *"비동기 메시지(Kafka)를 수신하는 Consumer 측 모듈에서 해당 데이터가 DB의 자유 텍스트 필드로
 > 저장되는지 아키텍처 수준의 수동 교차 검증이 필요함."*
 >
-> **자동화:** `tools/scripts/trace_kafka_flow.py` — Producer→Consumer→Sink 정적 추적 스크립트
-> ```bash
-> python3 tools/scripts/trace_kafka_flow.py <source_dir>            # 전체 topic
-> python3 tools/scripts/trace_kafka_flow.py <source_dir> "topic"    # 특정 topic
-> ```
+> **수동 확인:** Producer 코드에서 `KafkaTemplate.send()` 호출 → 동일 레포 또는 연관 레포의 Consumer에서 해당 topic을 구독하여 DB write하는 코드를 `rg "KafkaListener\|@Consumer"` 로 추적한다.
 
 ---
 
@@ -270,6 +296,41 @@ Kafka, RabbitMQ 등 비동기 메시지 브로커로 전송되는 데이터는 *
 - 또는 Spring Lucy XSS Filter (REST JSON 모드) 전역 적용
 - 소비자 측 출력 인코딩이 있더라도 저장 시점 방어는 별도로 적용 권고 (계층 방어)
 ```
+
+#### 1-B. 관리자 전용 기능 Persistent XSS — 심각도 하향만 허용, FP 금지
+
+> ⚠️ **보수적 원칙**: 관리자 전용 기능이라도 Persistent XSS는 **취약으로 보고**한다. 심각도를 낮출 수는 있지만 FP(양호) 처리는 금지한다.
+
+**근거:**
+- 관리자 계정이 피싱·자격증명 탈취·세션 하이재킹으로 침해된 경우, 공격자가 악성 콘텐츠를 주입할 수 있다.
+- 주입된 콘텐츠가 다른 관리자, 일반 사용자, 또는 배치 시스템으로 전파될 수 있다.
+- "관리자만 접근 가능" = 외부 공격자의 직접 접근 불가, "공격 불가능" ≠
+
+| 접근 제어 상황 | 판정 | 심각도 조정 |
+|---|---|---|
+| 인증 없이 누구나 접근 가능 | 취약 | High |
+| 로그인 필요, 일반 사용자 접근 가능 | 취약 | High |
+| 관리자(ADMIN role) 전용 기능 | **취약 (심각도 하향 가능)** | **Medium** |
+| 관리자 + 접근 IP 화이트리스트 | 취약 | Low |
+
+**Finding 작성 시 필수 포함:**
+```
+"severity": "Medium",
+"access_control_note": "관리자 전용 기능. 관리자 계정 침해 시 Stored XSS 발현 가능."
+```
+
+#### 1-C. XSS 필터 우회(Blacklist Bypass) — 프론트엔드 렌더링 미확인 시 취약 유지
+
+XssUtil / AntiSamy 등 커스텀 필터의 **블랙리스트 방식 우회**가 확인된 경우(예: `onerror=`, `onmouseover=` 등 이벤트 핸들러 미차단):
+
+| 프론트엔드 렌더링 확인 여부 | 판정 |
+|---|---|
+| `innerHTML` / `v-html` / `dangerouslySetInnerHTML` 직접 확인 → XSS 발현 경로 명확 | **취약 (Stored XSS 확정)** |
+| 프론트엔드 미확인 (별도 레포, 소스 없음 등) | **취약 (잠재적 Stored XSS)** — 렌더링 미확인이 FP 근거가 되지 않음 |
+| `textContent` / JSON API 응답만 사용 확인 | 양호 (FP) — 코드 직접 확인 필수 |
+
+> 필터 우회 페이로드가 DB 저장 → 향후 렌더링 방식 변경 시 즉시 XSS로 발현되므로, **렌더링 컨텍스트 미확인을 이유로 FP 처리 금지**.
+> Finding 작성 시: `"rendering_confirmed": false` + `"note": "프론트엔드 렌더링 방식 확인 필요 — 현재 필터 우회 가능 페이로드가 DB에 저장되어 잠재적 Stored XSS"` 명시.
 
 ---
 
@@ -595,127 +656,241 @@ grep -r "@RequestParam" src/main/java/ | grep -v "test" | wc -l
   - 자동스캔이 탐지한 경로가 성공 경로인지 실패 경로인지 명시
   - 각 경로에서 사용자 입력(errorCallbackUrl 등) 출력 확인
 
-□ 전역 XSS 필터 finding (XSS-FILTER-001 또는 동등 항목) 포함 여부
+□ 전역 XSS 필터 finding (XSS-NNN 형식 — severity 정렬 후 최종 부여) 포함 여부
   - findings 배열에 전역 필터 평가 항목 필수
 
 □ xss_endpoint_review.total_info_endpoints == xss.json의 실제 정보 endpoint 수
   확인: python3 -c "import json; d=json.load(open('state/<prefix>/xss.json'));
     print(d.get('summary',{}))"
+
+□ owasp_category — 각 finding에 "A03:2021 Injection" 또는 "A01:2021 Broken Access Control" 기재 완료
+  (Open Redirect → A01, 나머지 XSS 전종 → A03 / vuln_taxonomy.md 참조)
 ```
 
 ---
 
-### 출력 형식
+## 대응방안(recommendation) 작성 기준
 
-자동스캔 결과(`<prefix>_xss.json`)에서 수동 확정이 필요한 항목만 findings로 출력합니다.
-`endpoint_diagnoses`는 포함하지 않으며(자동스캔 JSON에 이미 있음), **보완 findings만** 작성합니다.
+> **핵심 원칙**: 고정 템플릿 복붙 금지. 각 finding의 취약점 유형, 코드 패턴, 서비스 특성(REST API / JSP 뷰 / 프론트엔드)을 반영한 실질적 조치를 번호 목록으로 작성한다.
 
-> **`affected_endpoints` 작성 규칙** — 각 finding에 영향 받는 API 목록을 구조화 배열로 명시.
-> 보고서 렌더링 시 Confluence Expand 매크로 또는 `<details>` 펼치기 섹션으로 자동 출력됩니다.
-> - `method`: HTTP 메서드 (GET/POST/PUT/DELETE 등)
-> - `path`: Request Mapping 경로 (예: `/admin/board/list`)
-> - `controller`: 클래스명.메서드명() (예: `BoardController.list()`)
-> - `description`: 해당 엔드포인트에서 XSS 발현 방식 한 줄 설명
-> - **전역 XSS 필터 결함 finding (필터 부재·전역 설정 오류)**: `"path": "전체 엔드포인트 (전역 필터 미적용)"` **1건만** 기재. 특정 엔드포인트 샘플 추가 금지 — 전역 문제를 특정 엔드포인트 문제처럼 오해 유발. 영향 범위(EP 수, POST/PUT 저장 건수 등)는 `description` 필드에 서술.
-> - **Persistent XSS 개별 endpoint finding**: 자동스캔 endpoint_diagnoses의 취약 판정 EP 목록은 보고서 생성기가 자동으로 그룹 finding으로 변환 — LLM이 별도 affected_endpoints 기재 불필요.
-> - **⚠️ endpoint group finding 중복 금지**: LLM이 endpoint_diagnoses 그룹을 재평가(하향/유지)하는 경우, 별도 finding(예: XSS-PERSIST-001)을 추가하지 않는다. 재평가 결과는 `xss_endpoint_review.group_judgments` 배열에만 기록한다. 별도 finding 추가 시 보고서에서 동일 사안이 2건으로 중복 출력됨.
+### 참조 가이드라인
+
+| 가이드라인 | 주요 참조 항목 |
+|---|---|
+| OWASP Testing Guide v4 | OTG-CLIENT-002 (Reflected XSS), OTG-CLIENT-003 (DOM XSS), OTG-INPVAL-001 (Stored XSS) |
+| OWASP ASVS v4.0 | V5.2.1 (입력 유효성), V5.3.1 (출력 인코딩), V5.3.3 (JavaScript 컨텍스트 이스케이핑) |
+| OWASP Top 10 2021 | A03:2021 Injection — XSS 공식 대응 전략 |
+| KISA 주요정보통신기반시설 취약점 분석 | WA-11 (크로스사이트 스크립트), WA-12 (리다이렉트 취약점 검증) |
+| 금융보안원 소프트웨어 보안약점 진단 가이드 | SW-10 (XSS: 출력 인코딩 미적용), SW-16 (검증되지 않은 리다이렉트) |
+
+> 위 가이드라인은 기준·원칙으로 활용한다. recommendation 본문에 가이드라인 이름을 직접 나열하지 않고, **조치 방법을 구체적으로 기술**하는 데 활용한다.
+
+### 취약점 유형별 핵심 대응 방향
+
+| 취약점 유형 | 핵심 대응 방향 |
+|---|---|
+| **Persistent XSS — filter_level: none** | Lucy XSS Servlet Filter `FilterRegistrationBean` 등록 (전역), REST JSON 서버는 Jackson 커스텀 Deserializer 또는 Lucy JSON 모드 추가. `@RequestParam` 경로와 Multipart 경로 모두 커버 확인 |
+| **Persistent XSS — filter_level: insufficient** | `skipXss=false` 강제 설정, `multipartFilter` 추가 등록, `@RequestParam` 미보호 경로에 별도 필터 또는 Validator 추가 |
+| **Reflected XSS — JSP 직접 출력** | `<c:out value="${param.xxx}">` 또는 `fn:escapeXml()` 적용. `escapeXml="false"` 속성 제거. 서블릿 필터 적용 전까지 뷰 레이어 이스케이핑 명시 |
+| **DOM XSS — innerHTML/v-html/dangerouslySetInnerHTML** | `innerHTML` → `textContent` 대체. HTML 삽입이 불가피한 경우 DOMPurify(`DOMPurify.sanitize()`) 화이트리스트 방식 적용 (OWASP ASVS V5.3.3) |
+| **View XSS — JS 컨텍스트 출력 (`<script>var x = '${val}'`)** | 서버에서 `JSON.stringify()` 또는 Unicode escape(`\\uXXXX`)로 인코딩 후 출력. `<script>` 블록 내 직접 EL 출력 패턴 전면 제거 |
+| **Open Redirect** | 리다이렉트 URL을 허용 도메인 화이트리스트(`allowedHosts[]`)로 검증 (KISA WA-12). 화이트리스트 외 URL은 기본 페이지로 이동. 외부 URL 파라미터는 서버사이드에서 파싱 후 scheme/host 검증 |
+| **XSS 필터 미구현 / 불완전** | (위 filter_level별 항목 참조) `multipartFilter` 등록 여부, `excludePattern` 범위, 필수 4문자(`< > " '`) 차단 여부 교차 검증 |
+
+### recommendation 작성 절차
+
+1. **코드 패턴 파악** — `evidence.code_snippet` 기준으로 어느 레이어(Controller/JSP/JS/Config)의 어떤 패턴이 문제인지 확인
+2. **가이드라인 선택** — 위 표에서 취약점 유형에 해당하는 핵심 대응 방향 선택
+3. **서비스 컨텍스트 반영** — 스택(Spring MVC / Spring Boot REST / React / Vue), 필터 현황(`filter_level`), 접근 제어 상태를 반영하여 현실적 조치 순서 결정
+4. **구체성 기준** — 메서드명·클래스명·설정 파일 경로를 포함해야 조치 가능한 수준으로 간주. "적절히 처리" / "검증 추가" 수준의 추상적 기술은 금지
+
+### 작성 예시
+
+**❌ 추상적 (금지)**
+```
+1. XSS 필터를 적용하여 사용자 입력을 적절히 처리하세요.
+2. 출력 인코딩을 적용하세요.
+```
+
+**✅ 구체적 (권장)**
+```
+1. AgreementController의 저장 경로에 Lucy XSS Servlet Filter를 적용합니다.
+   SecurityConfig.java 또는 web.xml에 FilterRegistrationBean을 등록하고
+   urlPattern을 "/*"로 설정합니다. REST JSON 전용 서비스라면 Lucy JSON 모드
+   (XssSaxFilter)를 Jackson ObjectMapper에 커스텀 Deserializer로 등록합니다.
+2. multipart/form-data 업로드 경로는 Lucy multipartFilter를 별도 등록합니다
+   (FilterRegistrationBean order를 Lucy 필터보다 낮게 설정).
+3. @RequestParam으로 직접 받는 파라미터 경로가 있다면, Lucy 필터의 requestBodyOnly
+   옵션 해제 또는 @RequestParam 파라미터에 HtmlUtils.htmlEscape() 수동 적용이
+   필요합니다.
+```
+
+---
+
+### 출력 형식 (findings_XSS.json)
+
+> **LLM은 xss.json을 수정하지 않는다.** Auto-Scan 원본 증적은 xss.json에 그대로 보존한다.
+> LLM-Check 완료 후 `state/<prefix>/findings_XSS.json`을 새로 작성하여 저장한다.
+
+#### findings_XSS.json 최상위 구조
 
 ```json
 {
-  "task_id": "2-3",
-  "status": "completed",
-  "xss_endpoint_review": {
-    "reviewed_at": "ISO8601 datetime",
-    "total_info_endpoints": 0,
-    "group_judgments": [
-      {
-        "group": "잠재적위협 — Persistent XSS 후보 (N건)",
-        "judgment": "양호|정보|취약",
-        "rationale": "Repository.save() 직접 호출 확인 / DB write 없음 확정 / Kafka 경유만 확인 등 — DB write 여부 코드 직접 확인 결과 기재",
-        "xss_category_after_review": "실제위협|잠재적위협|안전확인",
-        "db_write_confirmed": true,
-        "stored_field_types": "String(자유텍스트) / Integer / Enum 등 확인 내용",
-        "endpoints_confirmed": "N건 실제위협 / M건 양호(FP) / K건 잠재적위협(Async)"
-      },
-      {
-        "group": "수동확인필요 — HTML_VIEW 미탐지 (N건)",
-        "judgment": "양호|정보|취약",
-        "controllers_reviewed": [
-          {
-            "controller": "ControllerName",
-            "endpoints": ["GET /path"],
-            "return_type": "ResponseEntity<Protobuf> | JSP | String",
-            "finding": "Protobuf 반환 → View XSS 해당없음 / JSP render → 이스케이핑 확인",
-            "result": "양호|정보|취약"
-          }
-        ]
-      },
-      {
-        "group": "수동확인필요 — Reflected XSS text/html (N건)",
-        "judgment": "양호|정보|취약",
-        "endpoints_reviewed": [
-          {
-            "endpoint": "GET /path",
-            "controller": "ControllerName.method()",
-            "finding": "JSP escapeHtml 적용 / 파라미터 DB 재조회 후 반영 / 미구현(throw NotImplementedException)",
-            "result": "양호|정보|취약"
-          }
-        ]
-      }
-    ],
-    "overall_xss_info_judgment": "양호|정보|취약",
-    "rationale": "판정 근거 요약"
-  },
-  "findings": [
-    {
-      "id": "XSS-001",
-      "title": "취약점 제목",
-      "severity": "High",
-      "category": "XSS / Filter Misconfiguration",
-      "description": "상세 설명 — 자동스캔이 탐지하지 못한 전역 필터 취약점 등",
-      "affected_endpoints": [
-        {
-          "method": "GET",
-          "path": "/admin/board/list",
-          "controller": "BoardAdminController.list()",
-          "description": "파라미터 searchKeyword가 JSP에 escape 없이 출력됨"
-        },
-        {
-          "method": "POST",
-          "path": "/admin/board/save",
-          "controller": "BoardAdminController.save()",
-          "description": "전역 XSS 필터 미적용으로 저장 시점 클렌징 없음"
-        }
-      ],
-      "evidence": {
-        "file": "com/.../XssFilterUtil.java",
-        "lines": "35-51",
-        "code_snippet": "취약 코드 스니펫"
-      },
-      "cwe_id": "CWE-79",
-      "owasp_category": "A03:2021 Injection",
-      "diagnosis_method": "수동진단(LLM)",
-      "diagnosis_type": "[취약] XSS 필터 불충분",
-      "result": "취약",
-      "needs_review": false,
-      "manual_review_note": "코드 직접 확인 근거",
-      "recommendation": "조치 방안"
-    }
-  ],
+  "task_id": "xss",
+  "prefix": "<repo>/<skill>/<ts>",
+  "generated_at": "<ISO8601>",
+  "llm_checked": true,
+
   "xss_filter_assessment": {
     "has_lucy": false,
     "has_antisamy": false,
-    "has_custom_filter": true,
+    "has_custom_filter": false,
     "filter_default_enabled": false,
-    "filter_level": "insufficient"
+    "filter_level": "none",
+    "llm_note": "FilterRegistrationBean 없음 확인 — 의존성 선언만 존재"
   },
-  "executed_at": "",
-  "claude_session": ""
+
+  "scan_coverage": {
+    "total_endpoints": 32,
+    "result_breakdown": { "취약": 3, "정보": 5, "양호": 24 },
+    "fn_disclaimer": "Auto-Scan taint 추적 실패 항목 존재. LLM 교차검증 완료.",
+    "source_files": ["xss.json"]
+  },
+
+  "summary": {
+    "total_findings": 3,
+    "by_severity": { "Critical": 0, "High": 2, "Medium": 1, "Low": 0, "Informational": 0 },
+    "by_result": { "취약": 2, "정보": 1 },
+    "by_source": { "auto-scan": 1, "llm-check": 2 },
+    "fp_corrected": 2,
+    "fn_detected": 0
+  },
+
+  "findings": [ ],
+
+  "evidence_trail": [ ]
 }
 ```
 
-**주의**: `endpoint_diagnoses` 키는 출력하지 않는다 (자동스캔 JSON과 중복).
-전역 XSS 필터 상태(`xss_filter_assessment`)와 수동 확정 findings만 포함한다.
+#### finding 객체 필수 구조
+
+```json
+{
+  "finding_id": "XSS-001",
+  "finding_type": "instance",
+  "title": "Persistent XSS — 동의 여부 저장 API agreeYn String 필드 미정제",
+  "severity": "High",
+  "severity_rationale": "기본값 유지 시 생략 가능. 하향·상향 조정 시 필수 — 예: '로그인 후 본인 데이터만 노출 — High→Medium 하향', '인증 없는 공개 API — Medium→High 상향'",
+  "risk_level": 4,
+  "category": "Persistent XSS",
+  "cwe_id": "CWE-79",
+  "owasp_category": "A03:2021 Injection",
+
+  "result": "취약",
+  "diagnosis_method": "교차검증(수동)",
+  "source": "llm-check",
+  "fn_detected": false,
+  "fp_corrected": false,
+
+  "llm_verdict": "TP",
+  "llm_reviewed_at": "<ISO8601>",
+  "manual_review_note": "소스코드 직접 확인: AgreementService.setAgree()→agreementRepository.save(), agreeYn String 저장 확정. 원칙 1+2 충족.",
+
+  "scope": {
+    "type": "endpoint",
+    "endpoint": "POST /api/{version}/common/agreement/setAgree",
+    "handler": "AgreementController.setAgree()",
+    "affected_file": "src/.../AgreementService.java",
+    "affected_line": 44
+  },
+
+  "description": "...",
+  "recommendation": "...",
+
+  "evidence": {
+    "file": "src/.../AgreementService.java",
+    "lines": "44-54",
+    "code_snippet": "/* Read 툴로 읽은 실제 코드 */",
+    "taint_flow": {
+      "source": "HTTP @RequestParam agreeYn (String, 사용자 입력)",
+      "sink": "agreementRepository.save(agreement) — String 필드 저장",
+      "sanitized": false,
+      "hops": 2,
+      "call_chain": [
+        "AgreementController.setAgree(@RequestParam agreeYn)",
+        "AgreementService.setAgree(agreeYn)",
+        "agreementRepository.save(agreement)"
+      ]
+    },
+    "taint_evidence": [
+      {
+        "title": "Taint Path — Controller → Service → Repository",
+        "controller_file": "src/.../AgreementController.java",
+        "controller_lines": "30-38",
+        "controller_snippet": "/* 실제 Controller 코드 */",
+        "service_file": "src/.../AgreementService.java",
+        "service_lines": "44-54",
+        "service_snippet": "/* 실제 Service 코드 */",
+        "repository_file": "src/.../AgreementRepository.java",
+        "repository_lines": "1",
+        "repository_snippet": "/* 실제 Repository 인터페이스 */"
+      }
+    ]
+  },
+
+  "needs_review": false
+}
+```
+
+#### Root Cause finding (`finding_type: "root_cause"`) LLM 검토 절차
+
+```
+1. affected_endpoints[] 에서 대표 샘플 3-5건 선택
+2. 각 Controller 파일 Read → Service → Repository 추적
+3. DB write 여부 + 저장 필드 Data Type(String/Integer/Enum) 확인
+4. 결과 집계:
+   - 확정 TP N건: llm_verdict = "TP", manual_review_note에 대표 call_chain 기재
+   - FP M건: 각 endpoint 이유(숫자 파라미터만 등) manual_review_note에 기재
+   - FP가 전체의 70% 이상: fp_corrected = true, llm_verdict = "FP"
+   - 혼재(TP+FP): llm_verdict = "TP" 유지, note에 "TP N건 / FP M건 / 미확인 K건" 기재
+```
+
+#### Instance finding (`finding_type: "instance"`) LLM 검토 절차
+
+```
+1. scope.endpoint의 Controller 소스 Read
+2. [실제위협] View XSS: JSP/Thymeleaf 파일 직접 확인 → 출력 이스케이핑 패턴 검증
+3. Redirect XSS: 리다이렉트 파라미터 소스 확인 (외부 서비스 응답이면 FP 가능)
+4. DOM XSS: JS 파일에서 사용자 입력 소스→싱크 추적
+```
+
+#### 복수 API가 동일 취약점에 해당하는 경우
+
+`scope.affected_files[]` 배열로 처리한다. `scope.endpoint`는 대표 API 1건, 나머지는 `affected_files[]`에 추가.
+
+```json
+"scope": {
+  "type": "endpoint",
+  "endpoint": "POST /api/{version}/common/agreement/setAgree",
+  "handler": "AgreementController.setAgree()",
+  "affected_file": "src/.../AgreementService.java",
+  "affected_line": 44,
+  "affected_files": [
+    {
+      "file": "src/.../AgreementController.java",
+      "line": 30,
+      "endpoint": "POST /api/{version}/common/agreement/setAgree",
+      "handler": "AgreementController.setAgree()"
+    },
+    {
+      "file": "src/.../AgreementController.java",
+      "line": 50,
+      "endpoint": "POST /api/{version}/common/agreement/push/setAgree",
+      "handler": "AgreementController.setPushAgree()"
+    }
+  ]
+}
+```
 
 ---
 
@@ -740,25 +915,43 @@ grep -r "@RequestParam" src/main/java/ | grep -v "test" | wc -l
   ```
 - 파일을 읽지 않고 evidence를 작성하면 반드시 `needs_review: true` 로 표시하고 `manual_review_note`에 "코드 미확인" 명시
 
-#### 규칙 3: taint_evidence — Controller→Service→Repository 실제 코드 흐름
+#### 규칙 3: evidence.taint_flow — taint 경로 요약 (evidence 안에 포함 필수)
 
-DB 저장 경로(taint path)가 확인된 경우, `taint_evidence` 배열로 각 계층의 실제 코드 스니펫을 첨부:
+> ⚠️ **`taint_flow`는 반드시 `evidence` 객체 안에 포함한다.** finding 최상위에 두면 sec-review 및 보고서 출력 시 누락된다.
+
+DB 저장 경로 또는 렌더링 경로가 확인된 경우, `evidence.taint_flow`에 요약을 작성한다:
 
 ```json
-"taint_evidence": [
-  {
-    "title": "Taint Path 1 — Controller → Service → Repository",
-    "controller_file": "실제 경로/Controller.java",
-    "controller_lines": "66-73",
-    "controller_snippet": "/* Read 툴로 읽은 실제 Controller 코드 */",
-    "service_file": "실제 경로/Service.java",
-    "service_lines": "44-54",
-    "service_snippet": "/* Read 툴로 읽은 실제 Service 코드 */",
-    "repository_file": "실제 경로/Repository.java (있을 경우)",
-    "repository_lines": "26",
-    "repository_snippet": "/* 실제 Repository 인터페이스/메서드 */"
-  }
-]
+"evidence": {
+  "file": "실제 경로/Service.java",
+  "lines": "44-54",
+  "code_snippet": "/* 취약 코드 핵심 부분 */",
+  "taint_flow": {
+    "source": "HTTP @RequestParam agreeYn (사용자 입력)",
+    "sink": "agreementRepository.save(agreement) — String 필드 저장",
+    "sanitized": false,
+    "hops": 2,
+    "call_chain": [
+      "AgreementController.setAgree(@RequestParam agreeYn)",
+      "AgreementService.setAgree(agreeYn)",
+      "agreementRepository.save(agreement)"
+    ]
+  },
+  "taint_evidence": [
+    {
+      "title": "Taint Path — Controller → Service → Repository",
+      "controller_file": "실제 경로/Controller.java",
+      "controller_lines": "66-73",
+      "controller_snippet": "/* Read 툴로 읽은 실제 Controller 코드 */",
+      "service_file": "실제 경로/Service.java",
+      "service_lines": "44-54",
+      "service_snippet": "/* Read 툴로 읽은 실제 Service 코드 */",
+      "repository_file": "실제 경로/Repository.java",
+      "repository_lines": "26",
+      "repository_snippet": "/* 실제 Repository 인터페이스/메서드 */"
+    }
+  ]
+}
 ```
 
 각 taint path마다 Controller, Service, Repository 계층 코드를 모두 Read 툴로 직접 확인하여 첨부한다.
@@ -770,3 +963,40 @@ DB 저장 경로(taint path)가 확인된 경우, `taint_evidence` 배열로 각
 - 실제 XSS 페이로드 작성 금지
 - 민감정보 포함 금지
 - API 인벤토리에 없는 파일을 임의로 탐색 금지
+
+---
+
+## LLM-Check Phase 완료 기준
+
+> **`xss.json`은 수정하지 않는다.** Auto-Scan 원본 증적은 그대로 보존한다.
+> LLM-Check 완료 후 `state/<prefix>/findings_XSS.json`을 신규 작성하여 저장한다.
+
+### 완료 절차
+
+1. `state/<prefix>/xss.json`을 Read 툴로 읽는다 (전체 또는 offset/limit 부분 읽기).
+2. `auto_findings[]` 배열의 각 finding을 순서대로 LLM 검증한다.
+3. **TP/needs_review 항목** → findings[] 에 포함. 아래 필드를 모두 채운다:
+   - `llm_verdict`, `llm_reviewed_at`, `manual_review_note` (비워두지 않음)
+   - `evidence.taint_flow` (DB 저장 경로 확인된 경우 필수)
+   - `evidence.taint_evidence` (계층별 실제 코드, 읽은 경우 필수)
+4. **FP 항목** → findings[] 미포함, evidence_trail[] 에 기록 (`fp_corrected: true`).
+5. Auto-Scan 미탐지(FN) 신규 발굴 시 findings[] 에 추가:
+   ```json
+   {
+     "finding_id": "XSS-001",
+     "finding_type": "instance",
+     "fn_detected": true,
+     "source": "llm-check(fn-detected)",
+     "diagnosis_method": "수동진단(LLM)",
+     "llm_verdict": "TP",
+     "llm_reviewed_at": "<ISO8601>",
+     "manual_review_note": "FN 발견 경로 및 근거"
+   }
+   ```
+6. findings[] severity 내림차순 정렬 후 finding_id 최종 부여 (XSS-001, XSS-002, ...).
+7. `state/<prefix>/findings_XSS.json` 저장 (`llm_checked: true`).
+
+### sec-review 대상
+
+`findings_XSS.json`의 `findings[]` 배열이 `/sec-review` 정/오탐 판정 대상이다.
+`evidence_trail[]`은 로컬 증적으로 보존된다.

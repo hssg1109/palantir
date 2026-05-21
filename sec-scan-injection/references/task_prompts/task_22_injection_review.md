@@ -3,7 +3,7 @@
 **역할**: 당신은 보안 진단 전문가입니다.
 **입력 파일**: `state/<prefix>/injection.json` (scan_injection_enhanced.py 자동스캔 결과)
 **출력 파일**: `state/<prefix>/task22_llm.json` (LLM 수동분석 보완 — supplemental)
-**게시 방식**: 별도 Confluence 페이지 X → `<prefix>_injection.json` finding 페이지의 `supplemental_sources`로 통합
+**게시 방식**: `findings_INJ.json`으로 통합하여 /sec-review 대상으로 전달
 
 ---
 
@@ -20,13 +20,16 @@
    - 요약본의 `samples_by_category` 에서 diagnosis_type별 대표 케이스를 먼저 확인한다.
 4. **글로벌 스캔 결과**(OS Command, SSI)는 요약본 `samples_by_category.os_command_injection` / `ssi_injection` 으로 먼저 확인한다. 전체 목록이 필요하면 원본의 `global_findings` 섹션만 부분 읽기한다.
 
-> ⚠️ **이 JSON은 자동스캔 페이지에 통합 렌더링된다.** 독립 보고서가 아님.
-> `confluence_page_map.json`의 injection finding 항목에 `supplemental_sources` 배열로 추가할 것.
+> ⚠️ **이 JSON은 자동스캔 결과와 통합된다.** LLM-Check 완료 후 `findings_INJ.json`에 병합하여 /sec-review 대상으로 전달.
 
 > 📋 **Finding 작성 기준**: `references/finding_writing_guide.md` 필수 준수
 > - `evidence.code_snippet`: 취약 코드 직접 인용 필수 (없으면 finding 미완성)
 > - `description`: 현황 → 보안 위협 → 현재 평가 3단 구어체 서술
 > - `recommendation`: 번호 목록(`1. 2. 3.`) 2개 이상, 구체적 코드 수정 방법 포함
+
+> 📋 **취약점 분류 기준**: `shared/references/vuln_taxonomy.md` 필수 참조
+> - `category` / `cwe_id` / `owasp_category` / 기본 `severity` / `scope.type` 은 이 표를 기준으로 결정
+> - **금지** category 값 예시: `Injection / OS Command (Stored RCE Pattern)`, `SQL Injection` (영문), `OS 명령 실행`
 
 ---
 
@@ -40,10 +43,10 @@
 
 ```bash
 # 1. API 인벤토리 추출 (task_21이 이미 완료된 경우 생략 가능)
-python3 tools/scripts/scan_api.py <source_dir> -o state/{prefix}_api_scan.json
+python3 shared/scripts/scan_api.py <source_dir> -o state/{prefix}_api_scan.json
 
 # 2. endpoint별 인젝션 진단 (핵심)
-python3 tools/scripts/scan_injection_enhanced.py <source_dir> \
+python3 shared/scripts/scan_injection_enhanced.py <source_dir> \
     --api-inventory state/{prefix}_api_scan.json \
     --modules <대상모듈> \
     -o state/{prefix}_task_22_enhanced.json
@@ -224,8 +227,26 @@ for e in taint_failed[:10]:
    - 실제 사용자 입력이 취약 코드에 도달하는지 데이터 흐름 추적
 
 3. **전역 OS Command / SSI 결과 분석**
-   - 스크립트가 발견한 전역 패턴의 실제 위험도 판정
-   - 사용자 입력 연관성 확인
+
+   > ⚠️ **보수적 판정 원칙**: OS Command / SSI 패턴은 사용자 입력 연관성, 호출 여부와 무관하게 **항상 취약으로 보고**한다.
+
+   **판정 기준 (우선순위 순):**
+
+   | 상태 | 심각도 | 판정 |
+   |---|---|---|
+   | 사용자 입력이 직접 도달 (HTTP param → ProcessBuilder) | **Critical / High** | 취약 |
+   | 호출 경로 있으나 내부값/설정값만 전달 | **Medium** | 취약 (내부 공격자 또는 Config 침해 시 악용) |
+   | 현재 dead code (호출부 없음, 미사용 메서드) | **Medium** | 취약 — 현재 미호출이나 패턴 존재 자체가 위험 |
+   | 주석 처리된 코드 | Info | 정보 (비활성 코드) |
+
+   **판정 이유 (dead code를 취약으로 보는 근거):**
+   - 코드베이스에 OS Command / ProcessBuilder 패턴이 존재하면, 미래 리팩터링·기능 확장 시 호출 경로가 연결될 수 있다.
+   - SQL Injection dead code와 달리, OS Command는 단 한 줄(`executeCommand(request.getParam("cmd"))`)로 RCE가 열린다.
+   - 코드 리뷰 시 삭제되지 않은 OS Command 코드는 "제거 대상 취약 패턴"으로 즉시 보고해야 한다.
+
+   **Finding 작성 시 필수 포함:**
+   - `diagnosis_type: "취약 (현재 미호출)"` (dead code인 경우)
+   - 권고: 미사용 OS Command / ProcessBuilder 코드 즉시 삭제 또는 입력 화이트리스트 적용
 
 ---
 
@@ -444,7 +465,7 @@ for k,v in dtype_cnt.most_common(): print(f'  {v}건: {k}')
   print(f'Taint 추적 실패 endpoint: {len(taint_failed)}건')
   "
   ```
-  - 위 수치가 0보다 크고 `group_judgments`에서 누락되면 → **Task 3-2 미완료**
+  - 위 수치가 0보다 크고 `group_judgments`에서 누락되면 → **LLM-Check 미완료**
 
 **[global_findings 체크]** `injection.json`의 `global_findings.*.total` 합계를 확인:
 ```bash
@@ -482,10 +503,10 @@ for k, v in gf.items():
 
 > ⚠️ **group_judgments `group` 필드 명명 규칙**: `group` 값에는 반드시 injection.json의 `diagnosis_type` 값이
 > 부분문자열로 포함되어야 한다. 예: `"자동 판정 불가 (5건)"`, `"DB 접근 미확인 (3건)"`, `"추적 불가 (2건)"`.
-> 임의의 그룹명(예: `"FeignClient 전용 서비스"`)을 사용하면 generate_finding_report.py가 매칭에 실패한다.
+> 임의의 그룹명(예: `"FeignClient 전용 서비스"`)은 사용하지 말 것 — diagnosis_type 부분문자열 포함 규칙을 반드시 준수한다.
 
 > **`affected_endpoints` 작성 규칙** — 각 finding에 영향 받는 API 목록을 구조화 배열로 명시.
-> 보고서 렌더링 시 Confluence Expand 매크로 또는 `<details>` 펼치기 섹션으로 자동 출력됩니다.
+> 보고서의 `affected_endpoints` 섹션에서 조회됩니다.
 > - `method`: HTTP 메서드 (GET/POST/PUT/DELETE 등)
 > - `path`: Request Mapping 경로 (예: `/api/v1/user/login`)
 > - `controller`: 클래스명.메서드명() (예: `UserController.login()`)
@@ -493,7 +514,7 @@ for k, v in gf.items():
 
 ```json
 {
-  "task_id": "2-2",
+  "task_id": "injection",
   "status": "completed",
   "sqli_endpoint_review": {
     "reviewed_at": "ISO8601 datetime",
@@ -555,7 +576,8 @@ for k, v in gf.items():
       "id": "INJ-001",
       "title": "취약점 제목",
       "severity": "Medium",
-      "category": "Injection / OS Command (Stored RCE Pattern)",
+      "risk_level": 3,
+      "category": "OS Command Injection",
       "description": "상세 설명 — 자동스캔이 탐지하지 못한 취약 패턴",
       "affected_endpoints": [
         {
@@ -620,3 +642,116 @@ findings 배열이 비어 있으면(`[]`) 파일을 저장하되 `supplemental_s
 - 실제 Exploit 페이로드 작성 금지
 - 고객 DB 비밀번호, API 시크릿 등 민감정보 포함 금지
 - 스크립트가 이미 판정한 "양호" 항목은 재검토 불필요
+
+---
+
+## 대응방안(recommendation) 작성 기준
+
+> **핵심 원칙**: 고정 템플릿이 아닌, 해당 취약점 유형과 서비스 코드 맥락을 결합한 실질적 대응방안을 작성한다.
+> 아래 가이드라인을 참조하되, finding의 `evidence.code_snippet` 기반으로 **개발자가 실제로 적용 가능한** 수준으로 구체화한다.
+
+### 참조 가이드라인
+
+| 문서 | 주요 참조 항목 |
+|---|---|
+| OWASP Testing Guide v4 (OTG-INPVAL-005, OTG-INPVAL-006) | SQL 인젝션·명령어 인젝션 테스트 방법 및 방어 기법 |
+| OWASP ASVS v4.0 — V5.3 Output Encoding, V5.2 Injection Prevention | 파라미터 바인딩 요건, 동적 쿼리 허용 조건 |
+| OWASP Top 10 2021 — A03 Injection | 인젝션 방어 핵심 원칙 (Prepared Statement, Input Validation) |
+| KISA 주요정보통신기반시설 취약점 분석·평가 방법 상세가이드 | SQL 인젝션(WA-11), 운영체제 명령실행(WA-12) 점검 기준 및 조치 방법 |
+| 금융보안원 소프트웨어 보안약점 진단 가이드 | SW-9 SQL 삽입, SW-11 운영체제 명령어 삽입 약점 기준 |
+
+### 취약점 유형별 핵심 대응 방향
+
+| category | 핵심 대응 포인트 | 적용 레이어 |
+|---|---|---|
+| **SQL인젝션** — MyBatis `${}` 직삽 | `${}` → `#{}` (PreparedStatement 바인딩) 전환; 동적 컬럼·정렬은 Enum/화이트리스트 매핑 | Mapper XML / Repository |
+| **SQL인젝션** — JDBC String 결합 | PreparedStatement + `?` 바인딩 전환; 또는 JPA/ORM으로 구조 변경 | Repository/DAO |
+| **SQL인젝션** — 동적 ORDER BY/컬럼명 | 허용 컬럼명을 Enum 또는 `when` 표현식으로 하드코딩 매핑; 그 외 입력은 즉시 거부 | Service / Repository |
+| **OS Command Injection** — 사용자 입력 직접 전달 | 외부 명령 실행 자체를 Java 라이브러리(Apache Commons IO 등)로 대체; 불가능하면 인자 배열 분리(`ProcessBuilder(List<>)`) + 화이트리스트 검증 | Service |
+| **OS Command Injection** — Dead Code | 미사용 OS Command 코드 즉시 삭제; 팀 코드 리뷰 체크리스트에 금지 항목 등록 | 전체 코드베이스 |
+| **SSI Injection** | SSI 디렉티브 포함 파일을 웹 서버가 직접 서빙하지 않도록 설정(Apache SSI 옵션 비활성화); 사용자 업로드 파일 경로 제한 | 서버 설정 / 파일 처리 |
+| **SSTI** (SpEL/FreeMarker/Thymeleaf) | 사용자 입력을 템플릿 표현식으로 평가하는 구조 제거; 템플릿은 상수만 사용하고 동적 데이터는 바인딩 변수(`${variable}`)로만 전달 | Service / Template |
+
+### Recommendation 작성 절차
+
+1. **코드 패턴 파악**: `evidence.code_snippet`에서 어떤 DB API / 프레임워크를 사용하는지 확인 (MyBatis, JPA, JDBC, R2DBC 등)
+2. **가이드라인 기준 선택**: 위 참조 문서 중 해당 취약점 유형에 맞는 항목 적용
+3. **서비스 컨텍스트 반영**: 추상적 지침이 아니라 해당 파일·메서드 기준으로 서술
+   - MyBatis Mapper XML 취약 → `mapper.xml` 파일명과 SQL ID를 직접 언급
+   - Kotlin DSL 사용 → `when` 표현식 또는 Exposed DSL 활용 방식 제시
+   - 동적 컬럼 패턴 → 서비스에서 실제 사용되는 컬럼명을 Enum 예시로 제시
+4. **구체성 기준**:
+   - ❌ "PreparedStatement를 사용하세요" → ✅ "`FeedQuery.kt` L42의 `sql += gender` 패턴을 `when(gender) { "M" -> "M_VISIT", "F" -> "F_VISIT", else -> return }` 으로 교체"
+   - ❌ "입력값을 검증하세요" → ✅ "`sortColumn` 파라미터 허용값을 `SortColumn` Enum으로 정의하고 Controller에서 `@RequestParam SortColumn` 타입으로 수신"
+
+---
+
+## findings_INJ.json 생성 (LLM-Check Phase 최종 출력)
+
+LLM-Check Phase 완료 후 `state/<prefix>/findings_INJ.json`을 생성한다.
+이 파일이 /sec-review 대상인 최종 finding 목록이다.
+
+### 절차
+
+1. `state/<prefix>/task22.json`의 `auto_findings[]` 로드
+2. 각 항목 LLM 교차검증 수행:
+   - **FP 판정**: `findings[]`에서 **제외** → `evidence_trail[]`에 `fp_corrected: true`로 기록 (증적 보존)
+   - **TP 확정**: 필드 보완 (description, code_snippet, evidence 보강)
+3. Auto-Scan 미탐지 취약점(F/N) 발견 시 신규 finding 추가:
+   - `fn_detected: true`, `source: "llm-check(fn-detected)"`
+4. finding_id 재부여: `findings[]` 내 항목에만 `INJ-001` 순번 (심각도 내림차순)
+5. `state/<prefix>/findings_INJ.json` 저장
+
+### 출력 스키마 (shared/references/output_schemas.md 참조)
+
+```json
+{
+  "task_id": "injection",
+  "generated_at": "ISO8601",
+  "scan_coverage": {
+    "fn_disclaimer": "Auto-Scan은 정적 패턴 기반이므로 동적 생성 쿼리·런타임 연결 경로는 탐지 불가"
+  },
+  "summary": {
+    "total": 0, "취약": 0, "정보": 0, "fn_detected": 0
+  },
+  "findings": [
+    {
+      "finding_id": "INJ-001",
+      "title": "",
+      "severity": "Critical|High|Medium|Low|Informational",
+      "risk_level": "5|4|3|2|1",
+      "severity_rationale": "기본값 유지 시 생략 가능. 하향·상향 조정 시 필수 — 예: 'IP ACL 내부망 전용 — High→Medium 하향', 'Dead Code 확인 — Critical→Medium 하향'",
+      "category": "SQL인젝션|OS Command Injection|SSI Injection|SSTI",
+      "cwe_id": "CWE-89|CWE-78|CWE-97|CWE-94",
+      "owasp_category": "A03:2021 Injection",
+      "result": "취약|정보",
+      "diagnosis_method": "자동스캔(SAST)|교차검증(수동)|수동진단(LLM)",
+      "source": "auto-scan|llm-check|llm-check(fn-detected)",
+      "fn_detected": false,
+      "fp_corrected": false,
+      "scope": {
+        "type": "endpoint|file|config|dependency|global",
+        "endpoint": "POST /api/...",
+        "file": "path/to/File.java",
+        "line": 42,
+        "module": null
+      },
+      "description": "한국어 설명",
+      "recommendation": "조치 방법",
+      "code_snippet": "실제 코드",
+      "evidence": [],
+      "needs_review": false
+    }
+  ],
+  "evidence_trail": [
+    {
+      "finding_id": "INJ-AUTO-012",
+      "title": "FP 확정 항목 제목",
+      "category": "SQL인젝션|OS Command Injection|SSI Injection|SSTI",
+      "result_original": "정보",
+      "fp_corrected": true,
+      "fp_reason": "FP 판정 근거 — 사용자 입력 미도달, Enum 캐스팅 확인 등"
+    }
+  ]
+}
+```

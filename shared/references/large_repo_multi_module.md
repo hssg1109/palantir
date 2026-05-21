@@ -49,7 +49,7 @@
 cat testbed/<repo>/settings.gradle | grep include
 
 # API inventory 실행 후 module 필드 확인
-python3 tools/scripts/scan_api.py testbed/<repo> -o state/<prefix>/api_inventory.json
+python3 shared/scripts/scan_api.py testbed/<repo> -o state/<prefix>/api_inventory.json
 python3 -c "
 import json
 from collections import Counter
@@ -75,16 +75,16 @@ for k,v in mods.most_common():
 PREFIX_REPO="state/<test_prefix>_<repo>"   # 예: state/t41_ob_backend
 
 # 파일 처리 (전체 repo)
-python3 tools/scripts/scan_file_processing.py testbed/<repo> \
+python3 shared/scripts/scan_file_processing.py testbed/<repo> \
     -a state/<prefix>/api_inventory.json \
     -o ${PREFIX_REPO}_task24.json
 
 # 데이터 보호 (전체 repo)
-nohup python3 tools/scripts/scan_data_protection.py testbed/<repo> \
+nohup python3 shared/scripts/scan_data_protection.py testbed/<repo> \
     -o ${PREFIX_REPO}_task25.json > state/scan_dp.log 2>&1 &
 
 # SCA (전체 repo)
-python3 tools/scripts/scan_sca_gradle_tree.py testbed/<repo> \
+python3 shared/scripts/scan_sca_gradle_tree.py testbed/<repo> \
     --project <repo_name> -o ${PREFIX_REPO}_sca.json
 ```
 
@@ -103,7 +103,7 @@ for BT in "${BUILD_TARGETS[@]}"; do
     echo "=== Scanning: $BT ==="
 
     # Injection 스캔 (--modules 사용)
-    nohup python3 tools/scripts/scan_injection_enhanced.py \
+    nohup python3 shared/scripts/scan_injection_enhanced.py \
         testbed/<repo> \
         -a state/<test_prefix>_<repo>_api_inventory.json \
         --modules "$BT" \
@@ -112,7 +112,7 @@ for BT in "${BUILD_TARGETS[@]}"; do
     echo "injection PID: $!"
 
     # XSS 스캔 (--modules 사용)
-    nohup python3 tools/scripts/scan_xss.py \
+    nohup python3 shared/scripts/scan_xss.py \
         testbed/<repo> \
         -a state/<test_prefix>_<repo>_api_inventory.json \
         --modules "$BT" \
@@ -191,69 +191,6 @@ SCA LLM 검토는 전체 repo 공유 결과 기준으로 1회만 수행:
 
 ---
 
-## Step 5: Build-Target별 Phase 4 — 보고서 생성 + Confluence 게시
-
-### confluence_page_map.json 등록 패턴
-
-```json
-{
-  "entries": [
-    {
-      "title": "테스트NN - <repo> 정적 진단 (2026-MM-DD)",
-      "type": "container"
-    },
-    {
-      "source": "state/<test_prefix>_<BT>_report.md",
-      "title": "테스트NN - <repo> 보안진단 보고서 (<BT>)",
-      "type": "main_report",
-      "task_sources": {
-        "api":             "state/<test_prefix>_<BT>_api_inventory_inscope.json",
-        "injection":       "state/<test_prefix>_<BT>_injection_inscope.json",
-        "xss":             "state/<test_prefix>_<BT>_xss_inscope.json",
-        "file_handling":   "state/<test_prefix>_<BT>_task24_inscope.json",
-        "data_protection": "state/<test_prefix>_<BT>_task25_inscope.json"
-      }
-    },
-    {
-      "source": "state/<test_prefix>_<BT>_injection_inscope.json",
-      "supplemental_sources": ["state/<test_prefix>_<BT>_task22_llm.json"],
-      "title": "테스트NN - 인젝션 취약점 진단 결과 (<BT>)",
-      "type": "finding"
-    },
-    {
-      "source": "state/<test_prefix>_<BT>_xss_inscope.json",
-      "supplemental_sources": ["state/<test_prefix>_<BT>_task23_llm.json"],
-      "title": "테스트NN - XSS 취약점 진단 결과 (<BT>)",
-      "type": "finding"
-    },
-    {
-      "source": "state/<test_prefix>_<BT>_task24_inscope.json",
-      "supplemental_sources": ["state/<test_prefix>_<BT>_task24_llm.json"],
-      "title": "테스트NN - 파일 처리 진단 결과 (<BT>)",
-      "type": "finding"
-    },
-    {
-      "source": "state/<test_prefix>_<BT>_task25_inscope.json",
-      "supplemental_sources": ["state/<test_prefix>_<BT>_task25_llm.json"],
-      "title": "테스트NN - 데이터 보호 진단 결과 (<BT>)",
-      "type": "finding"
-    },
-    {
-      "source": "state/<test_prefix>_<repo>_sca.json",
-      "supplemental_sources": ["state/<test_prefix>_<repo>_sca_llm.json"],
-      "title": "테스트NN - SCA (오픈소스 취약점) 진단 결과",
-      "type": "sca"
-    }
-  ]
-}
-```
-
-> - SCA는 build_target 공유이므로 컨테이너 페이지 하위에 **1개만** 게시
-> - build_target별 보안진단 보고서는 각각 별도 페이지로 게시
-> - Fortify SSC 검증(Phase 5)도 build_target별로 수행: `fetch_ssc.py --project <project>/<repo>/<BT>`
-
----
-
 ## Prefix 네이밍 컨벤션
 
 | 항목 | 패턴 | 예시 |
@@ -265,8 +202,6 @@ SCA LLM 검토는 전체 repo 공유 결과 기준으로 1회만 수행:
 | Task 11 | `<test_prefix>_<repo>_task11.json` | 공유 |
 | Injection/XSS | `<test_prefix>_<BT>_injection.json` | build_target별 |
 | Task22~25 LLM | `<test_prefix>_<BT>_task22_llm.json` | build_target별 |
-| SSC findings | `<test_prefix>_<BT>_ssc_findings.json` | build_target별 |
-
 ---
 
 ## 미지원 언어 repo 처리
@@ -284,27 +219,3 @@ SCA LLM 검토는 전체 repo 공유 결과 기준으로 1회만 수행:
 | TypeScript/JavaScript | ✅ (부분) | XSS/DataProtection 중심, Injection 제한적 |
 | PHP | ❌ | 미지원 — `unsupported_lang_targets.md` 참조 |
 
----
-
-## 2월 정기진단 대상별 적용 계획
-
-| Project/Repo | build_target | 적용 절차 | 비고 |
-|---|---|---|---|
-| OCB_BACK_END/ocb-cashbag-mall | cla-madame-point-admin, cla-madame-point-partner | Multi-Module | endpoints 수 확인 후 결정 |
-| OCB-GAME/ocb-game-admin | 단일 | 일반 전체 스캔 | |
-| OCB-GAME/ocb-game-batch | 단일 | 일반 전체 스캔 | |
-| OCB-THP/ocb_fun_real | php_ocb_fun | **PHP 미지원** | skip + 메모 |
-| OCB-THP/ocb_game_biz | php_ocbgame | **PHP 미지원** | skip + 메모 |
-| OCB-THP/ocb_game_biz_admin | php_ocbgame | **PHP 미지원** | skip + 메모 |
-| OCB-THP/ocb_game_biz_matgo | php_ocbgame_matgo | **PHP 미지원** | skip + 메모 |
-| OCB-THP/ocb_game_biz_matgo_php_real | php_ocbgame_matgo | **PHP 미지원** | skip + 메모 |
-| OCBWEBVIEW/ocb-community-api | 단일 | 일반 전체 스캔 | |
-| OCBWEBVIEW/ocb-community-ssr | 단일 | 일반 전체 스캔 | |
-| OCBWEBVIEW/ocb-ogeul-admin-frontend | 단일 | 일반 전체 스캔 (TS/React) | |
-| OCBWEBVIEW/ocb-webview-admin-api | 단일 | 일반 전체 스캔 | |
-| OKICK/okick-event-batch-server | 단일 | 일반 전체 스캔 | |
-| OKICK/okick-event-server | 단일 | 일반 전체 스캔 | |
-| OKICK/okick-front | 단일 | 일반 전체 스캔 (React) | |
-| OKICK/okick-reward-batch-server | 단일 | 일반 전체 스캔 | |
-| OKICK/okick-reward-front | 단일 | 일반 전체 스캔 (React) | |
-| OKICK/okick-reward-server | 단일 | 일반 전체 스캔 | |

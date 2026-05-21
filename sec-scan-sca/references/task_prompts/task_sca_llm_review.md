@@ -187,18 +187,71 @@ rg -l "@PreAuthorize\|@Secured\|@EnableMethodSecurity\|hasRole\|hasAuthority" <s
 
 ---
 
-## Confluence 게시 방법
+## findings_SCA.json 생성 (LLM-Check Phase 최종 출력)
 
-LLM 검토 결과를 SCA 페이지에 병합 게시:
+LLM-Check Phase 완료 후 `state/<prefix>/findings_SCA.json`을 생성한다.
+
+### 절차
+
+1. `state/<prefix>/sca.json`의 `auto_findings[]` 로드
+2. `state/<prefix>/sca_llm.json`의 LLM 관련성 판정 적용:
+   - **무관(FP)**: `result` → `"양호(FP)"`, `fp_corrected: true`
+   - **관련**: TP 확정, `description`에 한국어 CVE 설명 병합
+   - **검토필요**: `needs_review: true`
+3. **동일 라이브러리 복수 CVE 병합 (HARD RULE)**: 같은 `group:artifact` + `version` 조합에 CVE가 여러 건이면 **1개 finding으로 병합**한다.
+   - `scope.cve_id`: CVSS 최상위 CVE를 대표 ID로 기재
+   - `scope.affected_cves`: 모든 CVE를 배열로 기재 `[{cve_id, cvss, severity, fixed_version}]`
+   - `severity`: 개별 CVE 중 최대값 적용 (합산 금지)
+   - `title`: CVE 1건이면 `취약 오픈소스 — <lib> <ver> (<CVE>)`, 2건 이상이면 `취약 오픈소스 — <lib> <ver> (<대표CVE> 외 N건)` 형식
+   - `recommendation`: 단일 패치 버전(최대 fixed_version 기준)으로 통합 작성
+4. finding_id 재부여: `SCA-001` 순번 (severity 내림차순 → CVSS 내림차순)
+5. `state/<prefix>/findings_SCA.json` 저장
+
+### 출력 스키마 (shared/references/output_schemas.md 참조)
 
 ```json
-// confluence_page_map.json 항목 예시
 {
-  "source": "state/<prefix>/sca.json",
-  "title": "테스트NN - SCA (오픈소스 취약점) 진단 결과",
-  "type": "sca",
-  "supplemental_sources": ["state/<prefix>/sca_llm.json"]
+  "task_id": "sca",
+  "generated_at": "ISO8601",
+  "scan_coverage": {
+    "fn_disclaimer": "OSV.dev 데이터베이스에 미등록된 CVE 및 CVSS 임계값 미만 취약점은 포함되지 않음"
+  },
+  "summary": {
+    "total": 0, "취약": 0, "정보": 0, "양호(FP)": 0, "fn_detected": 0
+  },
+  "findings": [
+    {
+      "finding_id": "SCA-001",
+      "title": "취약 오픈소스 라이브러리 — <package> <version> (<CVE>)",
+      "severity": "Critical|High|Medium|Low|Informational",
+      "risk_level": "5|4|3|2|1",
+      "category": "SCA/CVE",
+      "cwe_id": "CWE-1395",
+      "result": "취약|정보|양호(FP)",
+      "diagnosis_method": "auto-scan",
+      "source": "auto-scan|llm-check",
+      "fn_detected": false,
+      "fp_corrected": false,
+      "scope": {
+        "type": "dependency",
+        "endpoint": null,
+        "file": null,
+        "line": null,
+        "module": null,
+        "package": "group:artifact",
+        "version": "1.0.0",
+        "cve_id": "CVE-XXXX-XXXXX",
+        "affected_cves": [
+          {"cve_id": "CVE-XXXX-XXXXX", "cvss": 0.0, "severity": "High", "fixed_version": "x.y.z"}
+        ]
+      },
+      "description": "한국어 CVE 설명 (LLM 검토 결과 반영)",
+      "recommendation": "최신 패치 버전으로 업그레이드",
+      "code_snippet": "",
+      "evidence": [{"cve": "", "cvss": 0.0, "in_kev": false}],
+      "needs_review": false
+    }
+  ],
+  "evidence_trail": []
 }
 ```
-
-`publish_confluence.py`가 `_json_to_xhtml_sca_v2()`를 통해 SCA 자동 스캔 결과 + LLM 검토 결과를 하나의 페이지로 통합 렌더링한다.

@@ -38,12 +38,36 @@ palantir/
 | `/sec-scan-data` | 데이터 보호 (CORS/Secrets/JWT/Crypto/PII) | `shared/scripts/scan_data_protection.py` |
 | `/sec-scan-sca` | 오픈소스 CVE 취약점 | `shared/scripts/scan_sca_gradle_tree.py` |
 
-## Quick Start
+## Quick Start — 단일 레포 진단 절차
 
-1. 대상 소스코드를 `testbed/<project>/` 에 위치시킴
-2. 원하는 skill 실행 (예: `/sec-scan-injection`)
-3. 결과는 `state/<prefix>/` 에 저장됨
+1. **Clone** (Windows PowerShell에서 실행 — WSL 불가):
+   `python3 tools/clone_repo.py <PROJECT> <REPO>`
+   - 소스코드 → `testbed/<repo>/`
+
+2. **SAST 진단** — 5개 skill 순차 실행 (각각 `/sec-scan-injection` 등):
+   - 자율 완주: 자산 식별 → Auto-Scan → LLM-Check → Summary 생성
+   - `testbed/<repo>/` 소스코드는 보존 (보고서 검토 시 참조)
+
+3. **인터랙티브 리뷰** — 5개 skill 완료 후 `/sec-review` 실행:
+   ```
+   /sec-review <RUN_ID> <repo>
+   ```
+   - finding별 정탐/오탐 판정 (`1`=정탐, `0`=오탐, `s`=스킵)
+
+4. **최종 보고서 생성 + Confluence 게시**:
+   ```bash
+   python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
+   # → logs/final_<repo>_<RUN_ID>.md  (Confluence :::expand 매크로 포함)
+   ```
+
+> **진행 방향**: skill 단위로 전체 repo를 순차 진단 (injection 전체 → xss 전체 → ...)
 
 ## 관련 레포
 
-- `sec-audit-playbook` (private): 전체 파이프라인 오케스트레이션, Confluence 게시, 고객사 설정
+| 레포 | 경로 | 역할 |
+|---|---|---|
+| palantir | `~/palantir/` | 진단 도구 및 skill (현재 레포) |
+| palantir-testbed | `testbed/` | 고객사 소스코드 clone 저장소 |
+| palantir-state | `state/` | 진단 결과 JSON / 보고서 저장소 |
+| palantir-reports | `~/palantir-reports/` | 서비스별 1차보고서(final) 누적 저장소 |
+| sec-audit-playbook | (private) | 전체 파이프라인 오케스트레이션, Confluence 게시 |

@@ -14,6 +14,14 @@ severity 판정 및 설명 작성을 수행할 수 있도록 합니다.
 패턴 출처:
     - old_진단가이드문서/22_인젝션 진단가이드.docx
     - prompts/static/task_22_injection_review.md
+
+FN 방어 원칙 (Fail-Open):
+    - line_exclude 패턴은 탐지 결과를 삭제(skip)하지 않는다.
+      대신 Finding.excluded_reason 필드에 기록하여 LLM이 최종 판단하도록 한다.
+    - safe_indicators 패턴도 마찬가지로 탐지 결과를 삭제하지 않는다.
+      안전 패턴 존재 여부는 Finding.safe_indicators에 기록하고 LLM에 전달한다.
+    - context_check 미매칭 시에도 결과를 완전히 폐기하지 않고
+      needs_review=True 플래그로 정보(info)로 낮춰 LLM에 전달한다.
 """
 
 import json
@@ -23,6 +31,49 @@ import argparse
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Optional
+
+# ── Rule Registry 기반 패턴 동적 로드 ──────────────────────────────────────
+# scan_injection_rules.py가 단일 진실의 원천(SSoT). sink_patterns를 여기서 재사용해
+# SQLI_VULNERABLE_PATTERNS 이중 유지보수를 제거한다.
+try:
+    sys.path.insert(0, str(Path(__file__).parent))
+    from scan_injection_rules import RULE_REGISTRY as _RULE_REGISTRY
+except ImportError:
+    _RULE_REGISTRY = {}
+
+
+def _build_sqli_from_registry() -> list[dict]:
+    """RULE_REGISTRY.sink_patterns → scan_file() 호환 포맷으로 변환.
+
+    필드 매핑:
+        detail       → desc
+        framework_id → category prefix
+        is_vulnerable=False 항목은 제외 (safe 패턴이므로)
+        line_exclude 미포함 (Fail-Open 원칙 — 필터링 금지)
+    """
+    result = []
+    seen_ids: set[str] = set()
+    for rule in _RULE_REGISTRY.values():
+        for sp in rule.sink_patterns:
+            if not sp.get("is_vulnerable", True):
+                continue
+            sid = sp["id"]
+            if sid in seen_ids:
+                continue
+            seen_ids.add(sid)
+            category_label = rule.framework_id.replace("_", " ").title()
+            pat: dict = {
+                "id": sid,
+                "name": sp["name"],
+                "desc": sp.get("detail", ""),
+                "pattern": sp["pattern"],
+                "category": f"SQL Injection / {category_label}",
+            }
+            for opt in ("file_glob", "file_content_check", "context_check", "context_window"):
+                if opt in sp:
+                    pat[opt] = sp[opt]
+            result.append(pat)
+    return result
 
 
 # ============================================================
@@ -75,58 +126,12 @@ DB_API_IDENTIFY = {
 }
 
 # 1-2. SQL Injection 취약 패턴
-SQLI_VULNERABLE_PATTERNS = [
-    {
-        "id": "SQLI_MYBATIS_DOLLAR_XML",
-        "name": "MyBatis XML ${} 문자열 보간",
-        "desc": "MyBatis XML mapper에서 ${} 사용은 PreparedStatement 바인딩 없이 직접 문자열 치환하여 SQL Injection 취약",
-        "pattern": r'\$\{[^}]+\}',
-        "file_glob": ["*.xml"],
-        # MyBatis mapper XML 파일만 스캔 (pom.xml, logback.xml 등 제외)
-        # <mapper namespace= 또는 <!DOCTYPE mapper 태그가 있는 파일만
-        "file_content_check": r'(?:<mapper\s+namespace\s*=|<!DOCTYPE\s+mapper|<resultMap\s)',
-        "category": "SQL Injection / MyBatis",
-        "safe_counterpart": "#{} 파라미터 바인딩 사용",
-    },
-    {
-        "id": "SQLI_MYBATIS_DOLLAR_ANNOTATION",
-        "name": "MyBatis 어노테이션 ${} 문자열 보간",
-        "desc": "MyBatis @Select/@Insert/@Update/@Delete 어노테이션에서 ${} 사용 시 SQL Injection 취약",
-        # 같은 줄에 @Annotation 또는 SQL 키워드가 있어야 매칭
-        "pattern": r'(?:@(?:Select|Insert|Update|Delete)\s*\(.*?\$\{|(?:SELECT|INSERT|UPDATE|DELETE|ALTER|WHERE|FROM|JOIN|SET|INTERVAL|INTO)\s.*?\$\{)',
-        "file_glob": ["*.kt", "*.java"],
-        "category": "SQL Injection / MyBatis",
-        "safe_counterpart": "#{} 파라미터 바인딩 사용",
-    },
-    {
-        "id": "SQLI_R2DBC_CRITERIA_TOSTRING",
-        "name": "R2DBC Criteria.toString() SQL 직접 삽입",
-        "desc": "Criteria 객체를 .toString()하여 SQL WHERE절에 직접 삽입 (진단가이드 §1 참조)",
-        "pattern": r'(?:Criteria\.where|criteria|definition).*?\.toString\s*\(\)',
-        "file_glob": ["*.kt", "*.java"],
-        "category": "SQL Injection / R2DBC",
-        "safe_counterpart": ".bind() 파라미터 바인딩 또는 R2dbcEntityTemplate Query DSL 사용",
-    },
-    {
-        "id": "SQLI_R2DBC_STRING_CONCAT",
-        "name": "R2DBC SQL 문자열 결합",
-        "desc": "DatabaseClient.execute()에 문자열 결합(+, append, format, buildString)으로 사용자 입력을 SQL에 삽입",
-        "pattern": r'(?:\.execute|\.sql)\s*\(\s*(?:"""[^"]*"""|"[^"]*")\s*(?:\+|\.format\s*\()',
-        "file_glob": ["*.kt", "*.java"],
-        "category": "SQL Injection / R2DBC",
-        "safe_counterpart": ":param 파라미터 + .bind() 사용",
-    },
-    {
-        "id": "SQLI_R2DBC_APPEND_SQL",
-        "name": "R2DBC StringBuilder SQL 동적 생성",
-        "desc": "StringBuilder/buildString으로 SQL을 동적 구성하여 사용자 입력값을 직접 삽입",
-        "pattern": r'(?:buildString|StringBuilder|StringBuffer)\s*(?:\{|\()',
-        "file_glob": ["*.kt", "*.java"],
-        "category": "SQL Injection / R2DBC",
-        "context_check": r'(?:SELECT\s+.*FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|WHERE\s+|ORDER\s+BY|GROUP\s+BY|\.execute\s*\(|\.sql\s*\(|_SQL\b)',
-        "context_window": 8,
-        "safe_counterpart": "파라미터 바인딩 사용",
-    },
+# ── RULE_REGISTRY에서 동적 로드 (Single Source of Truth) ───────────────────
+# sink_patterns 추가/수정은 scan_injection_rules.py 에서만 수행.
+# 여기서는 RULE_REGISTRY에 없는 글로벌 전용 패턴 4종만 추가한다.
+SQLI_VULNERABLE_PATTERNS = _build_sqli_from_registry() + [
+
+    # ── 글로벌 전용 (RULE_REGISTRY 미등록 패턴) ────────────────────────────
     {
         "id": "SQLI_STRING_FORMAT_SQL",
         "name": "String.format()으로 SQL 생성",
@@ -135,37 +140,10 @@ SQLI_VULNERABLE_PATTERNS = [
         "file_glob": ["*.kt", "*.java"],
         "context_check": r'(?:SELECT\s+.*FROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|\.execute\s*\(|\.sql\s*\(|client\.execute)',
         "context_window": 3,
-        # 날짜/URL/파일경로 포맷은 제외
+        # 날짜/URL/파일경로 포맷 → Fail-Open: skip 아닌 needs_review=True 로 처리됨
         "line_exclude": r'(?:DateTimeFormatter|\.format\s*\(\s*DateTimeFormatter|trackingUrl|FILE_NAME_FORMAT|ARCHIVE_FILE|\.format\s*\(\s*"%[tTdD])',
         "category": "SQL Injection",
         "safe_counterpart": "PreparedStatement 또는 :param 바인딩 사용",
-    },
-    {
-        "id": "SQLI_JPA_CONCAT",
-        "name": "JPA @Query 문자열 결합",
-        "desc": "JPA @Query 어노테이션 내에서 문자열 결합으로 파라미터를 SQL에 직접 삽입",
-        "pattern": r'@Query\s*\(\s*(?:value\s*=\s*)?["\'].*?\+',
-        "file_glob": ["*.kt", "*.java"],
-        "category": "SQL Injection / JPA",
-        "safe_counterpart": ":param 또는 ?N 파라미터 바인딩 사용",
-    },
-    {
-        "id": "SQLI_JDBC_STATEMENT",
-        "name": "JDBC Statement 직접 실행",
-        "desc": "Statement.executeQuery()에 문자열 결합으로 SQL 생성",
-        "pattern": r'(?:Statement|stmt)\.execute(?:Query|Update)?\s*\(\s*(?:sql|query|[a-zA-Z_]+\s*\+)',
-        "file_glob": ["*.kt", "*.java"],
-        "category": "SQL Injection / JDBC",
-        "safe_counterpart": "PreparedStatement + setString() 사용",
-    },
-    {
-        "id": "SQLI_NODEJS_CONCAT",
-        "name": "Node.js SQL 문자열 결합",
-        "desc": "Node.js에서 db.query()에 문자열 결합 또는 템플릿 리터럴로 SQL 생성",
-        "pattern": r'(?:db|client|connect|pool)\.query\s*\(\s*(?:`[^`]*\$\{|["\'][^"\']*\"\s*\+)',
-        "file_glob": ["*.js", "*.ts"],
-        "category": "SQL Injection / Node.js",
-        "safe_counterpart": "Parameterized query ($1, $2) 사용",
     },
     {
         "id": "SQLI_ES_QUERY_INTERPOLATION",
@@ -196,6 +174,16 @@ SQLI_VULNERABLE_PATTERNS = [
         "safe_counterpart": "화이트리스트 검증으로 허용된 식별자만 사용",
     },
 ]
+
+
+# 이관된 패턴 목록 (참고용):
+#   SQLI_MYBATIS_DOLLAR_XML / ANNOTATION  → mybatis
+#   SQLI_R2DBC_*                          → r2dbc
+#   SQLI_JPA_CONCAT                       → spring_jpa
+#   SQLI_JDBC_STATEMENT                   → jdbc
+#   SQLI_NODEJS_CONCAT                    → nodejs
+#   Python / PHP SQL 패턴                 → python_db / php
+
 
 # 1-3. SQL Injection 양호 패턴 (safe indicators)
 SQLI_SAFE_PATTERNS = [
@@ -708,8 +696,14 @@ class Finding:
     code_snippet: str
     context_before: list = field(default_factory=list)
     context_after: list = field(default_factory=list)
+    # [Fail-Open] 안전 패턴이 근처에 있어도 탐지 결과는 유지.
+    # safe_indicators: 안전 패턴 ID 목록 (탐지 억제 금지 — LLM 판단 자료)
     safe_indicators: list = field(default_factory=list)
     safe_counterpart: str = ""
+    # [Fail-Open] line_exclude 해당 여부. True여도 Finding은 유지됨.
+    # needs_review=True + excluded_reason 기록으로 LLM에 전달.
+    excluded_reason: str = ""  # line_exclude 또는 context_check 미매칭 사유
+    needs_review: bool = False  # True: LLM 최종 판단 필요 (FP 가능성)
 
 
 def matches_glob(filename: str, globs: list[str]) -> bool:
@@ -723,7 +717,14 @@ def matches_glob(filename: str, globs: list[str]) -> bool:
 
 def scan_file(filepath: Path, patterns: list[dict], safe_patterns: list[dict],
               context_lines: int = 3) -> list[Finding]:
-    """파일에서 패턴을 검색하고 결과를 반환"""
+    """파일에서 패턴을 검색하고 결과를 반환.
+
+    [Fail-Open 전략]
+    - line_exclude 매칭: 결과를 삭제하지 않고 excluded_reason + needs_review=True 기록
+    - context_check 미매칭: 결과를 삭제하지 않고 excluded_reason + needs_review=True 기록
+    - safe_indicators 발견: 결과를 삭제하지 않고 safe_indicators 목록에 기록
+    → LLM이 safe_indicators / excluded_reason을 보고 최종 FP/TP 판단
+    """
     findings = []
     filename = filepath.name
 
@@ -738,6 +739,7 @@ def scan_file(filepath: Path, patterns: list[dict], safe_patterns: list[dict],
             continue
 
         # file_content_check: 파일 전체에 특정 패턴이 있어야 스캔 진행
+        # (이건 파일 자체가 관련 없는 경우 → 여전히 필터, Fail-Open 예외)
         if "file_content_check" in pat:
             if not re.search(pat["file_content_check"], content, re.IGNORECASE):
                 continue
@@ -758,22 +760,30 @@ def scan_file(filepath: Path, patterns: list[dict], safe_patterns: list[dict],
             if not match:
                 continue
 
-            # line_exclude: 매칭된 줄이 제외 패턴에 해당하면 스킵
-            if line_exclude_regex and line_exclude_regex.search(line):
-                continue
+            excluded_reason = ""
+            needs_review = False
 
-            # context_check: 주변 줄에서 키워드 확인
+            # [Fail-Open] line_exclude: 과거엔 skip — 이제는 needs_review=True 로 다운그레이드
+            if line_exclude_regex and line_exclude_regex.search(line):
+                excluded_reason = f"line_exclude 패턴 매칭: {pat['line_exclude'][:80]}"
+                needs_review = True
+                # ← 여기서 continue 하지 않음 (Fail-Open)
+
+            # [Fail-Open] context_check 미매칭: 과거엔 skip — 이제는 needs_review=True 로 다운그레이드
             if context_regex:
                 window = lines[max(0, i - ctx_window):min(len(lines), i + ctx_window + 1)]
                 window_text = "\n".join(window)
                 if not context_regex.search(window_text):
-                    continue
+                    reason = f"context_check 미매칭: {pat['context_check'][:80]}"
+                    excluded_reason = (excluded_reason + " / " + reason) if excluded_reason else reason
+                    needs_review = True
+                    # ← 여기서 continue 하지 않음 (Fail-Open)
 
             # 전후 context 추출
             ctx_before = lines[max(0, i - context_lines):i]
             ctx_after = lines[i + 1:min(len(lines), i + 1 + context_lines)]
 
-            # safe indicator 확인
+            # [Fail-Open] safe indicator: 발견해도 삭제하지 않고 목록에 기록
             safe_found = []
             window_text = "\n".join(lines[max(0, i - 10):min(len(lines), i + 11)])
             for sp in safe_patterns:
@@ -781,6 +791,9 @@ def scan_file(filepath: Path, patterns: list[dict], safe_patterns: list[dict],
                     continue
                 if re.search(sp["pattern"], window_text, re.IGNORECASE):
                     safe_found.append(sp["id"])
+            # 안전 패턴이 있어도 result는 유지, needs_review만 True
+            if safe_found:
+                needs_review = True
 
             rel_path = str(filepath)
 
@@ -796,6 +809,8 @@ def scan_file(filepath: Path, patterns: list[dict], safe_patterns: list[dict],
                 context_after=[l.strip() for l in ctx_after],
                 safe_indicators=safe_found,
                 safe_counterpart=pat.get("safe_counterpart", ""),
+                excluded_reason=excluded_reason,
+                needs_review=needs_review,
             ))
 
     return findings

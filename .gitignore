@@ -1,7 +1,38 @@
+### Python ###
 __pycache__/
 *.pyc
 *.pyo
+
+### 환경 / 자격증명 ###
 .env
-state/
+.claude/settings.json
+.claude/settings.local.json
+
+### 고객사 소스코드 (palantir-testbed) ###
 testbed/
+
+### 진단 결과 데이터 (palantir-state) ###
+state/
+
+### 진단 보고서 (취약점 포함 — 외부 공개 불가) ###
+logs/
+
+### 고객사 특정 운영 파일 ###
+trigger/scan_targets.yaml
+docs/ocb_scan_plan.md
+docs/service_inventory.json
+docs/.confluence_pages.json
+docs/.ocb_scan_status.json
+docs/credit_requirements_report_*.md
+shared/references/project_ocb_php_targets.md
+
+### 고객사 감사 자료 ###
+*.png
+*.jpg
+*.xlsx
+*.xlsxx
+*.xls
+
+### OS ###
 .DS_Store
+Thumbs.db

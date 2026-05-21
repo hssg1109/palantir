@@ -1,27 +1,17 @@
 # 미지원 언어 진단 대상 목록
 
-> sec-audit-static 스캐너는 Java/Kotlin을 완전 지원하며, TypeScript/JavaScript 프론트엔드는 **Task 2-6/3-6 (클라이언트 사이드 진단)**으로 지원.
-> 이 파일은 **PHP 등 지원 언어 스캐너가 없어 자동 진단이 불가한 대상**을 기록하고, 향후 스캐너 구현을 위한 요구사항을 명세합니다.
+> palantir 스캐너는 Java/Kotlin을 완전 지원하며, TypeScript/JavaScript 프론트엔드는 LLM 수동 진단으로 지원.
+> 이 파일은 **PHP 등 지원 언어 스캐너가 없어 자동 진단이 불가한 언어**와 향후 스캐너 구현 요구사항을 명세합니다.
+>
+> PHP 진단 보류 대상 repo 목록: `shared/references/project_ocb_php_targets.md` 참조.
 
 ---
 
 ## PHP (미지원)
 
-### 대상 repo 목록
-
-| Project | Repository | build_target | 서비스명 | 진단 월 | 상태 |
-|---|---|---|---|---|---|
-| OCB-THP | ocb_fun_real | php_ocb_fun | OCB 운세, 스타일업 등 | 2026-02 | ⬜ 미진단 |
-| OCB-THP | ocb_game_biz | php_ocbgame | OCB 캐쉬백게임 | 2026-02 | ⬜ 미진단 |
-| OCB-THP | ocb_game_biz_admin | php_ocbgame | OCB 캐쉬백게임 (admin) | 2026-02 | ⬜ 미진단 |
-| OCB-THP | ocb_game_biz_matgo | php_ocbgame_matgo | OCB 캐쉬백게임 (matgo) | 2026-02 | ⬜ 미진단 |
-| OCB-THP | ocb_game_biz_matgo_php_real | php_ocbgame_matgo | OCB 캐쉬백게임 (matgo, real) | 2026-02 | ⬜ 미진단 |
-
-> 주의: `ocb_game_biz_admin`(feature/20250924_php8_converting)과 `ocb_fun_real`(feature/20250909_php_converting)은 Fortify에서 master와 사실상 동일 판단 → 대상 제외 처리됨 (상기 목록에는 기록 유지).
-
 ### 현재 처리 방식
 
-자동 스캔 전량 skip. Confluence에 "PHP 언어 미지원 — 추후 진단 예정" 페이지 생성 후 게시.
+자동 스캔 전량 skip. Phase 1 자산 식별 결과에 "PHP 언어 미지원 — 추후 진단 예정" 기록.
 
 ### 향후 PHP 스캐너 구현 요구사항
 
@@ -68,12 +58,11 @@ system("ls " . $_GET['dir']);
 |---|---|---|---|
 | Java (Spring MVC / Spring Boot) | ✅ 완전 지원 | Injection / XSS / File / DataProtection / SCA | 2-1~2-5 |
 | Kotlin (Spring Boot) | ✅ 완전 지원 | Injection / XSS / File / DataProtection / SCA | 2-1~2-5 |
-| TypeScript (React / Next.js / Turborepo) | ✅ 지원 | FE-XSS / FE-SECRET / FE-STORAGE / FE-LOG / SCA(npm) | 2-6, 3-6 |
-| JavaScript (Node.js / React) | ✅ 지원 | FE-XSS / FE-SECRET / FE-STORAGE / FE-LOG / SCA(npm) | 2-6, 3-6 |
+| TypeScript (React / Next.js / Turborepo) | ✅ 지원 | FE-XSS / FE-SECRET / FE-STORAGE / FE-LOG / SCA(npm) | LLM 수동 진단 |
+| JavaScript (Node.js / React) | ✅ 지원 | FE-XSS / FE-SECRET / FE-STORAGE / FE-LOG / SCA(npm) | LLM 수동 진단 |
 | PHP | ❌ 미지원 | — | — |
 | Python | ❌ 미지원 | — | — |
 | Go | ❌ 미지원 | — | — |
 
 > **TypeScript/JavaScript 지원 범위**: LLM grep 기반 수동진단 (자동 스캔 스크립트 없음).
-> 상세 진단 기준: `task_prompts/task_26_frontend_client_side.md`
-> 워크플로 분기: `workflow.md` Phase 1 프론트엔드 판정 → Phase 2-6 실행
+> 워크플로 분기: `workflow.md` Phase 1 프론트엔드 판정 → Phase 2 프론트엔드 진단 실행

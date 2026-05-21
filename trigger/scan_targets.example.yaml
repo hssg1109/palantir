@@ -1,0 +1,71 @@
+# scan_targets.example.yaml — 파이프라인 진단 대상 목록 예시
+#
+# 실제 운영 파일: trigger/scan_targets.yaml (gitignore — 고객사 정보 포함)
+# 이 파일은 공개 예시용이며 실제 프로젝트 키 / 레포명을 포함하지 않는다.
+#
+# 최소 필수 필드: project + repo + active
+#   project    : Bitbucket 프로젝트 키 (clone_repo.py 참조)
+#   repo       : Bitbucket 레포 슬러그 (= testbed/<repo>/ 디렉터리명)
+#   active     : true이면 파이프라인에 포함, false이면 skip
+#
+# 선택 필드 (생략 시 auto):
+#   branch     : 대상 브랜치 (생략 시 clone_repo가 main→master 순 자동 감지)
+#   repo_type  : backend | frontend | php  (생략 시 clone 후 소스코드로 자동 감지)
+#   skills     : 실행 skill 목록 override (생략 시 repo_type별 기본값)
+#   provider   : LLM provider override (생략 시 defaults.provider)
+#   max_budget_usd : skill당 예산 override
+#   modules    : scan --modules 파라미터 (대형 repo 서브모듈 분리 시)
+#   note       : 비고
+#
+# 사용 예시:
+#   python3 tools/pipeline_runner.py --dry-run              # 전체 계획 확인
+#   python3 tools/pipeline_runner.py --repos my-service-api
+#   python3 tools/pipeline_runner.py --skills injection sca
+#   python3 tools/pipeline_runner.py --report draft         # 완료 후 1차 보고서 생성
+#   python3 tools/pipeline_runner.py --no-clone             # clone 건너뜀
+
+# ── 전역 기본값 ──────────────────────────────────────────────────────────────
+defaults:
+  provider: claude-cli
+  max_budget_usd: 3.0
+  max_turns: 80
+  # branch는 생략 — clone_repo.py가 main→master→dev 순 자동 감지
+
+# ── 진단 대상 목록 ────────────────────────────────────────────────────────────
+targets:
+
+  # ── 예시: 일반 Java/Kotlin 백엔드 ──────────────────────────────────────────
+  - project: MY_PROJECT          # Bitbucket 프로젝트 키 (대문자)
+    repo: my-service-api         # Bitbucket 레포 슬러그
+    active: false                # true로 변경 시 파이프라인에 포함
+    repo_type: backend
+    note: 예시 — 백엔드 API 서비스
+
+  # ── 예시: React/Vue 프론트엔드 (SCA + XSS만) ───────────────────────────────
+  - project: MY_PROJECT
+    repo: my-service-frontend
+    active: false
+    repo_type: frontend
+    skills:
+      - sca
+      - xss
+    note: 예시 — 프론트엔드 (SCA + XSS only)
+
+  # ── 예시: PHP 서비스 ────────────────────────────────────────────────────────
+  - project: MY_PROJECT
+    repo: my-service-php
+    active: false
+    repo_type: php
+    note: 예시 — PHP 서비스
+
+  # ── 예시: 대형 모노레포 (서브모듈 분리) ────────────────────────────────────
+  - project: MY_PROJECT
+    repo: my-monorepo
+    active: false
+    repo_type: backend
+    modules:
+      - module-a
+      - module-b
+    max_budget_usd: 5.0
+    max_turns: 120
+    note: 예시 — 대형 모노레포, 서브모듈별 분리 진단

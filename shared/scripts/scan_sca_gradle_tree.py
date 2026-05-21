@@ -561,6 +561,12 @@ def _run_gradle(
         "--quiet",
     ]
 
+    # SCA_GRADLE_INIT_SCRIPT 환경변수가 설정된 경우 init script 추가
+    # (사내망 Nexus 접근 불가 환경에서 Maven Central 오버라이드 등에 사용)
+    init_script = os.environ.get("SCA_GRADLE_INIT_SCRIPT", "")
+    if init_script and Path(init_script).exists():
+        cmd += ["--init-script", init_script]
+
     print(f"  실행: {' '.join(cmd[:3])} ... (job={job_id[:8]})")
     try:
         proc = subprocess.run(
@@ -623,7 +629,7 @@ def _parse_dependency_tree(output: str) -> set[tuple[str, str, str]]:
 
     처리 규칙:
       - "+--- groupId:artifactId:version" → (groupId, artifactId, version)
-      - "\--- ...:version -> resolvedVersion" → (groupId, artifactId, resolvedVersion) 사용
+      - r"\--- ...:version -> resolvedVersion" → (groupId, artifactId, resolvedVersion) 사용
         (앞의 requested version 은 버림; BOM/constraints 에 의해 override 된 최종 버전 우선)
       - "(*)" 는 이미 다른 노드에서 출력된 중복이므로 Set 으로 자동 제거됨
       - "project :subproject" 형태의 내부 프로젝트 참조는 regex 에서 제외
@@ -747,6 +753,179 @@ def _query_osv_batch(
 
     return results
 
+
+# ─────────────────────────────────────────────────────────────────
+# npm(package-lock.json) 지원
+# ─────────────────────────────────────────────────────────────────
+
+def _detect_npm_lock(project_dir: Path) -> Optional[Path]:
+    """프로젝트 루트에서 package-lock.json 경로를 반환한다(없으면 None)."""
+    lock = project_dir / "package-lock.json"
+    return lock if lock.exists() else None
+
+
+def _parse_package_lock(lock_path: Path) -> set[tuple[str, str]]:
+    """package-lock.json에서 (package_name, version) 집합을 추출한다.
+
+    지원 포맷:
+      - npm v7+ (lockfileVersion 2/3): 최상위 "packages" 객체 활용 (name/version 포함)
+      - npm v6 (lockfileVersion 1): 최상위 "dependencies" 재귀 순회
+    """
+    try:
+        data = json.loads(lock_path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:
+        return set()
+
+    deps: set[tuple[str, str]] = set()
+    lock_ver = data.get("lockfileVersion")
+
+    # npm v7+ : packages dict
+    packages = data.get("packages")
+    if isinstance(packages, dict):
+        for pkg_path, info in packages.items():
+            if not isinstance(info, dict):
+                continue
+            name = info.get("name")
+            ver = info.get("version")
+            if isinstance(ver, str) and ver:
+                # npm v7+에서는 대부분 name 필드가 없고 key가
+                # "node_modules/<pkg>" 또는 "node_modules/@scope/<pkg>" 형태다.
+                if not isinstance(name, str) or not name:
+                    if isinstance(pkg_path, str) and pkg_path.startswith("node_modules/"):
+                        # "node_modules/" 다음 경로를 패키지명으로 복원
+                        # 예: node_modules/lodash
+                        # 예: node_modules/@types/node
+                        rest = pkg_path[len("node_modules/"):]
+                        if rest.startswith("@"):
+                            parts = rest.split("/", 2)
+                            if len(parts) >= 2:
+                                name = parts[0] + "/" + parts[1]
+                        else:
+                            name = rest.split("/", 1)[0]
+                if isinstance(name, str) and name:
+                    deps.add((name, ver))
+        # packages 기반이 있으면 여기서 종료 (정확도가 더 높음)
+        if deps:
+            return deps
+
+    # npm v6 : dependencies dict 재귀
+    def walk(dep_obj: dict) -> None:
+        for name, info in (dep_obj or {}).items():
+            if not isinstance(info, dict):
+                continue
+            ver = info.get("version")
+            if isinstance(name, str) and isinstance(ver, str):
+                deps.add((name, ver))
+            nested = info.get("dependencies")
+            if isinstance(nested, dict):
+                walk(nested)
+
+    if isinstance(data.get("dependencies"), dict):
+        walk(data["dependencies"])
+
+    return deps
+
+
+def _query_osv_batch_npm(
+    deps: list[tuple[str, str]],
+    batch_size: int = _OSV_BATCH_SIZE,
+) -> list[dict]:
+    """npm 의존성 목록을 OSV.dev Batch Query API 로 조회한다.
+
+    Returns:
+        각 의존성별 OSV 취약점 결과 list.
+        각 항목: {"dep": (name, ver), "vulns": [...full_osv_vuln...]}
+    """
+    results: list[dict] = []
+    total = len(deps)
+
+    raw_hits: list[dict] = []  # {"dep": ..., "vuln_ids": [...]}
+    for chunk_start in range(0, total, batch_size):
+        chunk = deps[chunk_start: chunk_start + batch_size]
+        chunk_end = min(chunk_start + batch_size, total)
+        print(f"  [A] 취약 ID 식별(npm) [{chunk_start + 1}~{chunk_end}/{total}]...")
+
+        queries = [
+            {"package": {"name": name, "ecosystem": "npm"}, "version": ver}
+            for name, ver in chunk
+        ]
+
+        response = _http_post_json(_OSV_BATCH_URL, {"queries": queries}, timeout=60)
+        if not response:
+            print(f"  ⚠️  청크 [{chunk_start}~{chunk_end}] OSV 응답 없음 — 스킵", file=sys.stderr)
+            continue
+
+        for idx, result in enumerate(response.get("results", [])):
+            vuln_stubs = result.get("vulns", [])
+            if vuln_stubs:
+                raw_hits.append({
+                    "dep": chunk[idx],
+                    "vuln_ids": [v["id"] for v in vuln_stubs],
+                })
+
+    if not raw_hits:
+        return []
+
+    all_ids: set[str] = {vid for hit in raw_hits for vid in hit["vuln_ids"]}
+    print(f"  [B] CVSS 상세 조회 (고유 vuln {len(all_ids)}건)...")
+
+    vuln_cache: dict[str, dict] = {}
+    for i, vid in enumerate(sorted(all_ids), 1):
+        detail = _fetch_vuln_details(vid)
+        if detail:
+            vuln_cache[vid] = detail
+        if i % 50 == 0:
+            print(f"    {i}/{len(all_ids)} 완료...")
+
+    for hit in raw_hits:
+        full_vulns = [vuln_cache[vid] for vid in hit["vuln_ids"] if vid in vuln_cache]
+        if full_vulns:
+            results.append({"dep": hit["dep"], "vulns": full_vulns})
+
+    return results
+
+
+def _build_findings_npm(
+    osv_results: list[dict],
+    kev_set: set[str],
+    cvss_threshold: float,
+) -> tuple[list[dict], dict]:
+    """npm OSV 조회 결과 → findings 리스트 + summary 딕셔너리 구성."""
+    findings: list[dict] = []
+    summary = {"취약": 0, "정보": 0, "실제사용": 0, "간접사용": 0, "미확인": 0}
+
+    for item in osv_results:
+        name, ver = item["dep"]
+        package_name = name
+
+        for osv_vuln in item["vulns"]:
+            info = _extract_vuln_info(osv_vuln)
+            score = info["cvss_score"]
+            cve = info["cve_id"]
+            in_kev = cve in kev_set if cve else False
+
+            if score >= cvss_threshold or in_kev:
+                summary["취약"] += 1
+                if in_kev:
+                    summary["실제사용"] += 1
+                findings.append({
+                    "type":        info["severity"],
+                    "package":     package_name,
+                    "version":     ver,
+                    "cve":         cve or info["osv_id"],
+                    "cvss":        score,
+                    "severity":    info["severity"],
+                    "summary":     info["summary"],
+                    "cvss_vector": info["cvss_vector"],
+                    "in_kev":      in_kev,
+                    "osv_id":      info["osv_id"],
+                    "status":      "취약",
+                })
+            else:
+                summary["정보"] += 1
+
+    findings.sort(key=lambda f: f["cvss"], reverse=True)
+    return findings, summary
 
 # ─────────────────────────────────────────────────────────────────
 # OSV 취약점 → CVE 정보 추출
@@ -915,6 +1094,68 @@ def _build_grouped(findings: list[dict]) -> list[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────
+# auto_findings 생성 (표준 finding 스키마)
+# ─────────────────────────────────────────────────────────────────
+
+_SCA_RECOMMENDATION = (
+    "취약한 버전의 라이브러리를 보안 패치가 적용된 최신 버전으로 업그레이드하세요. "
+    "CISA KEV에 등재된 CVE는 즉시 조치가 필요합니다. "
+    "업그레이드가 불가한 경우 해당 라이브러리의 취약 기능 사용을 제한하거나 "
+    "WAF 룰로 완화 조치를 적용하세요."
+)
+
+
+def _sca_finding_to_auto_finding(f: dict, seq: int) -> dict:
+    """SCA finding item → 표준 finding object."""
+    cve_id = f.get("cve") or f.get("osv_id") or ""
+    pkg    = f.get("package", "")
+    ver    = f.get("version", "")
+    cvss   = f.get("cvss", 0.0)
+
+    return {
+        "finding_id":       f"SCA-AUTO-{seq:03d}",
+        "title":            f"취약 오픈소스 라이브러리 — {pkg} {ver} ({cve_id})",
+        "severity":         f.get("severity", "High"),
+        "category":         "SCA/CVE",
+        "cwe_id":           "CWE-1395",
+        "result":           "취약",
+        "diagnosis_method": "auto-scan",
+        "source":           "auto-scan",
+        "fn_detected":      False,
+        "scope": {
+            "type":       "dependency",
+            "endpoint":   None,
+            "file":       None,
+            "line":       None,
+            "module":     None,
+            "package":    pkg,
+            "version":    ver,
+        },
+        "description": (
+            f"{cve_id} — {f.get('summary', '')} "
+            f"(CVSS {cvss:.1f}"
+            + (" / CISA KEV 등재" if f.get("in_kev") else "")
+            + ")"
+        ),
+        "recommendation": _SCA_RECOMMENDATION,
+        "code_snippet":   "",
+        "evidence":       [{
+            "cve":         cve_id,
+            "cvss":        cvss,
+            "cvss_vector": f.get("cvss_vector", ""),
+            "osv_id":      f.get("osv_id", ""),
+            "in_kev":      f.get("in_kev", False),
+        }],
+        "needs_review":   False,
+    }
+
+
+def _build_sca_auto_findings(findings: list[dict]) -> list[dict]:
+    """SCA findings 리스트 → auto_findings[]."""
+    return [_sca_finding_to_auto_finding(f, i + 1) for i, f in enumerate(findings)]
+
+
+# ─────────────────────────────────────────────────────────────────
 # 출력 스키마 빌더 (publish_confluence.py 호환)
 # ─────────────────────────────────────────────────────────────────
 
@@ -931,8 +1172,9 @@ def _build_output(
     summary: dict,
 ) -> dict:
     """기존 scan_sca.py 출력 스키마와 호환되는 결과 딕셔너리를 생성한다."""
+    auto_findings = _build_sca_auto_findings(findings)
     return {
-        "task_id":     "P2-01/P2-02",
+        "task_id":     "sca",
         "source_tool": "SCA-GradleTree",
         "metadata": {
             "source_dir":               source_dir,
@@ -947,9 +1189,15 @@ def _build_output(
             "high_critical_cve":        sum(1 for f in findings if f["cvss"] >= cvss_threshold),
             "kev_count":                kev_count,
         },
-        "summary": summary,
-        "findings": findings,
-        "grouped":  _build_grouped(findings),
+        "summary": {
+            **summary,
+            "auto_findings_count": len(auto_findings),
+            "evidence_trail_count": 0,  # SCA는 threshold 미만 CVE를 findings에서 제외하므로 trail 없음
+        },
+        "findings":      findings,
+        "grouped":       _build_grouped(findings),
+        "auto_findings": auto_findings,
+        "evidence_trail": [],
     }
 
 
@@ -1036,9 +1284,73 @@ def main() -> None:
         print(f"❌ 소스 디렉토리가 존재하지 않음: {source_dir}", file=sys.stderr)
         sys.exit(1)
 
+    # npm 프로젝트(package-lock.json)면 gradlew 없이 npm SCA로 전환
+    npm_lock = _detect_npm_lock(source_dir)
+    if npm_lock:
+        print(f"\n=== scan_sca_gradle_tree.py — npm SCA 분석 ===")
+        print(f"소스: {source_dir}")
+        print(f"lock: {npm_lock}")
+
+        job_id = str(uuid.uuid4())
+        print(f"JobID: {job_id[:8]}")
+
+        print("\n[Step 1] package-lock.json 의존성 추출 중...")
+        npm_deps = sorted(_parse_package_lock(npm_lock))
+        if not npm_deps:
+            print("  ❌ package-lock.json에서 파싱된 항목 없음.", file=sys.stderr)
+            sys.exit(1)
+        print(f"  → 전체 의존성: {len(npm_deps)}건")
+
+        print("\n[Step 2] OSV.dev 취약점 조회 중...")
+        osv_results = _query_osv_batch_npm(npm_deps, batch_size=_OSV_BATCH_SIZE)
+        deps_with_vuln = len(osv_results)
+        total_cve = sum(len(r["vulns"]) for r in osv_results)
+        print(f"  → 취약 패키지: {deps_with_vuln}건, 총 CVE: {total_cve}건")
+
+        kev_set: set[str] = set()
+        if not args.no_kev:
+            print("\n[Step 3] CISA KEV 조회 중...")
+            kev_set = _load_cisa_kev()
+
+        print(f"\n[Step 4] findings 생성 (CVSS ≥ {args.cvss_threshold})...")
+        findings, summary = _build_findings_npm(osv_results, kev_set, args.cvss_threshold)
+        kev_count = sum(1 for f in findings if f["in_kev"])
+
+        print(f"\n[결과 요약]")
+        print(f"  전체 의존성:    {len(npm_deps)}건")
+        print(f"  취약 패키지:    {deps_with_vuln}건")
+        print(f"  전체 CVE:       {total_cve}건")
+        print(f"  High/Critical:  {summary['취약']}건 (CVSS ≥ {args.cvss_threshold})")
+        print(f"  CISA KEV 등재:  {kev_count}건")
+
+        # Gradle과 동일 스키마로 저장(단, scan_method만 npm으로 표시)
+        output_data = _build_output(
+            source_dir=str(source_dir),
+            project_name=args.project,
+            job_id=job_id,
+            total_deps=len(npm_deps),
+            deps_with_vuln=deps_with_vuln,
+            total_cve=total_cve,
+            kev_count=kev_count,
+            cvss_threshold=args.cvss_threshold,
+            findings=findings,
+            summary=summary,
+        )
+        output_data["source_tool"] = "SCA-NPM-PackageLock"
+        output_data.setdefault("metadata", {})
+        output_data["metadata"]["scan_method"] = "npm_package_lock"
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(output_data, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n결과 저장: {args.output}")
+        _write_llm_summary(output_data, args.output)
+        return
+
+    # Gradle 프로젝트(기존 동작)
     gradlew = _find_gradlew(source_dir)
     if not gradlew:
         print(f"❌ gradlew 를 찾을 수 없음: {source_dir}", file=sys.stderr)
+        print("   또한 package-lock.json도 없어 npm SCA로 전환할 수 없습니다.", file=sys.stderr)
         sys.exit(1)
 
     java_path = _ensure_java(
