@@ -2,6 +2,10 @@
 """
 approve_report.py — /sec-review 완료 후 최종 보고서 생성 및 Confluence 게시
 
+[필수] /sec-review 완료 후에만 실행 가능합니다.
+       미판정(reviewed != true) findings가 존재하면 실행이 차단됩니다.
+       --force 플래그로 강제 통과 가능 (의도적 사용 시에만).
+
 사용법 (RUN_ID 모드):
     python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo>
     python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
@@ -12,6 +16,7 @@ approve_report.py — /sec-review 완료 후 최종 보고서 생성 및 Conflue
     python3 tools/approve_report.py --repo <repo> --publish
 
 동작 흐름:
+  0. [GATE] /sec-review 완료 여부 검증 — 미판정 finding 존재 시 즉시 종료
   1. findings_*.json 읽기 (RUN_ID 지정 시 해당 RUN, 미지정 시 skill별 최신)
   2. review_status: "오탐" findings → result: "양호" 로 변경
   3. 모든 파일에 approved: true, llm_checked: true 표시
@@ -35,21 +40,16 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=str(PALANTIR_DIR))
 
 
-def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
-    """
-    findings_*.json 파일을 읽어 오탐 판정 finding의 result를 "양호"로 변경하고
-    파일 수준에서 approved: true, llm_checked: true 를 설정한다.
+REVIEW_EXEMPT_RESULTS = {"양호", "양호(FP)", "해당없음", "safe"}
 
-    run_id=None 이면 레포 단위 모드 — skill별 최신 RUN_ID 파일 하나씩 선택.
-    반환: {"updated": N, "skipped": N, "total_findings": N}
-    """
+
+def _collect_findings_paths(repo: str, run_id: str | None) -> list[Path]:
+    """findings_*.json 경로 목록 수집 (apply_review_results와 동일 로직)."""
     if run_id is None:
-        # 레포 단위 모드: skill별 최신 파일 선택
-        paths = []
+        paths: list[Path] = []
         repo_dir = STATE_DIR / repo
         if not repo_dir.is_dir():
-            print(f"[WARN] 레포 경로 없음: {repo_dir}")
-            return {"updated": 0, "skipped": 0, "total_findings": 0}
+            return paths
         for skill_dir in sorted(repo_dir.iterdir()):
             if not skill_dir.is_dir():
                 continue
@@ -62,11 +62,50 @@ def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
                 if files:
                     paths.append(files[0])
                     break
+        return paths
     else:
-        pattern = f"{repo}/*/{run_id}/findings_*.json"
-        paths   = sorted(STATE_DIR.glob(pattern))
+        return sorted(STATE_DIR.glob(f"{repo}/*/{run_id}/findings_*.json"))
+
+
+def _check_review_complete(repo: str, run_id: str | None) -> list[tuple[str, str]]:
+    """
+    /sec-review 완료 여부를 검증한다.
+    reviewed != True 이고 result가 제외 목록에 없는 finding 목록을 반환한다.
+    빈 리스트 반환 시 게이트 통과.
+    """
+    paths = _collect_findings_paths(repo, run_id)
+    unreviewed: list[tuple[str, str]] = []
+
+    for path in paths:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for f in doc.get("findings", []):
+            if f.get("reviewed") is True:
+                continue
+            if f.get("result") in REVIEW_EXEMPT_RESULTS:
+                continue
+            # review_status가 "그룹병합"인 SCA 하위 finding도 제외
+            if f.get("review_status") == "그룹병합":
+                continue
+            unreviewed.append((str(path), f.get("finding_id", "UNKNOWN")))
+
+    return unreviewed
+
+
+def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
+    """
+    findings_*.json 파일을 읽어 오탐 판정 finding의 result를 "양호"로 변경하고
+    파일 수준에서 approved: true, llm_checked: true 를 설정한다.
+
+    run_id=None 이면 레포 단위 모드 — skill별 최신 RUN_ID 파일 하나씩 선택.
+    반환: {"updated": N, "skipped": N, "total_findings": N}
+    """
+    paths = _collect_findings_paths(repo, run_id)
 
     if not paths:
+        pattern = f"{repo}/*/{run_id}/findings_*.json" if run_id else f"{repo}/*/latest/findings_*.json"
         print(f"[WARN] findings 없음: state/{pattern}")
         return {"updated": 0, "skipped": 0, "total_findings": 0}
 
@@ -86,7 +125,8 @@ def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
             counts["total_findings"] += 1
             review_status = f.get("review_status")
 
-            if review_status == "오탐":
+            if review_status in ("오탐", "그룹병합"):
+                # 오탐 또는 SCA 라이브러리 그룹 하위 finding → 보고서 제외
                 if f.get("result") != "양호":
                     f["result"] = "양호"
                     modified = True
@@ -110,6 +150,10 @@ def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
                         counts["updated"] += 1
                 counts["skipped"] += 1
 
+            # 최종 result 기준으로 보고서에 포함될 건수 집계
+            if f.get("result") in ("취약", "정보"):
+                counts["reportable"] = counts.get("reportable", 0) + 1
+
         # 파일 수준 플래그 갱신
         doc["approved"]    = True
         doc["llm_checked"] = True
@@ -120,6 +164,49 @@ def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
         print(f"[OK] {rel}  (오탐→양호: {counts['updated']}건 누계)")
 
     return counts
+
+
+def _send_to_jira_gateway(repo: str, page_id: str, report_key: str) -> None:
+    """게이트웨이에 MD 페이로드를 POST — 검토 대기(pending) 티켓으로 등록."""
+    import os
+    from dotenv import load_dotenv
+    load_dotenv(PALANTIR_DIR / ".env")
+
+    gateway_url = os.getenv("JIRA_GATEWAY_URL", "").strip()
+    if not gateway_url:
+        print("      [WARN] .env에 JIRA_GATEWAY_URL 미설정 — Jira 게이트웨이 전송 생략")
+        return
+
+    # 최종 보고서 MD 읽기
+    md_path = PALANTIR_DIR / report_key
+    if not md_path.exists():
+        print(f"      [WARN] 최종 보고서 파일 없음: {md_path} — 전송 생략")
+        return
+
+    md_text = md_path.read_text(encoding="utf-8")
+    jira_project = os.getenv("JIRA_PROJECT_KEY", "")
+
+    try:
+        import urllib.request, urllib.error
+        payload = json.dumps({
+            "repo":         repo,
+            "page_id":      page_id or "",
+            "md_text":      md_text,
+            "jira_project": jira_project,
+        }, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(
+            f"{gateway_url.rstrip('/')}/api/pending",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            body = json.loads(resp.read().decode())
+        ticket_id = body.get("ticket_id", "?")
+        base = os.getenv("JIRA_GATEWAY_URL", "http://localhost:8000").rstrip("/")
+        print(f"      게이트웨이 전송 완료 — 검토 대기: {base}/review/{ticket_id}")
+    except Exception as exc:
+        print(f"      [ERROR] 게이트웨이 전송 실패: {exc}")
 
 
 def main() -> int:
@@ -135,6 +222,8 @@ def main() -> int:
                         help="Confluence 자동 게시")
     parser.add_argument("--title",   default=None,
                         help="Confluence 페이지 제목 (생략 시 {repo}-진단결과)")
+    parser.add_argument("--force",   action="store_true",
+                        help="/sec-review 완료 여부 게이트 강제 통과 (긴급 시에만 사용)")
     args = parser.parse_args()
 
     run_id   = args.run_id
@@ -142,13 +231,33 @@ def main() -> int:
     print(f"\n[approve] RUN_ID={run_label}  repo={args.repo}")
     print("=" * 60)
 
+    # 0. [GATE] /sec-review 완료 여부 강제 검증
+    if not args.force:
+        unreviewed = _check_review_complete(args.repo, run_id)
+        if unreviewed:
+            print("\n[GATE ERROR] /sec-review 미완료 — 아래 findings가 판정되지 않았습니다:")
+            for path, fid in unreviewed:
+                rel = Path(path).relative_to(PALANTIR_DIR) if Path(path).is_absolute() else path
+                print(f"  {fid}  ({rel})")
+            print()
+            print("  → /sec-review 실행 후 approve_report.py를 재실행하세요.")
+            if run_id:
+                print(f"  → /sec-review {run_id} {args.repo}")
+            else:
+                print(f"  → /sec-review {args.repo}")
+            print()
+            print("  (긴급 시 --force 플래그로 게이트 우회 가능)")
+            return 1
+    else:
+        print("\n[GATE] --force 지정 — /sec-review 완료 여부 게이트 건너뜀")
+
     # 1. 오탐 반영
-    print("\n[1/3] 오탐 판정 적용 중...")
+    print("\n[1/4] 오탐 판정 적용 중...")
     stats = apply_review_results(args.repo, run_id)
     print(f"      전체 {stats['total_findings']}건  /  오탐→양호: {stats['updated']}건  /  유지: {stats['skipped']}건")
 
     # 2. final 1차 보고서 생성 + palantir-reports 커밋
-    print("\n[2/3] final 1차 보고서 생성...")
+    print("\n[2/4] final 1차 보고서 생성...")
     gen_cmd = [
         sys.executable, "tools/generate_report.py",
         "--type",  "final",
@@ -175,22 +284,50 @@ def main() -> int:
 
     # 3. Confluence 게시 (--publish 옵션 시)
     if args.publish:
-        print("\n[3/3] 최종 보고서 생성 + Confluence 게시...")
-        cmd = [
-            sys.executable, "tools/generate_final_report.py",
-            "--repo",   args.repo,
-            "--publish",
-        ]
-        if run_id:
-            cmd += ["--run-id", run_id]
-        if args.title:
-            cmd += ["--title", args.title]
-        r = _run(cmd)
-        if r.returncode != 0:
-            print(f"[ERROR] generate_final_report.py 실패 (returncode={r.returncode})")
-            return r.returncode
+        reportable = stats.get("reportable", 0)
+        if reportable == 0:
+            print("\n[3/4] Confluence 게시 생략 — 보고서에 포함할 취약/정보 finding 없음 (전체 양호)")
+        else:
+            print(f"\n[3/4] 최종 보고서 생성 + Confluence 게시... (보고 대상 {reportable}건)")
+            cmd = [
+                sys.executable, "tools/generate_final_report.py",
+                "--repo",   args.repo,
+                "--publish",
+            ]
+            if run_id:
+                cmd += ["--run-id", run_id]
+            if args.title:
+                cmd += ["--title", args.title]
+            r = _run(cmd)
+            if r.returncode != 0:
+                print(f"[ERROR] generate_final_report.py 실패 (returncode={r.returncode})")
+                return r.returncode
+            # 보고서 컬럼 자동 갱신 (Confluence page_id → URL)
+            registry_path = PALANTIR_DIR / "docs" / ".confluence_pages.json"
+            if registry_path.exists():
+                reg = json.loads(registry_path.read_text(encoding="utf-8"))
+                today_str = date.today().strftime("%Y%m%d")
+                if run_id:
+                    report_key = f"logs/final_{args.repo}_{run_id}.md"
+                else:
+                    report_key = f"logs/final_{args.repo}_{today_str}.md"
+                page_id = reg.get(report_key)
+                if page_id:
+                    import os
+                    from dotenv import load_dotenv
+                    load_dotenv(PALANTIR_DIR / ".env")
+                    base_url = os.getenv("CONFLUENCE_BASE_URL", "https://wiki.skplanet.com")
+                    report_url = f"{base_url}/pages/viewpage.action?pageId={page_id}"
+                    print(f"\n      체크리스트 보고서 컬럼 갱신 중 ... ({report_url})")
+                    _run([sys.executable, "tools/update_ocb_plan.py",
+                          "--report", args.repo, report_url])
+                else:
+                    print(f"\n      [WARN] .confluence_pages.json에서 {report_key} 를 찾지 못해 체크리스트 갱신 생략")
+            # Jira 티켓 게이트웨이 전송
+            print(f"\n[4/4] Jira 티켓 게이트웨이 전송...")
+            _send_to_jira_gateway(args.repo, page_id or "", report_key)
     else:
-        print("\n[3/3] Confluence 게시 생략 (--publish 미지정)")
+        print("\n[3/4] Confluence 게시 생략 (--publish 미지정)")
         if run_id:
             publish_hint = (f"python3 tools/approve_report.py "
                             f"--run-id {run_id} --repo {args.repo} --publish")
@@ -204,13 +341,16 @@ def main() -> int:
     print(f"[완료] RUN_ID={run_label}  repo={args.repo}")
     print(f"  1차 보고서: {report_path}")
     print(f"  커밋 이력:  {commit_path}")
-    if args.publish:
+    if args.publish and stats.get("reportable", 0) > 0:
         if run_id:
             final_path = f"logs/final_{args.repo}_{run_id}.md"
         else:
             final_path = f"logs/final_{args.repo}_{today}.md"
         print(f"  최종 보고서: {final_path}")
         print(f"  Confluence 게시 완료")
+        print(f"  Jira 게이트웨이 전송 완료 (검토 대기)")
+    elif args.publish:
+        print(f"  Confluence 게시: 생략 (전체 양호, 보고 대상 0건)")
     print()
     return 0
 
