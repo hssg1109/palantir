@@ -33,6 +33,19 @@ shared/references/project_ocb_php_targets.md
 *.xlsxx
 *.xls
 
+### 개인 문서 ###
+docs/*.docx
+docs/*.docxx
+docs/*.pdf
+docs/*:Zone.Identifier
+docs/generate_career_doc.py
+docs/2026_유성근_*
+docs/유성근_*
+tools/build_resume_docx.py
+
+### 임시 파일 ###
+.claude/scheduled_tasks.lock
+
 ### OS ###
 .DS_Store
 Thumbs.db

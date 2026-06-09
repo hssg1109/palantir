@@ -86,6 +86,12 @@ python3 shared/scripts/scan_data_protection.py <src> \
 - **Cryptography**: 약한 알고리즘(MD5/SHA1/DES/ECB), 고정 IV/Salt
 - **PII Logging**: `logger.*` / `console.log`에 개인식별정보 포함 여부
 - **API_RESPONSE_PII**: 서비스 레이어에서 userInfo PII 필드(mdn/userName/birthDate/ciNo 등)를 마스킹 없이 응답 DTO에 직접 할당하는 패턴 — CWE-359
+- **DTO_EXPOSURE (@ToString PII)**: `@ToString`/`@Data` 클래스 내 PII 필드(mbrId/userId/email 등)가 `@ToString.Exclude` 없이 포함 — CWE-532
+
+> **DTO_EXPOSURE 기본 심각도 정책**
+> - HTTP 직렬화 경로(엔드포인트 매핑) 없이 `@ToString`만 있는 경우: **기본 Medium / 정보(Informational)**
+>   — toString() 호출 조건, 로그 저장 여부, 로그 접근 통제가 실현 여부를 결정하므로 직접적 취약점이 아닌 잠재적 조건으로 분류
+> - `취약`으로 상향 판단은 `/sec-review` 시 리뷰어가 직접 결정 (예: 배치 로그에서 실제 toString() 호출 확인, 로그가 중앙 수집되고 비개발자 접근 가능한 환경)
 
 출력: `state/<prefix>/data.json`
 

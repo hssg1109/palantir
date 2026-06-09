@@ -56,7 +56,7 @@
   "category": "파일 처리 범위 확인",
   "cwe_id": "N/A",
   "owasp_category": "A04:2021 Insecure Design",
-  "result": "정보",
+  "result": "해당없음",
   "diagnosis_method": "교차검증(수동)",
   "source": "llm-check",
   "fn_detected": false,

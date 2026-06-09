@@ -215,6 +215,105 @@ RUN_ID : <RUN_ID>
 4. 이후 플래그 입력 분기를 그대로 적용 (메모 입력 포함)
 5. 분석 중 추가 질문이 들어오면 답변 후 다시 판정 요청 — finding이 종료될 때까지 반복
 
+### 4b. SCA 일괄 처리 및 라이브러리 그룹핑
+
+SCA findings(`category: "Vulnerable Dependency (SCA)"`)는 건별 인터랙티브 판정 루프를 **생략**하고 아래 절차로 일괄 처리한다.
+
+**실행 조건**: `llm_checked: true` 이거나 finding에 `llm_reviewed_at` 필드가 존재하는 경우
+
+---
+
+**처리 절차**:
+
+#### Step 1. 라이브러리 그룹핑
+
+title 패턴 `[SCA] <groupId>:<artifactId> <version> — <CVE>` 에서 `<groupId>:<artifactId>` 를 추출하여 동일 아티팩트별로 묶는다.
+
+- 동일 `<groupId>:<artifactId>` 가 2건 이상 → **라이브러리 그룹** 으로 처리
+- 1건만 존재 → 단독 처리 (Step 3으로 바로)
+
+#### Step 2. 대표 finding 선정 (그룹인 경우)
+
+그룹 내에서 severity가 가장 높은 finding을 **대표 finding** 으로 지정한다.
+
+- 위험도 우선순위: `Critical > High > Medium > Low > Informational`
+- 동점 시: finding_id 기준 오름차순(숫자 낮은 쪽) 선택
+
+대표 finding에 아래 필드를 추가한다:
+
+```json
+{
+  "reviewed": true,
+  "review_status": "정탐",
+  "review_result": "취약",
+  "group_cves": [
+    { "finding_id": "SCA-001", "cve_id": "CVE-2022-31692", "severity": "Critical", "summary": "FORWARD/INCLUDE Dispatcher 인증 우회" },
+    { "finding_id": "SCA-004", "cve_id": "CVE-2024-22257", "severity": "High",     "summary": "인증 객체 조건 우회" }
+  ]
+}
+```
+
+- `group_cves` 에는 해당 라이브러리의 **모든 CVE** (대표 포함)를 severity 내림차순으로 포함
+- `summary` 는 title에서 CVE ID 이후 설명 부분을 추출
+
+#### Step 3. 하위 finding 병합 처리 (그룹인 경우)
+
+대표가 아닌 나머지 findings에 아래 필드를 추가한다:
+
+```json
+{
+  "reviewed": true,
+  "review_status": "그룹병합",
+  "review_result": "취약",
+  "group_primary_id": "SCA-001",
+  "review_note": "SCA-001(동일 라이브러리 최고 위험도 대표 finding)에 병합됨"
+}
+```
+
+> `그룹병합` finding은 `approve_report.py` 에서 보고서 finding 목록에서 제외되며,
+> 대표 finding의 `group_cves` 표로 통합 출력된다.
+
+#### Step 4. 단독 라이브러리 처리
+
+그룹이 없는 SCA finding(1건짜리)은 그룹 필드 없이 아래만 추가:
+
+```json
+{
+  "reviewed": true,
+  "review_status": "정탐",
+  "review_result": "취약"
+}
+```
+
+#### Step 5. 처리 완료 출력
+
+```
+[SCA 일괄 처리]
+전체 {N}건 → 대표(보고 대상) {M}건 / 그룹병합(통합) {K}건
+
+라이브러리 그룹:
+  org.springframework.security:spring-security-core — 2건 → SCA-001(Critical) 대표
+  com.fasterxml.jackson.core:jackson-databind      — 2건 → SCA-005(High) 대표
+단독:
+  mysql:mysql-connector-java (SCA-003), org.springframework:spring-core (SCA-007), ...
+```
+
+---
+
+#### Phase 2 — SCA 그룹 report_expand 규칙
+
+- `review_status: "그룹병합"` finding은 Phase 2 대상에서 **제외**
+- 대표 finding의 `report_expand` 에는 `group_cves` 데이터를 기반으로 아래 섹션을 **필수 포함**:
+
+```markdown
+## 동일 라이브러리 CVE 전체 목록
+
+| CVE ID | 심각도 | 설명 요약 |
+|--------|--------|----------|
+| CVE-2022-31692 | Critical | FORWARD/INCLUDE Dispatcher 인증 우회 |
+| CVE-2024-22257 | High | 인증 객체 조건 우회 |
+```
+
 ### 5. 저장 형식
 
 finding 객체에 아래 필드를 추가/갱신한다:
@@ -384,3 +483,15 @@ Confluence 게시 포함:
 - 소스 파일 경로: `testbed/<repo>/` 기준으로 `scope.affected_file` 을 조합
 - **Phase 2는 자율 완주** — 완료 전 어떤 확인도 없이 모든 정탐 finding에 대해 순서대로 실행
 - Phase 2 완료 전까지 `approve_report.py` 실행 금지 (report_expand 미생성 상태로 보고서 생성되면 review_note 폴백 사용됨)
+
+#### §N. evidence_trail 교차검증 (누락 판정 전 필수)
+
+**원시 스캔 파일(`xss.json`, `injection.json` 등)의 `취약` 건수 > `findings_*.json`의 `findings[]` 건수인 경우,
+"finding 누락"으로 판정하기 전에 반드시 아래 절차를 먼저 수행한다.**
+
+1. `findings_*.json`의 `evidence_trail[]` 배열을 확인한다
+2. `evidence_trail[]`에 `fp_corrected: true` + 해당 endpoint 항목이 존재하면 → LLM-Check 단계에서 FP로 올바르게 제외된 것임 → **누락 아님, 추가 불필요**
+3. `evidence_trail[]`에도 없고 `findings[]`에도 없는 경우에만 → 실제 누락으로 판단하고 수동 조사 진행
+
+> **배경**: LLM-Check가 원시 스캔 결과를 FP 판정하면 해당 항목은 `findings[]`가 아닌 `evidence_trail[]`에만 기록된다.
+> `evidence_trail[]` 확인 없이 숫자 차이만으로 누락 판정 시 올바르게 제외된 FP를 재추가하는 오류가 발생한다.

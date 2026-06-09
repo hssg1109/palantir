@@ -336,6 +336,24 @@ def main() -> int:
                             f"--repo {args.repo} --publish")
         print(f"      게시하려면: {publish_hint}")
 
+    # 진단이력 업로드 (VULCHK/audit_result)
+    print("\n[audit] 진단이력 업로드 중 (VULCHK/audit_result)...")
+    try:
+        import importlib.util, os as _os
+        spec = importlib.util.spec_from_file_location(
+            "push_audit_result",
+            PALANTIR_DIR / "tools" / "push_audit_result.py",
+        )
+        _par = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(_par)
+        _par.push(args.repo, run_id)
+    except Exception as _exc:
+        _hint = f"python3 tools/push_audit_result.py --repo {args.repo}"
+        if run_id:
+            _hint += f" --run-id {run_id}"
+        print(f"  [WARN] 업로드 실패: {_exc}")
+        print(f"  수동 실행: {_hint}")
+
     # 완료 요약
     print("\n" + "=" * 60)
     print(f"[완료] RUN_ID={run_label}  repo={args.repo}")

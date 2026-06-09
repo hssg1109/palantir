@@ -61,6 +61,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import zipfile
 import urllib.error
 import urllib.request
 import uuid
@@ -518,6 +519,276 @@ def _find_gradlew(project_dir: Path) -> Optional[Path]:
         if candidate.exists():
             return candidate
     return None
+
+
+# ─────────────────────────────────────────────────────────────────
+# Gradle 환경 자동 보정 (WSL2 / Windows clone 대응)
+# ─────────────────────────────────────────────────────────────────
+
+def _block_end(text: str, open_pos: int) -> int:
+    """open_pos 위치의 '{' 에서 시작하는 블록의 닫는 '}' 인덱스를 반환."""
+    depth = 0
+    for i in range(open_pos, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return i
+    return len(text) - 1
+
+
+def _fix_gradlew_crlf(project_dir: Path) -> None:
+    """gradlew 의 CRLF line endings 를 LF 로 변환한다 (Windows clone 대응)."""
+    gradlew = project_dir / "gradlew"
+    if not gradlew.exists():
+        return
+    raw = gradlew.read_bytes()
+    if b"\r" in raw:
+        fixed = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        gradlew.write_bytes(fixed)
+        print("  [prep] gradlew: CRLF → LF 변환 완료")
+
+
+def _fix_settings_gradle(settings_file: Path) -> None:
+    """settings.gradle(.kts) 의 Nexus-only pluginManagement 와 refreshVersions 를 보정한다.
+
+    - pluginManagement.repositories 가 Nexus URL 만 포함 시 → gradlePluginPortal + mavenCentral 로 교체
+    - de.fayard.refreshVersions 플러그인 블록 → 주석 처리 (외부망 미접속 환경 대응)
+    """
+    try:
+        text = settings_file.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return
+
+    original = text
+    nexus_re = re.compile(r"https?://[^\s\"']*nexus[^\s\"']*", re.IGNORECASE)
+
+    # ── pluginManagement 블록 내 repositories 수정 ─────────────────
+    pm_idx = text.find("pluginManagement")
+    if pm_idx != -1:
+        brace_idx = text.find("{", pm_idx)
+        if brace_idx != -1:
+            pm_end = _block_end(text, brace_idx)
+            pm_block = text[brace_idx : pm_end + 1]
+
+            if nexus_re.search(pm_block):
+                repo_idx = pm_block.find("repositories")
+                if repo_idx != -1:
+                    repo_brace = pm_block.find("{", repo_idx)
+                    if repo_brace != -1:
+                        repo_end = _block_end(pm_block, repo_brace)
+                        new_repos = "{\n        gradlePluginPortal()\n        mavenCentral()\n    }"
+                        pm_block = pm_block[:repo_brace] + new_repos + pm_block[repo_end + 1:]
+                        text = text[:brace_idx] + pm_block + text[pm_end + 1:]
+                        print(f"  [prep] {settings_file.name}: pluginManagement.repositories → gradlePluginPortal + mavenCentral")
+
+    # ── refreshVersions 플러그인 블록 주석 처리 ─────────────────────
+    # 이미 모든 라인이 주석 처리된 경우는 매칭 제외
+    rv_re = re.compile(
+        r"^(?!\s*//)(\s*plugins\s*\{[^}]*de\.fayard\.refreshVersions[^}]*\})",
+        re.MULTILINE | re.DOTALL,
+    )
+
+    def _comment_out(m: re.Match) -> str:
+        return "\n".join("// " + line for line in m.group(0).splitlines())
+
+    new_text, n = rv_re.subn(_comment_out, text)
+    if n > 0:
+        text = new_text
+        print(f"  [prep] {settings_file.name}: refreshVersions 블록 주석 처리")
+
+    if text != original:
+        settings_file.write_text(text, encoding="utf-8")
+
+
+def _fix_build_gradle_repos(build_file: Path) -> None:
+    """build.gradle(.kts) 의 Nexus-only repositories 블록을 mavenCentral + mavenLocal 로 교체한다."""
+    try:
+        text = build_file.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return
+
+    original = text
+    nexus_re = re.compile(r"https?://[^\s\"']*nexus[^\s\"']*", re.IGNORECASE)
+
+    # top-level repositories {} 블록만 대상 (pluginManagement 하위 제외)
+    search_start = 0
+    modified = False
+    while True:
+        repo_match = re.search(r"\brepos(?:itories)?\s*\{", text[search_start:])
+        if not repo_match:
+            break
+        abs_repo_start = search_start + repo_match.start()
+        brace_open = search_start + repo_match.end() - 1
+        brace_close = _block_end(text, brace_open)
+        repo_block = text[brace_open : brace_close + 1]
+
+        # pluginManagement 하위인지 확인 (단순: 앞에 pluginManagement 가 200자 이내에 있으면 건너뜀)
+        prefix = text[max(0, abs_repo_start - 200) : abs_repo_start]
+        if "pluginManagement" in prefix and prefix.rfind("pluginManagement") > prefix.rfind("}"):
+            search_start = brace_close + 1
+            continue
+
+        if nexus_re.search(repo_block):
+            new_block = "{\n    mavenCentral()\n    mavenLocal()\n}"
+            text = text[:brace_open] + new_block + text[brace_close + 1:]
+            print(f"  [prep] {build_file.name}: repositories Nexus → mavenCentral + mavenLocal")
+            modified = True
+            # 블록 길이가 바뀌었으므로 처음부터 재탐색
+            search_start = 0
+        else:
+            search_start = brace_close + 1
+
+    if modified:
+        build_file.write_text(text, encoding="utf-8")
+
+
+def _needs_refreshversions(project_dir: Path) -> bool:
+    """versions.properties 가 존재하고 build.gradle.kts 에 버전 없는 플러그인이 있으면 True."""
+    if not (project_dir / "versions.properties").exists():
+        return False
+    build = project_dir / "build.gradle.kts"
+    if not build.exists():
+        build = project_dir / "build.gradle"
+    if not build.exists():
+        return False
+    text = build.read_text(encoding="utf-8", errors="replace")
+    # plugins 블록 안에 버전 없이 id("...") 만 있는 줄 탐지
+    plugins_match = re.search(r"plugins\s*\{", text)
+    if not plugins_match:
+        return False
+    brace_open = plugins_match.end() - 1
+    brace_close = _block_end(text, brace_open)
+    plugins_block = text[brace_open : brace_close + 1]
+    # id("...") 가 있고 version 이 없는 줄이 하나라도 있으면 True
+    for line in plugins_block.splitlines():
+        stripped = line.strip()
+        if re.search(r'\bid\s*\(', stripped) and "version" not in stripped and not stripped.startswith("//"):
+            return True
+    return False
+
+
+def _enable_refreshversions(settings_file: Path) -> None:
+    """settings.gradle(.kts) 에서 refreshVersions 플러그인 블록을 활성화한다.
+
+    - 이미 활성화된 경우: 아무것도 하지 않음
+    - 주석처리된 경우: 주석 해제
+    - 없는 경우: plugins { id("de.fayard.refreshVersions") version "0.40.2" } 블록 추가
+    """
+    try:
+        text = settings_file.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return
+
+    # 이미 활성화된 경우 (주석 아닌 줄에 refreshVersions 선언 존재)
+    already_active = any(
+        "de.fayard.refreshVersions" in line and not line.strip().startswith("//")
+        for line in text.splitlines()
+    )
+    if already_active:
+        return
+
+    # 파일 끝에 개행이 없으면 추가 (마지막 줄이 regex에서 누락되는 것 방지)
+    if not text.endswith("\n"):
+        text = text + "\n"
+
+    original = text
+
+    # 주석처리된 블록 해제: de.fayard.refreshVersions 가 포함된 연속 주석 블록 찾아 주석 제거
+    rv_commented_re = re.compile(
+        r"((?:^[ \t]*//[^\n]*\n)*[ \t]*//[^\n]*de\.fayard\.refreshVersions[^\n]*\n(?:[ \t]*//[^\n]*\n)*)",
+        re.MULTILINE,
+    )
+    m = rv_commented_re.search(text)
+    if m:
+        uncommented = re.sub(r"^[ \t]*// ?", "", m.group(0), flags=re.MULTILINE)
+        text = text[:m.start()] + uncommented + text[m.end():]
+    else:
+        # 블록 자체가 없음 → 파일 끝에 추가
+        text = text.rstrip() + '\n\nplugins {\n    id("de.fayard.refreshVersions") version "0.40.2"\n}\n'
+
+    if text != original:
+        settings_file.write_text(text, encoding="utf-8")
+        print(f"  [prep] {settings_file.name}: refreshVersions 플러그인 활성화")
+
+
+def _detect_installed_java_version() -> Optional[int]:
+    """현재 환경의 Java major 버전을 반환한다. 감지 실패 시 None."""
+    try:
+        result = subprocess.run(
+            ["java", "-version"], capture_output=True, text=True, timeout=10,
+        )
+        # java -version 출력은 stderr 로 나옴
+        output = result.stderr or result.stdout
+        m = re.search(r'"(\d+)(?:\.(\d+))?', output)
+        if m:
+            major = int(m.group(1))
+            if major == 1 and m.group(2):  # Java 8: "1.8.x" 형식
+                major = int(m.group(2))
+            return major
+    except Exception:
+        pass
+    return None
+
+
+def _fix_java_toolchain(build_file: Path, installed_version: int) -> None:
+    """build.gradle(.kts) 의 JavaLanguageVersion.of(N) 을 설치된 버전으로 낮춘다."""
+    try:
+        text = build_file.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return
+
+    pattern = re.compile(r"JavaLanguageVersion\.of\((\d+)\)")
+
+    def _clamp_version(m: re.Match) -> str:
+        declared = int(m.group(1))
+        if declared > installed_version:
+            return f"JavaLanguageVersion.of({installed_version})"
+        return m.group(0)
+
+    new_text, n = pattern.subn(_clamp_version, text)
+    if n > 0 and new_text != text:
+        build_file.write_text(new_text, encoding="utf-8")
+        print(f"  [prep] {build_file.name}: Java toolchain → {installed_version} (설치 버전 기준 자동 조정)")
+
+
+def _prepare_gradle_env(project_dir: Path) -> None:
+    """gradlew 실행 전 WSL2/Windows-clone 환경 호환성 자동 보정.
+
+    1. gradlew CRLF → LF 변환
+    2. settings.gradle(.kts): Nexus-only pluginManagement → gradlePluginPortal + mavenCentral
+    3. settings.gradle(.kts): refreshVersions 블록 — 필요 시 활성화, 불필요 시 주석처리
+    4. build.gradle(.kts): Nexus-only repositories → mavenCentral + mavenLocal
+    5. build.gradle(.kts): Java toolchain 버전 → 설치된 JDK 버전으로 자동 다운그레이드
+    """
+    print("  [prep] Gradle 환경 호환성 보정 중...")
+    _fix_gradlew_crlf(project_dir)
+
+    needs_rv = _needs_refreshversions(project_dir)
+
+    for sf in (
+        list(project_dir.rglob("settings.gradle.kts"))
+        + list(project_dir.rglob("settings.gradle"))
+    ):
+        _fix_settings_gradle(sf)
+        if needs_rv:
+            _enable_refreshversions(sf)
+
+    build_files = (
+        list(project_dir.rglob("build.gradle.kts"))
+        + list(project_dir.rglob("build.gradle"))
+    )
+    for bf in build_files:
+        _fix_build_gradle_repos(bf)
+
+    installed_java = _detect_installed_java_version()
+    if installed_java:
+        print(f"  [prep] 설치된 Java 버전: {installed_java}")
+        for bf in build_files:
+            _fix_java_toolchain(bf, installed_java)
+    else:
+        print("  [prep] Java 버전 감지 실패 — toolchain 버전 조정 생략", file=sys.stderr)
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -1249,6 +1520,370 @@ def _write_llm_summary(output_data: dict, out_path: "Path") -> None:
 
 
 # ─────────────────────────────────────────────────────────────────
+# P0: gradle-wrapper.jar 자동 복구
+# ─────────────────────────────────────────────────────────────────
+
+def _recover_gradle_wrapper_jar(project_dir: Path) -> bool:
+    """gradle-wrapper.jar 누락 시 복구한다.
+
+    복구 우선순위:
+    1. `gradle wrapper` 명령 (시스템 gradle 있을 때)
+    2. GitHub raw에서 wrapper JAR 직접 다운로드
+    """
+    import urllib.request
+
+    wrapper_jar = project_dir / "gradle" / "wrapper" / "gradle-wrapper.jar"
+    if wrapper_jar.exists():
+        return True
+
+    props_file = project_dir / "gradle" / "wrapper" / "gradle-wrapper.properties"
+    gradle_version: Optional[str] = None
+    if props_file.exists():
+        for line in props_file.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.search(r"distributionUrl=.*gradle-([0-9]+\.[0-9]+(?:\.[0-9]+)?)-", line)
+            if m:
+                gradle_version = m.group(1)
+                break
+
+    if not gradle_version:
+        print("  ⚠️  [P0] gradle-wrapper.properties에서 버전 확인 불가 — wrapper 복구 스킵", file=sys.stderr)
+        return False
+
+    print(f"  [P0] gradle-wrapper.jar 누락 감지 (gradle {gradle_version}) — 복구 시도")
+
+    # 방법 1: 시스템 gradle 명령
+    try:
+        result = subprocess.run(
+            ["gradle", "wrapper", f"--gradle-version={gradle_version}"],
+            cwd=str(project_dir),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if wrapper_jar.exists():
+            print(f"  [P0] gradle-wrapper.jar 복구 완료 (gradle wrapper 명령)")
+            return True
+    except FileNotFoundError:
+        pass  # gradle 바이너리 없음 → 방법 2로
+    except subprocess.TimeoutExpired:
+        print("  ⚠️  [P0] gradle wrapper 명령 타임아웃", file=sys.stderr)
+
+    # 방법 2: GitHub raw에서 직접 다운로드
+    jar_url = (
+        f"https://raw.githubusercontent.com/gradle/gradle"
+        f"/v{gradle_version}/gradle/wrapper/gradle-wrapper.jar"
+    )
+    print(f"  [P0] GitHub에서 직접 다운로드: {jar_url}")
+    try:
+        wrapper_jar.parent.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(jar_url, timeout=60) as resp:
+            wrapper_jar.write_bytes(resp.read())
+        if wrapper_jar.exists() and wrapper_jar.stat().st_size > 1024:
+            print(f"  [P0] gradle-wrapper.jar 다운로드 완료 ({wrapper_jar.stat().st_size // 1024} KB)")
+            return True
+        wrapper_jar.unlink(missing_ok=True)
+        print("  ⚠️  [P0] 다운로드 파일 크기 비정상 — 복구 실패", file=sys.stderr)
+        return False
+    except Exception as e:
+        print(f"  ⚠️  [P0] wrapper JAR 다운로드 실패: {e}", file=sys.stderr)
+        return False
+
+
+# ─────────────────────────────────────────────────────────────────
+# P3: Ant/JAR 스캔 지원 (WEB-INF/lib, lib 폴더 내 JAR 직접 분석)
+# ─────────────────────────────────────────────────────────────────
+
+def _detect_ant(project_dir: Path) -> Optional[Path]:
+    """build.xml 이 존재하고 pom.xml / gradlew 가 없으면 Ant 프로젝트로 판단."""
+    build_xml = project_dir / "build.xml"
+    if not build_xml.exists():
+        return None
+    if (project_dir / "pom.xml").exists():
+        return None
+    if (project_dir / "gradlew").exists() or (project_dir / "gradlew.bat").exists():
+        return None
+    return build_xml
+
+
+def _jar_maven_coords(jar_path: Path) -> Optional[tuple[str, str, str]]:
+    """JAR 내 META-INF/maven/*/pom.properties 에서 Maven coordinates 추출."""
+    try:
+        with zipfile.ZipFile(jar_path, "r") as z:
+            for name in z.namelist():
+                if name.startswith("META-INF/maven/") and name.endswith("pom.properties"):
+                    props: dict[str, str] = {}
+                    for line in z.read(name).decode("utf-8", errors="ignore").splitlines():
+                        if "=" in line and not line.startswith("#"):
+                            k, _, v = line.partition("=")
+                            props[k.strip()] = v.strip()
+                    g = props.get("groupId", "").strip()
+                    a = props.get("artifactId", "").strip()
+                    v = props.get("version", "").strip()
+                    if g and a and v:
+                        return (g, a, v)
+    except Exception:
+        pass
+    return None
+
+
+def _scan_jar_libs(project_dir: Path) -> set[tuple[str, str, str]]:
+    """WEB-INF/lib, lib 폴더 내 JAR 파일에서 Maven coordinates 추출."""
+    search_dirs = [
+        project_dir / "WebContent" / "WEB-INF" / "lib",
+        project_dir / "WEB-INF" / "lib",
+        project_dir / "lib",
+        project_dir / "libs",
+    ]
+    coords: set[tuple[str, str, str]] = set()
+    skipped: list[str] = []
+
+    for lib_dir in search_dirs:
+        if not lib_dir.is_dir():
+            continue
+        for jar in sorted(lib_dir.glob("*.jar")):
+            result = _jar_maven_coords(jar)
+            if result:
+                coords.add(result)
+            else:
+                skipped.append(jar.name)
+
+    if skipped:
+        print(f"  [prep] Maven metadata 없음 (커스텀 JAR, OSV 조회 생략): {len(skipped)}건")
+        for name in skipped[:10]:
+            print(f"    - {name}")
+        if len(skipped) > 10:
+            print(f"    ... 외 {len(skipped) - 10}건")
+
+    return coords
+
+
+# ─────────────────────────────────────────────────────────────────
+# P2: Maven 지원 (mvnw / pom.xml 직접 파싱 fallback)
+# ─────────────────────────────────────────────────────────────────
+
+def _detect_maven(project_dir: Path) -> Optional[Path]:
+    """pom.xml + mvnw/mvnw.cmd 존재 시 mvnw 경로 반환."""
+    if not (project_dir / "pom.xml").exists():
+        return None
+    for name in ("mvnw", "mvnw.cmd"):
+        candidate = project_dir / name
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _detect_pom_only(project_dir: Path) -> bool:
+    """mvnw 없이 pom.xml만 존재하는 경우 True."""
+    return (project_dir / "pom.xml").exists() and _detect_maven(project_dir) is None
+
+
+def _fix_mvnw_crlf(mvnw: Path) -> None:
+    """mvnw CRLF → LF 변환 (Windows clone 대응)."""
+    try:
+        raw = mvnw.read_bytes()
+        if b"\r" in raw:
+            mvnw.write_bytes(raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
+            print("  [prep] mvnw: CRLF → LF 변환 완료")
+    except Exception:
+        pass
+
+
+_KNOWN_PRIVATE_GROUP_IDS = {
+    "com.oracle",
+    "com.oracle.ojdbc",
+    "com.oracle.database",
+    "com.oracle.database.nls",
+    "com.ibm.db2",
+    "com.microsoft.sqlserver",
+}
+
+
+def _fix_pom_xml_repos(project_dir: Path) -> None:
+    """pom.xml 의 Nexus-only <repositories>/<pluginRepositories> 블록을 Maven Central 로 교체하고
+    Maven Central 미등재 비공개 의존성(Oracle JDBC 등)을 provided scope 로 변경한다."""
+    nexus_re = re.compile(r"nexus", re.IGNORECASE)
+
+    for pom_file in project_dir.rglob("pom.xml"):
+        try:
+            text = pom_file.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        original = text
+
+        # 1. <repositories> / <pluginRepositories> Nexus → Maven Central
+        repos_block_re = re.compile(r"<repositories>.*?</repositories>", re.DOTALL)
+        def _replace_repos(m: re.Match) -> str:
+            if nexus_re.search(m.group(0)):
+                return (
+                    "<repositories>\n"
+                    "        <repository>\n"
+                    "            <id>central</id>\n"
+                    "            <url>https://repo.maven.apache.org/maven2</url>\n"
+                    "        </repository>\n"
+                    "    </repositories>"
+                )
+            return m.group(0)
+        text = repos_block_re.sub(_replace_repos, text)
+
+        plugin_repos_re = re.compile(r"<pluginRepositories>.*?</pluginRepositories>", re.DOTALL)
+        def _replace_plugin_repos(m: re.Match) -> str:
+            if nexus_re.search(m.group(0)):
+                return (
+                    "<pluginRepositories>\n"
+                    "        <pluginRepository>\n"
+                    "            <id>central</id>\n"
+                    "            <url>https://repo.maven.apache.org/maven2</url>\n"
+                    "        </pluginRepository>\n"
+                    "    </pluginRepositories>"
+                )
+            return m.group(0)
+        text = plugin_repos_re.sub(_replace_plugin_repos, text)
+
+        # 2. Maven Central 미등재 비공개 의존성 블록 제거 (provided scope도 Maven이 resolution 시도)
+        #    com.oracle:ojdbc6 등 독점 드라이버는 OSV.dev에 등재 안 되므로 SCA 목적상 제거해도 무방
+        dep_block_re = re.compile(r"\s*<dependency>.*?</dependency>", re.DOTALL)
+        def _remove_private_dep(m: re.Match) -> str:
+            block = m.group(0)
+            # XML 주석 안의 블록은 건너뜀 (<!-- ... --> 안에 있으면 패턴 불일치하므로 안전)
+            gid_m = re.search(r"<groupId>\s*([^<]+)\s*</groupId>", block)
+            if not gid_m:
+                return block
+            gid = gid_m.group(1).strip()
+            if gid not in _KNOWN_PRIVATE_GROUP_IDS:
+                return block
+            # 이미 system scope(local JAR 직접 참조)면 건드리지 않음
+            scope_m = re.search(r"<scope>\s*([^<]+)\s*</scope>", block)
+            if scope_m and scope_m.group(1).strip() == "system":
+                return block
+            aid_m = re.search(r"<artifactId>\s*([^<]+)\s*</artifactId>", block)
+            aid = aid_m.group(1).strip() if aid_m else "?"
+            print(f"  [prep] {pom_file.name}: {gid}:{aid} 제거 (Maven Central 미등재, SCA 대상 아님)")
+            return ""
+        text = dep_block_re.sub(_remove_private_dep, text)
+
+        if text != original:
+            pom_file.write_text(text, encoding="utf-8")
+            if nexus_re.search(original):
+                print(f"  [prep] {pom_file.name}: repositories Nexus → Maven Central")
+
+
+# Maven dependency:tree 출력 파싱 정규식
+# [INFO] +- groupId:artifactId:type:version:scope
+# [INFO] |  \- groupId:artifactId:type:version:scope
+_MAVEN_DEP_RE = re.compile(
+    r"\[INFO\]\s+[+\\ |`-]+\s+"
+    r"([A-Za-z0-9._\-]+)"   # groupId
+    r":([A-Za-z0-9._\-]+)"  # artifactId
+    r":[A-Za-z0-9._\-]+"    # type (jar, war, ...)
+    r":([A-Za-z0-9._\-]+)"  # version
+    r":[A-Za-z0-9._\-]+"    # scope
+)
+
+
+def _parse_maven_dep_tree(output: str) -> set[tuple[str, str, str]]:
+    """Maven dependency:tree 출력 파싱 → (groupId, artifactId, version) Set."""
+    deps: set[tuple[str, str, str]] = set()
+    for line in output.splitlines():
+        m = _MAVEN_DEP_RE.search(line)
+        if m:
+            deps.add((m.group(1), m.group(2), m.group(3)))
+    return deps
+
+
+def _run_maven_dep_tree(project_dir: Path, mvnw: Path, timeout: int = 300) -> Optional[str]:
+    """./mvnw dependency:tree 실행 → stdout+stderr 반환. 실패 시 None."""
+    _fix_mvnw_crlf(mvnw)
+    _fix_pom_xml_repos(project_dir)
+    try:
+        os.chmod(mvnw, 0o755)
+    except Exception:
+        pass
+
+    cmd = [str(mvnw), "dependency:tree", "-DoutputType=text", "--batch-mode", "--no-transfer-progress"]
+    print(f"  실행: mvnw dependency:tree ...")
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(project_dir),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        combined = proc.stdout + proc.stderr
+        if proc.returncode != 0:
+            print(f"  ⚠️  mvnw 비정상 종료 (rc={proc.returncode})", file=sys.stderr)
+            for line in proc.stderr.strip().splitlines()[:5]:
+                print(f"     {line}", file=sys.stderr)
+        return combined if combined.strip() else None
+    except subprocess.TimeoutExpired:
+        print(f"  ❌ mvnw 타임아웃 ({timeout}초)", file=sys.stderr)
+        return None
+    except FileNotFoundError as e:
+        print(f"  ❌ mvnw 실행 불가: {e}", file=sys.stderr)
+        return None
+
+
+def _parse_pom_xml_deps(project_dir: Path) -> set[tuple[str, str, str]]:
+    """pom.xml 직접 파싱 — 명시적 버전이 있는 의존성만 추출 (mvnw 실패 시 fallback)."""
+    import xml.etree.ElementTree as ET
+    pom = project_dir / "pom.xml"
+    if not pom.exists():
+        return set()
+    try:
+        root = ET.parse(str(pom)).getroot()
+    except Exception as e:
+        print(f"  ⚠️  pom.xml 파싱 실패: {e}", file=sys.stderr)
+        return set()
+
+    ns_prefix = ""
+    if root.tag.startswith("{"):
+        ns_prefix = root.tag.split("}")[0] + "}"
+
+    def t(name: str) -> str:
+        return f"{ns_prefix}{name}"
+
+    # <properties> 에서 버전 변수 추출
+    props: dict[str, str] = {}
+    props_el = root.find(t("properties"))
+    if props_el is not None:
+        for child in props_el:
+            tag = child.tag.replace(ns_prefix, "")
+            if child.text and not child.text.startswith("${"):
+                props[f"${{{tag}}}"] = child.text.strip()
+
+    # dependencyManagement 버전 맵
+    version_map: dict[tuple[str, str], str] = {}
+    dm = root.find(f".//{t('dependencyManagement')}/{t('dependencies')}")
+    if dm is not None:
+        for dep in dm.findall(t("dependency")):
+            gid = (dep.findtext(t("groupId")) or "").strip()
+            aid = (dep.findtext(t("artifactId")) or "").strip()
+            ver = (dep.findtext(t("version")) or "").strip()
+            ver = props.get(ver, ver)
+            if gid and aid and ver and not ver.startswith("${"):
+                version_map[(gid, aid)] = ver
+
+    deps: set[tuple[str, str, str]] = set()
+    for dep in root.findall(f".//{t('dependencies')}/{t('dependency')}"):
+        gid = (dep.findtext(t("groupId")) or "").strip()
+        aid = (dep.findtext(t("artifactId")) or "").strip()
+        ver = (dep.findtext(t("version")) or "").strip()
+        scope = (dep.findtext(t("scope")) or "compile").strip().lower()
+        if scope == "test":
+            continue
+        if not gid or not aid:
+            continue
+        ver = props.get(ver, ver)
+        if not ver or ver.startswith("${"):
+            ver = version_map.get((gid, aid), "")
+        if not ver or ver.startswith("${"):
+            continue  # 버전 불명 — 스킵
+        deps.add((gid, aid, ver))
+    return deps
+
+
+# ─────────────────────────────────────────────────────────────────
 # 메인 파이프라인
 # ─────────────────────────────────────────────────────────────────
 
@@ -1346,12 +1981,162 @@ def main() -> None:
         _write_llm_summary(output_data, args.output)
         return
 
+    # Maven 프로젝트(pom.xml) → Maven SCA로 전환
+    mvnw = _detect_maven(source_dir)
+    pom_only = _detect_pom_only(source_dir)
+    if mvnw is not None or pom_only:
+        print(f"\n=== scan_sca_gradle_tree.py — Maven SCA 분석 ===")
+        print(f"소스: {source_dir}")
+        if mvnw:
+            print(f"mvnw: {mvnw}")
+        else:
+            print("mvnw: 없음 — pom.xml 직접 파싱으로 진행")
+
+        job_id = str(uuid.uuid4())
+        print(f"JobID: {job_id[:8]}")
+
+        maven_deps: set[tuple[str, str, str]] = set()
+
+        if mvnw is not None:
+            print("\n[Step 1] Maven 의존성 트리 추출 중...")
+            maven_output = _run_maven_dep_tree(source_dir, mvnw, timeout=args.gradle_timeout)
+            if maven_output:
+                maven_deps = _parse_maven_dep_tree(maven_output)
+                print(f"  → mvnw 실행 완료, 의존성: {len(maven_deps)}건 (전이 포함)")
+            if not maven_deps:
+                print("  ⚠️  mvnw dep tree 파싱 결과 없음 → pom.xml 직접 파싱으로 fallback")
+
+        if not maven_deps:
+            print("\n[Step 1] pom.xml 직접 파싱 중...")
+            maven_deps = _parse_pom_xml_deps(source_dir)
+            print(f"  → pom.xml 직접 파싱: {len(maven_deps)}건 (직접 의존성, 명시 버전만)")
+
+        if not maven_deps:
+            print("  ❌ Maven 의존성 파싱 실패 — 명시적 버전이 있는 의존성이 없습니다.", file=sys.stderr)
+            sys.exit(1)
+
+        print("\n[Step 2] OSV.dev 취약점 조회 중...")
+        maven_osv = _query_osv_batch(sorted(maven_deps), batch_size=_OSV_BATCH_SIZE)
+        maven_vuln_count = len(maven_osv)
+        maven_cve_count = sum(len(r["vulns"]) for r in maven_osv)
+        print(f"  → 취약 패키지: {maven_vuln_count}건, 총 CVE: {maven_cve_count}건")
+
+        kev_set_mv: set[str] = set()
+        if not args.no_kev:
+            print("\n[Step 3] CISA KEV 조회 중...")
+            kev_set_mv = _load_cisa_kev()
+
+        print(f"\n[Step 4] findings 생성 (CVSS ≥ {args.cvss_threshold})...")
+        maven_findings, maven_summary = _build_findings(maven_osv, kev_set_mv, args.cvss_threshold)
+        maven_kev_count = sum(1 for f in maven_findings if f["in_kev"])
+
+        print(f"\n[결과 요약]")
+        print(f"  전체 의존성:    {len(maven_deps)}건")
+        print(f"  취약 패키지:    {maven_vuln_count}건")
+        print(f"  전체 CVE:       {maven_cve_count}건")
+        print(f"  High/Critical:  {maven_summary['취약']}건 (CVSS ≥ {args.cvss_threshold})")
+        print(f"  CISA KEV 등재:  {maven_kev_count}건")
+
+        maven_output_data = _build_output(
+            source_dir=str(source_dir),
+            project_name=args.project,
+            job_id=job_id,
+            total_deps=len(maven_deps),
+            deps_with_vuln=maven_vuln_count,
+            total_cve=maven_cve_count,
+            kev_count=maven_kev_count,
+            cvss_threshold=args.cvss_threshold,
+            findings=maven_findings,
+            summary=maven_summary,
+        )
+        scan_method = "maven_mvnw" if mvnw is not None else "maven_pom_xml"
+        maven_output_data["source_tool"] = "SCA-Maven"
+        maven_output_data.setdefault("metadata", {})
+        maven_output_data["metadata"]["scan_method"] = scan_method
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(
+            json.dumps(maven_output_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"\n결과 저장: {args.output}")
+        _write_llm_summary(maven_output_data, args.output)
+        return
+
+    # P3: Ant 프로젝트 — WEB-INF/lib JAR 직접 스캔
+    ant_build_xml = _detect_ant(source_dir)
+    if ant_build_xml:
+        print(f"\n=== scan_sca_gradle_tree.py — Ant/JAR SCA 분석 ===")
+        print(f"소스: {source_dir}")
+        print(f"build.xml: {ant_build_xml}")
+
+        job_id = str(uuid.uuid4())
+        print(f"JobID: {job_id[:8]}")
+
+        print("\n[Step 1] JAR 라이브러리 Maven coordinates 추출 중...")
+        ant_deps = _scan_jar_libs(source_dir)
+        print(f"  → Maven metadata 확인된 의존성: {len(ant_deps)}건")
+
+        if not ant_deps:
+            print("  ❌ Maven metadata가 있는 JAR 없음 — SCA 불가", file=sys.stderr)
+            sys.exit(1)
+
+        print("\n[Step 2] OSV.dev 취약점 조회 중...")
+        ant_osv = _query_osv_batch(sorted(ant_deps), batch_size=_OSV_BATCH_SIZE)
+        ant_vuln_count = len(ant_osv)
+        ant_cve_count = sum(len(r["vulns"]) for r in ant_osv)
+        print(f"  → 취약 패키지: {ant_vuln_count}건, 총 CVE: {ant_cve_count}건")
+
+        kev_set_ant: set[str] = set()
+        if not args.no_kev:
+            print("\n[Step 3] CISA KEV 조회 중...")
+            kev_set_ant = _load_cisa_kev()
+
+        print(f"\n[Step 4] findings 생성 (CVSS ≥ {args.cvss_threshold})...")
+        ant_findings, ant_summary = _build_findings(ant_osv, kev_set_ant, args.cvss_threshold)
+        ant_kev_count = sum(1 for f in ant_findings if f["in_kev"])
+
+        print(f"\n[결과 요약]")
+        print(f"  전체 의존성:    {len(ant_deps)}건")
+        print(f"  취약 패키지:    {ant_vuln_count}건")
+        print(f"  전체 CVE:       {ant_cve_count}건")
+        print(f"  High/Critical:  {ant_summary['취약']}건 (CVSS ≥ {args.cvss_threshold})")
+        print(f"  CISA KEV 등재:  {ant_kev_count}건")
+
+        ant_output_data = _build_output(
+            source_dir=str(source_dir),
+            project_name=args.project,
+            job_id=job_id,
+            total_deps=len(ant_deps),
+            deps_with_vuln=ant_vuln_count,
+            total_cve=ant_cve_count,
+            kev_count=ant_kev_count,
+            cvss_threshold=args.cvss_threshold,
+            findings=ant_findings,
+            summary=ant_summary,
+        )
+        ant_output_data["source_tool"] = "SCA-Ant"
+        ant_output_data.setdefault("metadata", {})
+        ant_output_data["metadata"]["scan_method"] = "ant_jar_scan"
+
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(
+            json.dumps(ant_output_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        print(f"\n결과 저장: {args.output}")
+        _write_llm_summary(ant_output_data, args.output)
+        return
+
     # Gradle 프로젝트(기존 동작)
     gradlew = _find_gradlew(source_dir)
     if not gradlew:
         print(f"❌ gradlew 를 찾을 수 없음: {source_dir}", file=sys.stderr)
-        print("   또한 package-lock.json도 없어 npm SCA로 전환할 수 없습니다.", file=sys.stderr)
+        print("   npm, Maven(pom.xml), Gradle(gradlew), Ant(build.xml) 어느 것도 감지되지 않았습니다.", file=sys.stderr)
         sys.exit(1)
+
+    # P0: gradle-wrapper.jar 누락 시 자동 복구
+    _recover_gradle_wrapper_jar(source_dir)
+
+    _prepare_gradle_env(source_dir)
 
     java_path = _ensure_java(
         java_home_override=args.java_home,

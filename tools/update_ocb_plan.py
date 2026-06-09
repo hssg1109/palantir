@@ -54,8 +54,10 @@ SKILL_FINDINGS = {
 }
 
 # 체크리스트 테이블의 컬럼 인덱스 (split("|") 기준)
-# "| `repo` | INJ | XSS | FILE | DATA | SCA |" → split 시 cells[0]=""(공백), cells[1]=repo, cells[2]=INJ ...
-SKILL_COL_IDX = {"injection": 2, "xss": 3, "file": 4, "data": 5, "sca": 6}
+# "| `repo` | ↔️ 대내외 | INJ | XSS | FILE | DATA | SCA | 보고서 |"
+# split 시: [0]='', [1]=repo, [2]=direction, [3]=INJ, [4]=XSS, [5]=FILE, [6]=DATA, [7]=SCA, [8]=보고서
+SKILL_COL_IDX  = {"injection": 3, "xss": 4, "file": 5, "data": 6, "sca": 7}
+REPORT_COL_IDX = 8
 
 # Confluence 페이지 제목
 CF_TITLE     = "OCB 서비스 군 보안 진단 계획"
@@ -110,6 +112,40 @@ def mark_done(repo: str, skills: list[str], date: str | None = None) -> int:
 
     if changed > 0:
         PLAN_MD.write_text(text, encoding="utf-8")
+    return changed
+
+
+# ── 보고서 컬럼 갱신 ─────────────────────────────────────────────────────────
+
+def mark_report(repo: str, value: str) -> int:
+    """
+    ocb_scan_plan.md 내 해당 repo의 보고서 컬럼을 갱신한다.
+    value: '전체양호' 또는 Confluence URL (http로 시작하면 [보고서](url) 형식으로 변환)
+    반환: 변경된 셀 수.
+    """
+    if value.startswith("http"):
+        cell_value = f" [보고서]({value}) "
+    else:
+        cell_value = f" {value} "
+
+    text = PLAN_MD.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    new_lines = []
+    changed = 0
+
+    for line in lines:
+        if f"`{repo}`" in line and "|" in line:
+            cells = line.split("|")
+            if len(cells) > REPORT_COL_IDX:
+                current = cells[REPORT_COL_IDX].strip()
+                if current != cell_value.strip():
+                    cells[REPORT_COL_IDX] = cell_value
+                    changed += 1
+            line = "|".join(cells)
+        new_lines.append(line)
+
+    if changed:
+        PLAN_MD.write_text("\n".join(new_lines), encoding="utf-8")
     return changed
 
 
@@ -182,26 +218,8 @@ def sync_from_state(no_sync: bool = False) -> int:
 # ── Confluence 동기화 ─────────────────────────────────────────────────────────
 
 def sync_confluence() -> bool:
-    registry_path = PALANTIR_DIR / "docs" / ".confluence_pages.json"
-    reg = {}
-    if registry_path.exists():
-        reg = json.loads(registry_path.read_text(encoding="utf-8"))
-
-    md_key  = str(PLAN_MD.relative_to(PALANTIR_DIR))
-    page_id = reg.get(md_key)
-    parent  = CF_PARENT_ID if not page_id else None
-
-    cmd = [
-        sys.executable, str(PALANTIR_DIR / "tools" / "publish_confluence.py"),
-        str(PLAN_MD),
-        "--title", CF_TITLE,
-    ]
-    if page_id:
-        cmd += ["--page-id", page_id]
-    elif parent:
-        cmd += ["--parent", parent]
-
-    print(f"[SYNC] Confluence 게시 중 ... (title: {CF_TITLE})")
+    cmd = [sys.executable, str(PALANTIR_DIR / "tools" / "sync_ocb_confluence.py"), "--only", "scan_plan"]
+    print("[SYNC] Confluence 게시 중 (scan_plan) ...")
     result = subprocess.run(cmd, cwd=PALANTIR_DIR)
     return result.returncode == 0
 
@@ -268,6 +286,11 @@ def main():
         "--no-sync", action="store_true",
         help="체크리스트 갱신 후 Confluence 동기화 생략",
     )
+    parser.add_argument(
+        "--report", nargs=2, metavar=("REPO", "VALUE"),
+        help="보고서 컬럼 갱신. VALUE: Confluence URL 또는 '전체양호'\n"
+             "예: --report ocb-webview-api https://wiki.skplanet.com/pages/viewpage.action?pageId=750464899",
+    )
     args = parser.parse_args()
 
     # ── --status ──────────────────────────────────────────────────────────────
@@ -321,6 +344,19 @@ def main():
             status["completed"][repo][s] = date
         _save_status(status)
         print(f"[OK] 상태 저장: docs/.ocb_scan_status.json")
+
+        if not args.no_sync:
+            sync_confluence()
+        return
+
+    # ── --report ──────────────────────────────────────────────────────────────
+    if args.report:
+        repo, value = args.report
+        n = mark_report(repo, value)
+        if n > 0:
+            print(f"[OK] {repo} — 보고서 컬럼 갱신 완료 ({n}개 셀)")
+        else:
+            print(f"[WARN] {repo}: 보고서 컬럼 갱신할 항목을 찾지 못했습니다.")
 
         if not args.no_sync:
             sync_confluence()

@@ -99,21 +99,30 @@ def md_to_confluence(md: str) -> str:
     i = 0
 
     def _inline(text: str) -> str:
-        # 1. XML 특수문자 이스케이프 (태그 처리 전에 먼저)
+        # 1. 인라인 코드를 플레이스홀더로 먼저 교체 (** 등 메타 문자 보호)
+        code_spans: list[str] = []
+        def _stash_code(m: re.Match) -> str:
+            idx = len(code_spans)
+            inner = m.group(1).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            code_spans.append(f'<code>{inner}</code>')
+            return f'\x00CODE{idx}\x00'
+        text = re.sub(r'`([^`]+)`', _stash_code, text)
+        # 2. XML 특수문자 이스케이프 (코드 스팬 제외한 나머지)
         text = text.replace('&', '&amp;')
         text = text.replace('<', '&lt;').replace('>', '&gt;')
-        # 2. 굵기
+        # 3. 굵기
         text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
-        # 3. 기울임
+        # 4. 기울임
         text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
-        # 4. 인라인 코드
-        text = re.sub(r'`([^`]+)`', r'<code>\1</code>', text)
         # 5. 링크 [text](url)
         text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)',
                       r'<a href="\2">\1</a>', text)
         # 6. 색상 태그 {color:X}text{/color} → <span style="color:X">
         text = re.sub(r'\{color:([^}]+)\}(.*?)\{/color\}',
                       r'<span style="color:\1">\2</span>', text, flags=re.DOTALL)
+        # 7. 플레이스홀더 복원
+        for idx, span in enumerate(code_spans):
+            text = text.replace(f'\x00CODE{idx}\x00', span)
         return text
 
     while i < len(lines):

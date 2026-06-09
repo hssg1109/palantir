@@ -113,6 +113,58 @@ LLM 검토 절차는 `references/task_prompts/task_23_xss_review.md` 전체 절�
   - 출력: `diagnosis_method: "수동진단(LLM)"` + `manual_review_note`
   - **HARD RULE**: `llm_verdict: "needs_review"` 판정 시 `result` 는 반드시 `"정보"` 로 저장. `"수동검토필요"`, `"정보(수동검토필요)"` 등 비표준 값 사용 금지 — `output_schemas.md` result enum 위반이며 sec-review 필터에서 누락됨.
 
+#### §3a. 전역 XSS 필터 부재 — 구조적 취약점 Finding 생성
+
+Auto-Scan Step 3 또는 LLM-Check 완료 후 `xss_filter_assessment.filter_level == "none"` 인 경우,
+아래 구조의 **`finding_type: "structural"`** finding을 `findings[]`에 추가한다.
+
+이 finding은 개별 XSS endpoint 취약점과 독립된 정책 수준 취약점으로, 리포트에 별도 항목으로 포함된다.
+
+| 필드 | 값 |
+|------|-----|
+| `finding_type` | `"structural"` |
+| `severity` | `"Medium"` (기본) — 동반 Persistent/Reflected XSS 취약점 존재 시 `"High"` 상향 |
+| `category` | `"XSS 필터 미구현"` |
+| `cwe_id` | `"CWE-693"` (Protection Mechanism Failure) |
+| `owasp_category` | `"A05:2021 Security Misconfiguration"` |
+| `scope.type` | `"global"` |
+
+동반 XSS 취약점이 있으면 `review_note`에 해당 finding_id 명시.
+
+##### 표준 보고서 템플릿 (description / recommendation / report_expand)
+
+보고서 생성 시 아래 텍스트를 기준으로 `<repo>` 및 동반 취약점 ID를 치환하여 사용한다.
+
+**description (표준)**:
+```
+<repo> 전체 소스(src/) 및 build.gradle 검색 결과, Lucy XSS Servlet Filter, OWASP AntiSamy, ESAPI 등 어떤 전역 XSS 방어 컴포넌트도 발견되지 않습니다. WebSecurityConfiguration에서 CSRF만 disable되어 있으며 XSS 관련 Filter 등록이 없습니다. 전역 필터 미구현 상태에서는 개별 엔드포인트에 XSS sanitization이 누락되는 즉시 Persistent/Reflected XSS가 실현됩니다.
+```
+
+**recommendation (표준)**:
+```
+Lucy XSS Servlet Filter(naver/lucy-xss-servlet) 또는 OWASP AntiSamy를 Spring Security Filter Chain에 전역 등록하십시오. 전역 필터 적용 시 <동반_XSS_ID_목록> 등 개별 엔드포인트 취약점에 대한 방어 심도가 추가됩니다.
+```
+
+**report_expand (표준)**:
+```markdown
+## 코드 직접 확인 결과
+
+`build.gradle` 전체 및 `src/` 소스코드를 탐색한 결과 Lucy XSS Servlet Filter(`naver/lucy-xss-servlet`), OWASP AntiSamy, ESAPI 등 전역 XSS 방어 컴포넌트가 전혀 등록되어 있지 않다. `WebSecurityConfiguration`에서는 `http.csrf().disable()`만 설정하고 XSS 관련 Filter Chain 등록이 없다.
+
+## 위험 시나리오
+
+전역 XSS 필터가 없는 구조에서는 각 엔드포인트에서 sanitization이 누락되는 즉시 Stored XSS/Reflected XSS가 바로 실현 가능하다. <동반_XSS_ID_설명>은 이 구조적 부재로 인해 실제 취약점으로 발현된다. 신규 API 추가 시에도 개발자가 개별로 sanitization을 적용해야 하는 구조적 위험이 지속된다.
+
+## 방어 컴포넌트 현황
+
+| 방어 수단 | 적용 여부 | 비고 |
+|----------|-----------|------|
+| Lucy XSS Servlet Filter | 미적용 | build.gradle dependency 없음 |
+| OWASP AntiSamy | 미적용 | 소스코드 전체 미사용 |
+| ESAPI | 미적용 | 소스코드 전체 미사용 |
+| 커스텀 XSS Filter | 미적용 | WebSecurityConfiguration 내 미등록 |
+```
+
 ---
 
 ### <a name="frontend-llm-check"></a>프론트엔드 LLM 심층진단 Phase (JS/TS 레포 전용)
@@ -208,6 +260,24 @@ Step FE-1/FE-2 hit 목록을 기반으로 LLM이 **각 sink 파일을 직접 읽
    - 정보: 사용자 입력 경로 있으나 sanitize 있음 또는 추적 불가
    - 양호: sink에 사용자 입력 도달 불가 (정적 값 또는 서버사이드 인코딩)
 ```
+
+> #### ⚠️ HARD RULE — DOMPurify 누락 sink 발견 시 Taint Source 전파 역추적 필수
+>
+> **하나의 sink에서 DOMPurify 미적용 취약점을 발견한 것으로 탐지 완료 처리하지 않는다.**
+> 동일 taint source가 여러 컴포넌트에 전파되는 경우 일부만 finding에 반영되어
+> 보고서 누락이 발생한다 (실제 사례: `mallInfo.notice` 소비 컴포넌트 3개 중 1개만 식별).
+>
+> **절차**:
+> 1. sink에서 데이터 출처(API 엔드포인트명 또는 state 필드명) 확인
+> 2. 동일 taint source를 소비하는 모든 파일 열거:
+>    ```bash
+>    rg -n "mallInfo\.notice\|해당_API_경로\|해당_필드명" <src>/src
+>    ```
+> 3. 열거된 파일 각각에 대해 `dangerouslySetInnerHTML` / `innerHTML` 사용 및 DOMPurify 적용 여부 확인
+> 4. 누락된 파일이 있으면 **동일 finding에 통합** (finding_id 1개로 scope.affected_file에 전체 파일 목록 명시)
+> 5. `evidence_trail`에 "전파 탐색 완료" 근거 기록
+>
+> **전수 검토 완료 선언 조건**: taint source grep 결과가 0건이거나, 열거된 파일 전체에 DOMPurify 적용 확인된 경우에만 허용.
 
 **Open Redirect 전용 판정:**
 - `location.href = ...` 에 전달되는 값이 외부 파라미터(`?redirect=`, `?next=`, `?url=`)에서 오면 → 취약

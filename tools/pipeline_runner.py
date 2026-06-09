@@ -442,6 +442,12 @@ def main() -> int:
     # ── 요약 ──────────────────────────────────────────────────────────────────
     print_summary(results, run_id, elapsed)
 
+    # ── 진단현황 자동 갱신 ────────────────────────────────────────────────────
+    update_plan = PALANTIR_DIR / "tools" / "update_ocb_plan.py"
+    if update_plan.exists():
+        print("\n[진단현황 갱신] update_ocb_plan.py --auto ...")
+        subprocess.run([sys.executable, str(update_plan), "--auto"], cwd=str(PALANTIR_DIR))
+
     # ── 보고서 생성 ───────────────────────────────────────────────────────────
     if args.report:
         call_generate_report(run_id, args.report, elapsed)
