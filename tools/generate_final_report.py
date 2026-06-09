@@ -64,11 +64,9 @@ SKILL_LABEL = {
 # 2.2 요약표 · 3 취약점 상세 공통 정렬 순서 (depth1)
 SKILL_ORDER = ["injection", "xss", "file", "data", "sca"]
 
-DISCLAIMER = """본 보고서는 자동화 스크립트 및 LLM AI 에이전트를 통한 1차 분석 후, \
-보안 진단 인력이 직접 검토한 결과입니다. \
-분석 특성상 오탐(False Positive) 및 미탐(False Negative) 가능성이 일부 존재하므로, \
-발견된 취약점은 소스코드 수정·패치 적용 등 조치 후 보안팀에 회신해 주시기 바랍니다. \
-본 보고서에 포함된 소스코드 스니펫 및 취약점 정보는 내부 보안 목적으로만 사용되어야 합니다."""
+DISCLAIMER = """본 보고서는 자동화 스크립트 및 LLM AI 에이전트를 통한 1차 분석 후, 보안 진단 인력이 직접 검토한 결과입니다.
+소스코드 정적 분석(SAST) 도구의 특성상, 인증/결제 로직의 결함이나 시스템 아키텍처 구조에 기인한 심층적인 취약점은 현재 보고서에 반영되지 않았으며, 해당 영역은 추후 별도의 동적 진단(DAST) 또는 아키텍처 리뷰를 통해 리포팅될 예정입니다.
+분석 과정에서 오탐(False Positive) 및 미탐(False Negative) 가능성이 일부 존재할 수 있으므로, 식별된 취약점은 권고 사항을 참고하여 소스코드 수정 및 패치 적용 후 보안팀에 회신해 주시기 바랍니다. 본 보고서에 포함된 소스코드 스니펫 및 취약점 정보는 대외비 자산으로, 내부 보안 개선 목적으로만 사용되어야 합니다."""
 
 
 # ── 유틸 ─────────────────────────────────────────────────────────────────────
@@ -210,6 +208,27 @@ def load_clone_info(repo: str) -> dict:
             return json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             pass
+    # fallback: state/<repo>/*/scan_meta.json 중 bb_commit이 있는 가장 최신 파일
+    import glob as _glob
+    metas = sorted(
+        _glob.glob(str(STATE_DIR / repo / "*" / "scan_meta.json")),
+        reverse=True,
+    )
+    for meta_path in metas:
+        try:
+            m = json.loads(Path(meta_path).read_text(encoding="utf-8"))
+            if m.get("bb_commit") or m.get("bb_branch"):
+                return {
+                    "project":           m.get("bb_project", "—"),
+                    "repo":              m.get("bb_repo", repo),
+                    "branch":            m.get("bb_branch", "—"),
+                    "commit_hash":       m.get("bb_commit") or "—",
+                    "clone_url":         m.get("repo_url", "—"),
+                    "cloned_at":         "—",
+                    "last_commit_author": "—",
+                }
+        except Exception:
+            continue
     return {}
 
 
@@ -298,8 +317,16 @@ def _location_cells(f: dict, omit_cve: bool = False) -> tuple[str, str, str]:
     _ev_d   = (_ev[0] if isinstance(_ev, list) and _ev else _ev) if _ev else {}
     if not isinstance(_ev_d, dict):
         _ev_d = {}
-    af      = scope.get("affected_file") or _ev_d.get("file", "")
-    line    = scope.get("affected_line") or _ev_d.get("lines", "")
+    af      = scope.get("affected_file") or ""
+    if not af:
+        # DATA 스캔 findings: scope.module + scope.file 조합 (e.g. "src/main/resources/" + "application-local.properties")
+        _sf = scope.get("file") or ""
+        _sm = scope.get("module") or ""
+        if _sf:
+            af = (_sm.rstrip("/") + "/" + _sf) if _sm else _sf
+    if not af:
+        af = _ev_d.get("file", "")
+    line    = scope.get("affected_line") or scope.get("line") or _ev_d.get("lines", "")
     pkg     = scope.get("package") or ""
 
     if pkg:
@@ -358,7 +385,10 @@ def _result_from_sev(sev: str) -> str:
 
 
 def _get_result(f: dict) -> str:
-    """위험도 기반 결과 레이블 반환 — Section 2.2와 동일 로직 (Critical/High=취약, 그 외=정보)."""
+    """findings JSON의 result 필드 우선 사용; 없거나 비표준이면 위험도 기반 도출."""
+    stored = f.get("result", "")
+    if stored in ("취약", "정보"):
+        return stored
     return _result_from_sev(_norm_sev(f.get("severity", "Informational")))
 
 
@@ -388,12 +418,13 @@ def _build_gemini_prompt_for_overview(
     all_findings: list[tuple[str, dict]],
     global_counts: dict[str, int],
 ) -> str:
-    """2.1 취약점 개요 섹션에 삽입할 Gemini용 프롬프트를 생성.
+    """2.1 취약점 개요 섹션에 삽입할 LLM용 프롬프트를 생성.
 
-    findings 목록 (위험도별 정렬, 최대 20건)을 포함해
-    LLM이 3~5문장 한국어 취약점 개요를 작성하도록 요청한다.
+    - '취약' 결과 findings만 전달 (정보/양호는 제외)
+    - SCA 항목은 DoS 전용 CVE보다 인증우회·RCE 우선 표시
+    - 2~3문장 압축 개요, Lombok/@ToString 같은 낮은 긴급도 항목 제외
     """
-    # 위험도별 건수 요약 문자열
+    # 위험도별 건수 요약 — '취약' 결과만 카운트
     sev_parts = []
     for sev in SEVERITY_ORDER:
         cnt = global_counts.get(sev, 0)
@@ -402,13 +433,22 @@ def _build_gemini_prompt_for_overview(
             sev_parts.append(f"{kr}({sev}) {cnt}건")
     sev_summary = ", ".join(sev_parts) if sev_parts else "취약점 없음"
 
-    # findings 정렬: 위험도 높은 순 → 취약 먼저
+    # '취약' 결과만 필터링한 뒤 위험도 높은 순 정렬
     def _sort_key(skill_f: tuple) -> tuple:
         _, f = skill_f
-        return (_sev_key(f), 0 if _get_result(f) == "취약" else 1)
+        # SCA 항목 중 DoS 전용 CVE는 인증우회·RCE 뒤로 밀기
+        cat = (f.get("category") or "").upper()
+        title = (f.get("title") or "").lower()
+        is_dos_only = (
+            "sca" in cat.lower()
+            and any(k in title for k in ("dos", "denial", "oom", "stackoverflow", "reset", "welcome page"))
+            and not any(k in title for k in ("인증 우회", "auth bypass", "rce", "권한", "탈취"))
+        )
+        return (_sev_key(f), 1 if is_dos_only else 0)
 
-    sorted_findings = sorted(all_findings, key=_sort_key)
-    display = sorted_findings[:20]
+    vuln_findings = [sf for sf in all_findings if _get_result(sf[1]) == "취약"]
+    sorted_findings = sorted(vuln_findings, key=_sort_key)
+    display = sorted_findings[:15]
 
     p: list[str] = [
         "당신은 보안 전문가입니다. 아래 SAST(정적 분석) 진단 결과를 바탕으로",
@@ -420,43 +460,66 @@ def _build_gemini_prompt_for_overview(
         f"- 진단 방식: SAST (정적 분석) + LLM 교차검증",
         f"- 위험도별 현황: {sev_summary}",
         "",
-        "## 발견된 취약점 목록",
+        "## 즉시 조치 필요 취약점 목록 (결과: 취약)",
         "",
     ]
     for i, (_, f) in enumerate(display, 1):
-        sev    = _norm_sev(f.get("severity", "Informational"))
-        title  = (f.get("title", "—") or "—").strip()
-        cat    = f.get("category", "—")
-        result = _get_result(f)
-        raw    = f.get("description", "") or ""
-        desc   = raw[:150].strip()
-        if len(raw) > 150:
+        sev   = _norm_sev(f.get("severity", "Informational"))
+        title = (f.get("title", "—") or "—").strip()
+        cat   = f.get("category", "—")
+        raw   = f.get("description", "") or ""
+        desc  = raw[:120].strip()
+        if len(raw) > 120:
             desc += "…"
         p.append(f"{i}. [{sev}] {title}")
-        p.append(f"   분류: {cat} | 결과: {result}")
+        p.append(f"   분류: {cat}")
         if desc:
             p.append(f"   설명: {desc}")
         p.append("")
 
-    if len(sorted_findings) > 20:
-        p.append(f"   ... 외 {len(sorted_findings) - 20}건 생략")
+    if len(sorted_findings) > 15:
+        p.append(f"   ... 외 {len(sorted_findings) - 15}건 생략")
         p.append("")
 
     p += [
         "## 작성 요청",
         "",
-        "위 취약점 목록을 기반으로 취약점 개요 문단을 작성해주세요.",
+        "위 취약점 목록을 바탕으로 짧은 취약점 개요 문단을 작성해주세요.",
         "",
         "조건:",
-        "1. 이번 진단에서 발견된 핵심 보안 위험 2~3가지를 중심으로 3~5문장으로 작성합니다.",
-        "2. 대상 독자는 개발팀 리더 및 보안 담당자입니다.",
-        "3. 기술적 세부사항보다 비즈니스 위험과 조치 우선순위 관점으로 기술합니다.",
-        "4. 존댓말(합쇼체)을 사용합니다.",
-        "5. 취약점이 없는 경우 '이번 진단에서 취약 항목이 발견되지 않았습니다.'로 시작합니다.",
+        "1. 대상 독자는 해당 서비스를 개발한 개발자입니다.",
+        "2. 위험도 높은 주요 취약점 현황을 간략히 언급하고,",
+        "   데이터 유출·서버 침투·개인정보 노출 등 보안 위협을 한두 가지만 간단히 적습니다.",
+        "3. 마지막에 한 문장으로 간단한 조치 방향을 추가합니다.",
+        "4. 분량: 2~3문장. 짧고 명확하게.",
+        "5. 존댓말(합쇼체)을 사용합니다.",
+        "6. 취약점이 없는 경우 '이번 진단에서 취약 항목이 발견되지 않았습니다.'로 시작합니다.",
+        "7. 다음 유형은 개요에 포함하지 않습니다:",
+        "   - @ToString/@Data Lombok DTO 노출 (DTO_EXPOSURE)",
+        "   - DoS 전용 SCA CVE (OOM/StackOverflow/Welcome Page 등)",
+        "   - 디버그 레벨 로그 노출",
         "",
-        "출력 형식: 완성된 개요 문단만 출력합니다 (별도 설명이나 목록 없이 산문체).",
+        "출력 형식: 완성된 개요 문단만 출력합니다 (제목·목록 없이 산문체).",
     ]
     return "\n".join(p)
+
+
+def _call_claude_for_overview(prompt: str) -> str | None:
+    """claude -p 로 취약점 개요 문단 자동 생성. 실패 시 None 반환."""
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode == 0:
+            text = result.stdout.strip()
+            if text:
+                return text
+    except Exception:
+        pass
+    return None
 
 
 def _recom_summary(recom: str) -> str:
@@ -605,6 +668,51 @@ def _extract_review_note_sections(review_note: str) -> str:
     return review_note[idx:].strip()
 
 
+# ── HARDCODED_SECRET / SECRET_EXPOSURE 전용 credential 값 마스킹 ──────────────
+# key 이름은 유지, 실제 값(value)만 [REDACTED]로 치환
+_SECRET_CATEGORIES = {"HARDCODED_SECRET", "SECRET_EXPOSURE"}
+
+# pattern 1: keyword=value (값 끝은 공백·줄바꿈·쉼표·파이프·세미콜론)
+_RE_KV = re.compile(
+    r"(?i)((?:password|passwd|secret|token|apikey|api[._]key|basickey"
+    r"|hmac(?:[._][a-z]+)*|aes[._](?:key|iv)|sharedsecret|private[._]?key"
+    r"|access[._]token|client[._]secret|encrypt[._]key|authkey\d*"
+    r"|site[._]key|batch[._]site[._]key)\s*=\s*)([^\s,\n|;#\[]{4,})"
+)
+# pattern 2: DBACCOUNT/password 형식 (대문자 계정명 / 평문 패스워드)
+_RE_USERPASS = re.compile(r"\b([A-Z][A-Z0-9_]{2,})/([A-Za-z0-9!@#$%^&*()\-_+=.]{4,})\b")
+# pattern 3: 32자 이상 hex 문자열 (AES key, MD5 digest 등)
+_RE_HEX32 = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+# pattern 4: OpenAI / Bearer 토큰 형식 (sk-proj-...)
+_RE_API_TOKEN = re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b")
+# pattern 5: UUID 형식 credential (access token 등)
+_RE_UUID = re.compile(
+    r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
+)
+
+
+def _sanitize_secret_expand(text: str, category: str) -> str:
+    """HARDCODED_SECRET / SECRET_EXPOSURE 카테고리 expand 텍스트에서 실제 credential 값을 마스킹.
+
+    정책:
+    - 설정 key 이름(spring.datasource.hikari.password 등)은 그대로 유지
+    - 실제 값(=value 이후)만 [REDACTED]로 치환
+    - DB 계정/비밀번호 포맷(ACCOUNT/passwd) → ACCOUNT/[REDACTED]
+    - 32자+ hex 문자열 (AES key, 해시값 등) → [REDACTED-KEY]
+    - UUID 형식 토큰 → [REDACTED-TOKEN]
+    - OpenAI sk-proj- 등 알려진 토큰 접두사 → [REDACTED-TOKEN]
+    """
+    cat = (category or "").upper()
+    if cat not in _SECRET_CATEGORIES:
+        return text
+    text = _RE_KV.sub(lambda m: m.group(1) + "[REDACTED]", text)
+    text = _RE_USERPASS.sub(lambda m: m.group(1) + "/[REDACTED]", text)
+    text = _RE_HEX32.sub("[REDACTED-KEY]", text)
+    text = _RE_API_TOKEN.sub("[REDACTED-TOKEN]", text)
+    text = _RE_UUID.sub("[REDACTED-TOKEN]", text)
+    return text
+
+
 def _render_taint_expand(evidence: dict) -> list[str]:
     """Taint flow 정보를 :::expand 블록으로 렌더링."""
     lines: list[str] = []
@@ -614,7 +722,7 @@ def _render_taint_expand(evidence: dict) -> list[str]:
     if not taint_flow and not taint_evidence:
         return lines
 
-    lines.append(":::expand Taint Flow 상세")
+    lines.append(":::expand Taint Flow 상세 (참조용)")
 
     if taint_flow:
         source = taint_flow.get("source", "")
@@ -661,6 +769,25 @@ def _render_taint_expand(evidence: dict) -> list[str]:
                     lines.append("")
 
     lines.append(":::")
+    return lines
+
+
+def _render_group_cves(group_cves: list[dict]) -> list[str]:
+    """SCA 라이브러리 그룹 CVE 전체 목록 표 렌더링."""
+    if not group_cves:
+        return []
+    lines = [
+        "**동일 라이브러리 CVE 전체 목록**",
+        "",
+        "| CVE ID | 심각도 | 설명 요약 |",
+        "|--------|--------|----------|",
+    ]
+    for cve in group_cves:
+        cve_id  = _esc(cve.get("cve_id", "—"))
+        sev     = _esc(cve.get("severity", "—"))
+        summary = _esc(cve.get("summary", cve.get("title", "—")))
+        lines.append(f"| {cve_id} | {sev} | {summary} |")
+    lines.append("")
     return lines
 
 
@@ -729,9 +856,10 @@ def _render_finding(sub_no: str, skill: str, f: dict) -> list[str]:
             lang = "xml"
         lines += [f"**증거 코드** — `{_esc(af_str)}`", "", f"```{lang}", snippet, "```", ""]
 
-    taint_lines = _render_taint_expand(evidence)
-    if taint_lines:
-        lines += taint_lines + [""]
+    # SCA 라이브러리 그룹 CVE 표 (group_cves 필드 존재 시)
+    group_cves = f.get("group_cves")
+    if group_cves:
+        lines += _render_group_cves(group_cves)
 
     # report_expand: agent 생성 상세 검증 섹션 (없으면 review_note 폴백)
     report_expand_raw = f.get("report_expand", "")
@@ -740,19 +868,16 @@ def _render_finding(sub_no: str, skill: str, f: dict) -> list[str]:
     expand_content = report_expand_raw or review_note_raw
     if expand_content:
         rn_sections = _extract_review_note_sections(expand_content)
+        # HARDCODED_SECRET / SECRET_EXPOSURE: 실제 credential 값 마스킹
+        rn_sections = _sanitize_secret_expand(rn_sections, f.get("category", ""))
         if rn_sections:
             lines += [":::expand 상세 검증 결과 (코드 직접 확인)", "", rn_sections, "", ":::"]
             lines.append("")
 
-    # review_note: /sec-review 검토자 의견 — report_expand 있을 때도 별도 출력
-    if report_expand_raw and review_note_raw:
-        note_content = _extract_review_note_sections(review_note_raw)
-        if note_content:
-            if "\n" in note_content:
-                lines += [":::expand 검토자 의견", "", note_content, "", ":::"]
-            else:
-                lines += [f"> **검토자 의견**: {note_content}"]
-            lines.append("")
+    # Taint Flow expand — 참조용, finding 맨 아래 배치
+    taint_lines = _render_taint_expand(evidence)
+    if taint_lines:
+        lines += taint_lines + [""]
 
     lines.append("---")
     lines.append("")
@@ -799,12 +924,14 @@ def render_markdown(
         f"| Bitbucket 프로젝트 | {project} |",
         f"| 진단 브랜치 | {branch} |",
         f"| 커밋 해시 | `{commit[:12]}` |" if commit != "—" else f"| 커밋 해시 | — |",
-        f"| 담당자 | {maintainer} |",
+        f"| *담당자 | {maintainer} |",
         f"| 보고서 생성일 | {now} |",
         f"| RUN_ID | `{run_id}` |",
         f"| 진단 유형 | SAST (정적 분석) + LLM 교차검증 |",
         f"| 진단 도구 | palantir (Claude Code 기반) |",
         f"| 전체 발견 건수 | {total_cnt}건 |",
+        "",
+        "\\* 담당자는 해당 repo clone 시 가장 최근 commit 한 개발 매니저로 임의 설정되어있습니다. 변경 필요시 댓글부탁드립니다.",
         "",
     ]
 
@@ -812,20 +939,28 @@ def render_markdown(
     gemini_prompt = _build_gemini_prompt_for_overview(
         repo, exposure_type, all_findings, global_counts
     )
-    lines += [
-        "## 2. 취약점 요약",
-        "",
-        "### 2.1 취약점 개요",
-        "",
-        ":::info LLM 작성 요청",
-        "아래 프롬프트를 Gemini 등 LLM에 입력한 뒤, 생성된 문단으로 이 섹션을 교체하세요.",
-        ":::",
-        "",
-        "```text",
-        gemini_prompt,
-        "```",
-        "",
-    ]
+    print("[개요] claude-cli로 취약점 개요 자동 생성 중...", file=sys.stderr)
+    overview_text = _call_claude_for_overview(gemini_prompt)
+    if overview_text:
+        print("[개요] 자동 생성 완료", file=sys.stderr)
+        overview_section = ["## 2. 취약점 요약", "", "### 2.1 취약점 개요", "", overview_text, ""]
+    else:
+        print("[개요] claude-cli 호출 실패 — 수동 작성 placeholder 삽입", file=sys.stderr)
+        overview_section = [
+            "## 2. 취약점 요약",
+            "",
+            "### 2.1 취약점 개요",
+            "",
+            ":::info LLM 작성 요청",
+            "아래 프롬프트를 Gemini 등 LLM에 입력한 뒤, 생성된 문단으로 이 섹션을 교체하세요.",
+            ":::",
+            "",
+            "```text",
+            gemini_prompt,
+            "```",
+            "",
+        ]
+    lines += overview_section
 
     # 섹션 3·4 공통 정렬 기준 및 skill 순서 (2.2보다 먼저 정의하여 Sub_No 사전 생성에 사용)
     ordered_skills = [s for s in SKILL_ORDER if s in data] + \
@@ -864,7 +999,7 @@ def render_markdown(
     for skill, f in flat_sorted:
         sub_no = sub_no_map.get(f.get("finding_id", ""), "—")
         sev    = _norm_sev(f.get("severity", "—"))
-        result = _result_colored(_result_from_sev(sev))
+        result = _result_colored(_get_result(f))
         title  = _esc(_clean_title(f.get("title", "—")))
         cat    = _esc(f.get("category", "—"))
         ep, af_str, _ = _location_cells(f, omit_cve=True)

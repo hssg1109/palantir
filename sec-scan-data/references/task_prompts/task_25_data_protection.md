@@ -843,7 +843,7 @@ WEAK_CRYPTO / CORS / JWT 등 나머지 카테고리는 자동스캔 확정 항�
 > ⚠️ **evidence.file은 반드시 실제 파일 경로여야 한다 (디렉토리 금지).
 > evidence.code_snippet은 반드시 Read 툴로 읽은 실제 파일 내용을 사용한다.**
 
-- `evidence.file`: 실제 파일 경로 (`Config.java`, `application.yml` 등) — 디렉토리 경로 금지
+- `evidence.file`: **repo root 기준 전체 상대경로** 필수 (`src/main/resources/application-local.properties`, `src/main/java/com/foo/Bar.java` 등) — 파일명만(`application.yml`) 또는 디렉토리 경로 금지
 - `evidence.code_snippet`: Read 툴로 직접 읽은 실제 코드만 허용 — 생성/추측 주석 금지
 - 파일을 직접 읽지 못한 경우: `needs_review: true` + `manual_review_note: "코드 미확인"` 표시
 - 자동스캔 `code_snippet`이 `"**** (마스킹)"` 상태인 경우, LLM 보완 finding 작성 시 반드시 Read 툴로 실제 파일을 읽어 evidence 첨부

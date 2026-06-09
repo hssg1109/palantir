@@ -566,7 +566,8 @@ grep -r "filter-class" src/main/webapp/WEB-INF/web.xml 2>/dev/null
 
 | 상태 | 판정 |
 |---|---|
-| `XSSStringDeserializer` 전역 등록 + **모든 엔드포인트가 @RequestBody 전용** | **양호** (`filter_level: jackson_requestbody_only`, 서블릿 파라미터 없음) |
+| `XSSStringDeserializer` 전역 등록 + **모든 엔드포인트가 @RequestBody 전용** + `@JsonXssFilter(disable=true)` 없음 | **양호** (`filter_level: jackson_requestbody_only`, 서블릿 파라미터 없음, Secure-by-Default 확인) |
+| `XSSStringDeserializer` 전역 등록 + `@JsonXssFilter(disable=true)` 필드 존재 | **취약 (High)** — 해당 필드 개별 추적 필요 (6-C 기준) |
 | `XSSStringDeserializer` 전역 등록 + **@RequestParam/ModelAttribute 파라미터 존재** | **취약 (High)** — 해당 파라미터 경로는 필터 미보호 → 별도 Servlet 레벨 필터 필요 |
 | Jackson Deserializer만 있고 Lucy/AntiSamy/ESAPI 없음 + @RequestParam 존재 | **취약 (High)** — 전역 Servlet 필터 완전 부재 |
 
@@ -584,6 +585,66 @@ grep -r "@RequestParam" src/main/java/ | grep -v "test" | wc -l
 2. `@RequestParam` 파라미터가 응답에 반사되거나 DB에 저장되는 엔드포인트 추적
 3. 별도 Servlet 레벨 필터(Lucy, 커스텀 `HttpServletRequestWrapper`) 부재 확인
 4. 취약 finding 등록: `"전역 XSS 필터 — @RequestParam 경로 미보호 (Jackson Deserializer 한계)"`
+
+---
+
+#### 6-C. Jackson XSS Deserializer — 전역 등록 시 Secure-by-Default 아키텍처 (오탐 방지 필수)
+
+> ⚠️ **`XSSStringDeserializer`가 `addDeserializer(String.class, ...)` 형태로 전역 등록된 경우,
+> `@JsonXssFilter` 어노테이션 유무만으로 보호 여부를 판단하면 오탐이 대량 발생한다.
+> 어노테이션이 없는 필드가 오히려 가장 강한 보호를 받는 구조다.**
+
+**판별 전제: 전역 등록 여부 확인 (필수 선행 절차)**
+
+```bash
+# WebMvcConfiguration 또는 Jackson 설정 파일에서 전역 등록 코드 확인
+grep -r "addDeserializer.*String\|addDeserializer.*String\.class" src/
+# 출력 예시: .addDeserializer(String.class, new XSSStringDeserializer())
+```
+
+전역 등록이 확인된 경우에만 아래 판정 기준을 적용한다.
+
+**@JsonXssFilter 어노테이션 의미 (전역 등록 전제)**
+
+| 상태 | 동작 | 판정 |
+|---|---|---|
+| 어노테이션 없음 (기본) | `XssPreventer.escape()` — 모든 HTML 특수문자 엔티티 변환 (가장 강한 보호) | **양호** |
+| `@JsonXssFilter` 있음 | `XssFilter.doFilter()` — Lucy 화이트리스트 모드 (허용 태그만 통과, 나머지 이스케이프) | **양호** — Lucy 화이트리스트도 XSS 보호 |
+| `@JsonXssFilter(disable=true)` | raw 값 반환 — 보호 없음 | **취약 (High)** |
+
+> **핵심**: `@JsonXssFilter`는 "보호를 활성화"하는 어노테이션이 아니라 "예외 처리 모드"를 지정하는 어노테이션이다.
+> 어노테이션이 없으면 기본값이 가장 강한 이스케이프로 적용되는 **Secure-by-Default** 아키텍처다.
+> Lucy 화이트리스트는 일부 HTML 태그를 허용하지만, 비허용 태그·스크립트는 이스케이프·제거하므로 **XSS 미보호가 아니다**.
+
+**실제 취약 지점 — `disable=true` grep 필수**
+
+```bash
+# 진짜 미보호 필드 탐색
+grep -r "@JsonXssFilter.*disable.*true\|disable\s*=\s*true" src/ | grep -i "xss"
+```
+
+- 결과 없음 → 전체 `@RequestBody` 경로 **양호**
+- 결과 있음 → 해당 필드·엔드포인트 개별 추적 후 DB 저장·응답 반사 여부 확인
+
+**Lucy 화이트리스트 필터 취급 원칙**
+
+- Lucy `XssFilter.doFilter()` 적용 필드를 "필터가 덜 엄격하다"는 이유로 취약 리포팅 **금지**
+- 허용 태그 목록(`lucy-xss-superset.xml` 등)을 확인하여 스크립트 실행 가능 태그가 허용 목록에 포함된 경우에만 별도 검토 대상
+- 허용 목록에 `<script>`, `<iframe>`, `javascript:` 등이 명시적으로 포함된 경우 → **정보** 수준으로 기록 (구성 검토 권고)
+
+**오탐 예방 — 판정 체크리스트**
+
+```
+□ WebMvcConfiguration 등에서 addDeserializer(String.class, ...) 전역 등록 확인?
+  → 미확인 시 아래 체크 생략, 일반 판정 절차 적용
+
+□ (전역 등록 확인 후) @JsonXssFilter(disable=true) 필드가 있는가?
+  → 없으면 전체 @RequestBody String 필드 양호 처리
+  → 있으면 해당 필드만 개별 추적
+
+□ @JsonXssFilter (disable 없음) 필드를 "Lucy만 적용 = 취약"으로 판정했는가?
+  → 해당 판정은 오탐 — 즉시 result: "양호" 로 수정
+```
 
 ---
 
@@ -621,7 +682,7 @@ grep -r "@RequestParam" src/main/java/ | grep -v "test" | wc -l
 - Lucy XSS Filter / Lucy XSS Servlet Filter (SK Planet 사내 표준) — **등록 코드 교차 검증 필수**
 - ESAPI
 - Java Servlet Filter (커스텀)
-- Jackson XSS Deserializer — **@RequestBody 경로만 커버, @RequestParam 별도 검증 필수**
+- Jackson XSS Deserializer — **@RequestBody 경로만 커버, @RequestParam 별도 검증 필수** / `addDeserializer(String.class, ...)` 전역 등록 시 Secure-by-Default 아키텍처 적용 — `@JsonXssFilter` 유무 판단 전 반드시 6-C 체크리스트 수행
 
 ---
 
