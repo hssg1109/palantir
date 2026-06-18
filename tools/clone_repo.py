@@ -143,30 +143,71 @@ _GIT_PATH_PREAMBLE = (
 )
 
 
-def _detect_default_branch_via_powershell(token: str, bare_url: str) -> str | None:
+def _detect_default_branch_via_powershell(
+    token: str,
+    bare_url: str,
+    project: str = "",
+    repo_slug: str = "",
+    bb_base: str = "",
+) -> str | None:
     """
-    PowerShell git ls-remote로 기본 브랜치를 자동 감지한다.
-    main → master → dev → alpha 순으로 확인 후 없으면 첫 번째 브랜치 반환.
-    ls-remote 자체가 실패하면 None 반환 (호출측에서 --branch 생략).
+    가장 최근 커밋된 안정 브랜치를 자동 감지한다.
+
+    1차: Bitbucket REST API (orderBy=MODIFICATION) via PowerShell
+         → 슬래시 없는 안정 브랜치(main/master/develop 등) 중 최신 커밋 순 1위 반환
+    2차 fallback: git ls-remote → main/master/dev/alpha 우선순위
     """
-    ps_cmd = (
+    _STABLE = {"main", "master", "develop", "dev", "alpha"}
+
+    # ── 1차: Bitbucket REST API ───────────────────────────────────────────────
+    if project and repo_slug and bb_base:
+        api_url = (
+            f"{bb_base}/rest/api/1.0/projects/{project}/repos/{repo_slug}"
+            f"/branches?orderBy=MODIFICATION&limit=20"
+        )
+        ps_api = (
+            _GIT_PATH_PREAMBLE
+            + f"$h = @{{Authorization='Bearer {token}'; Accept='application/json'}}; "
+            f"try {{ "
+            f"  $r = Invoke-RestMethod -Uri '{api_url}' -Headers $h; "
+            f"  $r.values | ForEach-Object {{ Write-Output $_.displayId }} "
+            f"}} catch {{ exit 1 }}"
+        )
+        r = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_api],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            # API 반환 순서: 최신 커밋 → 오래된 커밋
+            all_branches = [b.strip() for b in r.stdout.strip().splitlines() if b.strip()]
+            # '/' 없는 안정 브랜치 우선 (feature/release/hotfix 제외)
+            stable = [b for b in all_branches if "/" not in b]
+            chosen = stable[0] if stable else (all_branches[0] if all_branches else None)
+            if chosen:
+                print(f"[INFO] 브랜치 자동 감지 (API 최신 커밋 기준): {chosen}")
+                if stable and chosen not in _STABLE:
+                    print(f"[INFO]  → '{chosen}' (비표준 트렁크 브랜치 — 필요시 --branch로 지정)")
+                return chosen
+
+    # ── 2차 fallback: git ls-remote ──────────────────────────────────────────
+    ps_ls = (
         _GIT_PATH_PREAMBLE
         + f"git -c credential.helper= "
         f"-c http.extraHeader='Authorization: Bearer {token}' "
         f"ls-remote --heads '{bare_url}'"
     )
     r = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
+        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_ls],
         capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     branches = []
-    stdout = r.stdout or ""
-    for line in stdout.splitlines():
+    for line in (r.stdout or "").splitlines():
         parts = line.strip().split()
         if len(parts) == 2 and parts[1].startswith("refs/heads/"):
             branches.append(parts[1].replace("refs/heads/", ""))
     if not branches:
         return None  # ls-remote 실패 또는 빈 레포 → --branch 없이 clone
+    print(f"[INFO] 브랜치 자동 감지 (ls-remote 우선순위 fallback): {branches}")
     for preferred in ("main", "master", "dev", "alpha"):
         if preferred in branches:
             return preferred
@@ -197,11 +238,14 @@ def _git_clone_via_powershell(token: str, bare_url: str, dest: Path, branch: str
     )
 
 
-def clone_repo(project: str, repo: str, branch: str = "main", force: bool = False) -> Path:
+def clone_repo(project: str, repo: str, branch: str | None = None, force: bool = False) -> Path:
     """
     레포를 testbed/<repo>/ 에 clone하고 경로를 반환한다.
     이미 존재하면 pull로 업데이트 (force=True이면 삭제 후 재clone).
     WSL 환경에서는 PowerShell(Windows git)을 경유하여 clone한다.
+
+    branch=None (기본) → 가장 최근 커밋된 안정 브랜치 자동 선택
+    branch 명시       → 해당 브랜치 강제 사용
     """
     if not CUSTOMER_BB_TOKEN:
         print("[ERROR] CUSTOMER_BB_TOKEN이 .env에 설정되지 않았습니다.", file=sys.stderr)
@@ -210,7 +254,8 @@ def clone_repo(project: str, repo: str, branch: str = "main", force: bool = Fals
     dest: Path = TESTBED_DIR / repo
     TESTBED_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"[INFO] 대상 레포: {project}/{repo}  (브랜치: {branch})")
+    branch_label = branch if branch else "(자동 감지)"
+    print(f"[INFO] 대상 레포: {project}/{repo}  (브랜치: {branch_label})")
     print(f"[INFO] Bitbucket API 조회 중: {BITBUCKET_BASE_URL}")
 
     clone_url  = _get_clone_url(project, repo)
@@ -236,27 +281,33 @@ def clone_repo(project: str, repo: str, branch: str = "main", force: bool = Fals
 
     # WSL이면 PowerShell(Windows git) 경유로 clone, 아니면 Windows git 직접 실행
     if _is_wsl():
-        # 브랜치 자동 감지 (None이면 --branch 없이 clone)
-        detected_branch = _detect_default_branch_via_powershell(CUSTOMER_BB_TOKEN, clone_url)
-        if detected_branch is None:
-            print(f"[INFO] 브랜치 자동 감지 실패 → 원격 기본 브랜치로 clone")
-            branch = None
-        elif detected_branch != branch:
-            print(f"[INFO] 브랜치 '{branch}' 미존재 → '{detected_branch}' 로 자동 전환")
+        # 브랜치 자동 감지 (branch=None이면 자동 감지, 명시 지정이면 그대로 사용)
+        if branch is None:
+            detected_branch = _detect_default_branch_via_powershell(
+                CUSTOMER_BB_TOKEN, clone_url,
+                project=project, repo_slug=repo, bb_base=BITBUCKET_BASE_URL,
+            )
+            if detected_branch is None:
+                print(f"[INFO] 브랜치 자동 감지 실패 → 원격 기본 브랜치로 clone")
             branch = detected_branch
         print(f"[INFO] Clone 시작: {safe_url} → {dest}")
         result = _git_clone_via_powershell(CUSTOMER_BB_TOKEN, clone_url, dest, branch)
     else:
         # Windows Python 환경: powershell.exe 경유로 git clone
-        detected_branch = _detect_default_branch_via_powershell(CUSTOMER_BB_TOKEN, clone_url)
-        if detected_branch is None:
-            print(f"[INFO] 브랜치 자동 감지 실패 → 원격 기본 브랜치로 clone")
-            branch_flag = ""
-            branch_label = "(원격 기본 브랜치)"
-        else:
-            if detected_branch != branch:
-                print(f"[INFO] 브랜치 '{branch}' 미존재 → '{detected_branch}' 로 자동 전환")
+        if branch is None:
+            detected_branch = _detect_default_branch_via_powershell(
+                CUSTOMER_BB_TOKEN, clone_url,
+                project=project, repo_slug=repo, bb_base=BITBUCKET_BASE_URL,
+            )
+            if detected_branch is None:
+                print(f"[INFO] 브랜치 자동 감지 실패 → 원격 기본 브랜치로 clone")
+                branch_flag = ""
+                branch_label = "(원격 기본 브랜치)"
+            else:
                 branch = detected_branch
+                branch_flag = f"--branch '{branch}' "
+                branch_label = branch
+        else:
             branch_flag = f"--branch '{branch}' "
             branch_label = branch
         win_dest = str(dest)
@@ -358,7 +409,8 @@ def main():
     )
     parser.add_argument("project",  help="Bitbucket 프로젝트 키 (예: PROJ)")
     parser.add_argument("repo",     help="레포 슬러그 (예: my-service)")
-    parser.add_argument("--branch", default="main", help="대상 브랜치 (기본: main)")
+    parser.add_argument("--branch", default=None,
+                        help="대상 브랜치 (기본: 자동 감지 — 최신 커밋 기준)")
     parser.add_argument("--force",  action="store_true",
                         help="이미 존재하면 삭제 후 재clone")
     args = parser.parse_args()

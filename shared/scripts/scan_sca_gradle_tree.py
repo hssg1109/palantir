@@ -226,6 +226,66 @@ def _severity_label(score: float) -> str:
     return "Unknown"
 
 
+def _version_key(v: str) -> tuple:
+    """버전 문자열을 비교 가능한 튜플로 변환한다.
+
+    예) "10.1.34" → ((0,10),(0,1),(0,34))
+        "2.0.0-M3" → ((0,2),(0,0),(0,0),(1,"m3"))
+    숫자 파트가 알파 파트보다 앞에 오도록 (0, int) vs (1, str) 구분.
+    """
+    parts = re.split(r"[.\-]", v)
+    result = []
+    for p in parts:
+        try:
+            result.append((0, int(p)))
+        except ValueError:
+            result.append((1, p.lower()))
+    return tuple(result)
+
+
+def _extract_fixed_version(osv_vuln: dict, package_name: str) -> str:
+    """OSV vuln 객체의 affected 배열에서 해당 패키지의 최신 fixed 버전을 반환한다.
+
+    OSV affected 구조:
+      affected[].package.name == "group:artifact" (Maven) 또는 패키지명 (npm)
+      affected[].ranges[type=ECOSYSTEM].events: [{"introduced": "0"}, {"fixed": "1.2.3"}, ...]
+
+    여러 버전 브랜치에 대한 fixed 이벤트가 있을 수 있으며 (e.g. 9.0.x, 10.1.x 각각),
+    모든 fixed 버전 중 최댓값을 반환한다 — 가장 최신 패치 버전 권고.
+
+    Returns:
+        fixed version 문자열. 데이터 없으면 "".
+    """
+    artifact_suffix = package_name.split(":")[-1].lower()
+    fixed_versions: list[str] = []
+
+    for affected_item in osv_vuln.get("affected", []):
+        pkg = affected_item.get("package", {})
+        osv_name = pkg.get("name", "").lower()
+
+        # 패키지 매칭: 전체명 일치 또는 artifactId(콜론 이후) 일치
+        if not osv_name:
+            continue
+        if osv_name != package_name.lower() and osv_name.split(":")[-1] != artifact_suffix:
+            continue
+
+        for rng in affected_item.get("ranges", []):
+            # ECOSYSTEM (Maven 등) 및 SEMVER (npm 등) 모두 처리
+            if rng.get("type") not in ("ECOSYSTEM", "SEMVER"):
+                continue
+            for event in rng.get("events", []):
+                fv = event.get("fixed", "")
+                if fv:
+                    fixed_versions.append(fv)
+
+    if not fixed_versions:
+        return ""
+    try:
+        return max(fixed_versions, key=_version_key)
+    except Exception:
+        return fixed_versions[-1]
+
+
 # ─────────────────────────────────────────────────────────────────
 # HTTP 유틸리티
 # ─────────────────────────────────────────────────────────────────
@@ -1170,7 +1230,7 @@ def _build_findings_npm(
         package_name = name
 
         for osv_vuln in item["vulns"]:
-            info = _extract_vuln_info(osv_vuln)
+            info = _extract_vuln_info(osv_vuln, package_name)
             score = info["cvss_score"]
             cve = info["cve_id"]
             in_kev = cve in kev_set if cve else False
@@ -1180,17 +1240,18 @@ def _build_findings_npm(
                 if in_kev:
                     summary["실제사용"] += 1
                 findings.append({
-                    "type":        info["severity"],
-                    "package":     package_name,
-                    "version":     ver,
-                    "cve":         cve or info["osv_id"],
-                    "cvss":        score,
-                    "severity":    info["severity"],
-                    "summary":     info["summary"],
-                    "cvss_vector": info["cvss_vector"],
-                    "in_kev":      in_kev,
-                    "osv_id":      info["osv_id"],
-                    "status":      "취약",
+                    "type":          info["severity"],
+                    "package":       package_name,
+                    "version":       ver,
+                    "cve":           cve or info["osv_id"],
+                    "cvss":          score,
+                    "severity":      info["severity"],
+                    "summary":       info["summary"],
+                    "cvss_vector":   info["cvss_vector"],
+                    "in_kev":        in_kev,
+                    "osv_id":        info["osv_id"],
+                    "status":        "취약",
+                    "fixed_version": info["fixed_version"],
                 })
             else:
                 summary["정보"] += 1
@@ -1202,12 +1263,14 @@ def _build_findings_npm(
 # OSV 취약점 → CVE 정보 추출
 # ─────────────────────────────────────────────────────────────────
 
-def _extract_vuln_info(osv_vuln: dict) -> dict:
-    """OSV 취약점 객체에서 CVE ID, CVSS 점수, 설명을 추출한다.
+def _extract_vuln_info(osv_vuln: dict, package_name: str = "") -> dict:
+    """OSV 취약점 객체에서 CVE ID, CVSS 점수, 설명, fixed 버전을 추출한다.
 
     OSV severity 필드 구조:
       {"severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/..."}]}
     CVSS 벡터 문자열을 직접 파싱하여 Base Score 를 계산한다.
+
+    package_name 이 주어지면 affected 배열에서 fixed 버전도 추출한다.
     """
     osv_id = osv_vuln.get("id", "")
     summary = osv_vuln.get("summary", "")
@@ -1252,13 +1315,16 @@ def _extract_vuln_info(osv_vuln: dict) -> dict:
         label_score_map = {"CRITICAL": 9.0, "HIGH": 7.0, "MODERATE": 5.0, "MEDIUM": 5.0, "LOW": 2.0}
         cvss_score = label_score_map.get(label, 0.0)
 
+    fixed_version = _extract_fixed_version(osv_vuln, package_name) if package_name else ""
+
     return {
-        "osv_id": osv_id,
-        "cve_id": cve_id,
-        "summary": summary or details[:120],
-        "cvss_score": cvss_score,
-        "cvss_vector": cvss_vector,
-        "severity": _severity_label(cvss_score),
+        "osv_id":        osv_id,
+        "cve_id":        cve_id,
+        "summary":       summary or details[:120],
+        "cvss_score":    cvss_score,
+        "cvss_vector":   cvss_vector,
+        "severity":      _severity_label(cvss_score),
+        "fixed_version": fixed_version,
     }
 
 
@@ -1302,7 +1368,7 @@ def _build_findings(
         package_name = f"{gid}:{aid}"
 
         for osv_vuln in item["vulns"]:
-            info = _extract_vuln_info(osv_vuln)
+            info = _extract_vuln_info(osv_vuln, package_name)
             score = info["cvss_score"]
             cve = info["cve_id"]
             in_kev = cve in kev_set if cve else False
@@ -1313,17 +1379,18 @@ def _build_findings(
                 if in_kev:
                     summary["실제사용"] += 1
                 finding = {
-                    "type":        info["severity"],
-                    "package":     package_name,
-                    "version":     ver,
-                    "cve":         cve or info["osv_id"],
-                    "cvss":        score,
-                    "severity":    info["severity"],
-                    "summary":     info["summary"],
-                    "cvss_vector": info["cvss_vector"],
-                    "in_kev":      in_kev,
-                    "osv_id":      info["osv_id"],
-                    "status":      "취약",
+                    "type":          info["severity"],
+                    "package":       package_name,
+                    "version":       ver,
+                    "cve":           cve or info["osv_id"],
+                    "cvss":          score,
+                    "severity":      info["severity"],
+                    "summary":       info["summary"],
+                    "cvss_vector":   info["cvss_vector"],
+                    "in_kev":        in_kev,
+                    "osv_id":        info["osv_id"],
+                    "status":        "취약",
+                    "fixed_version": info["fixed_version"],
                 }
                 findings.append(finding)
             else:
@@ -1336,30 +1403,46 @@ def _build_findings(
 
 
 def _build_grouped(findings: list[dict]) -> list[dict]:
-    """findings 를 패키지 단위로 그룹핑한다 (보고서 가독성용)."""
+    """findings 를 패키지 단위로 그룹핑한다 (보고서 가독성용).
+
+    각 패키지 항목에 recommended_version 필드를 추가한다.
+    recommended_version: 해당 패키지의 모든 CVE fixed_version 중 최댓값.
+    이 버전으로 업그레이드하면 식별된 CVE가 모두 패치된다.
+    """
     pkg_map: dict[str, dict] = {}
     for f in findings:
         key = f"{f['package']}:{f['version']}"
         if key not in pkg_map:
             pkg_map[key] = {
-                "package": f["package"],
-                "version": f["version"],
-                "max_cvss": f["cvss"],
-                "severity": f["severity"],
-                "cves": [],
-                "in_kev": False,
+                "package":             f["package"],
+                "version":             f["version"],
+                "max_cvss":            f["cvss"],
+                "severity":            f["severity"],
+                "cves":                [],
+                "in_kev":              False,
+                "recommended_version": "",
             }
         pkg_map[key]["cves"].append({
-            "cve":     f["cve"],
-            "cvss":    f["cvss"],
-            "summary": f["summary"],
-            "in_kev":  f["in_kev"],
+            "cve":           f["cve"],
+            "cvss":          f["cvss"],
+            "summary":       f["summary"],
+            "in_kev":        f["in_kev"],
+            "fixed_version": f.get("fixed_version", ""),
         })
         if f["in_kev"]:
             pkg_map[key]["in_kev"] = True
         if f["cvss"] > pkg_map[key]["max_cvss"]:
             pkg_map[key]["max_cvss"] = f["cvss"]
             pkg_map[key]["severity"] = f["severity"]
+
+    # 패키지별 recommended_version: 모든 CVE fixed_version 중 최댓값
+    for g in pkg_map.values():
+        fixed_vers = [c["fixed_version"] for c in g["cves"] if c.get("fixed_version")]
+        if fixed_vers:
+            try:
+                g["recommended_version"] = max(fixed_vers, key=_version_key)
+            except Exception:
+                g["recommended_version"] = fixed_vers[-1]
 
     return sorted(pkg_map.values(), key=lambda g: g["max_cvss"], reverse=True)
 
@@ -1368,20 +1451,34 @@ def _build_grouped(findings: list[dict]) -> list[dict]:
 # auto_findings 생성 (표준 finding 스키마)
 # ─────────────────────────────────────────────────────────────────
 
-_SCA_RECOMMENDATION = (
+_SCA_FALLBACK_RECOMMENDATION = (
     "취약한 버전의 라이브러리를 보안 패치가 적용된 최신 버전으로 업그레이드하세요. "
-    "CISA KEV에 등재된 CVE는 즉시 조치가 필요합니다. "
     "업그레이드가 불가한 경우 해당 라이브러리의 취약 기능 사용을 제한하거나 "
     "WAF 룰로 완화 조치를 적용하세요."
 )
 
 
+def _build_recommendation(pkg: str, fixed_version: str, in_kev: bool) -> str:
+    """라이브러리명과 fixed_version으로 구체적인 조치권고 문자열을 생성한다."""
+    artifact = pkg.split(":")[-1] if ":" in pkg else pkg
+    kev_note = " CISA KEV 등재 CVE이므로 즉시 조치가 필요합니다." if in_kev else ""
+    if fixed_version:
+        return (
+            f"{artifact} {fixed_version} 이상으로 업그레이드하세요.{kev_note} "
+            "업그레이드가 불가한 경우 해당 라이브러리의 취약 기능 사용을 제한하거나 "
+            "WAF 룰로 완화 조치를 적용하세요."
+        )
+    return _SCA_FALLBACK_RECOMMENDATION + (" CISA KEV 등재 CVE이므로 즉시 조치가 필요합니다." if in_kev else "")
+
+
 def _sca_finding_to_auto_finding(f: dict, seq: int) -> dict:
     """SCA finding item → 표준 finding object."""
-    cve_id = f.get("cve") or f.get("osv_id") or ""
-    pkg    = f.get("package", "")
-    ver    = f.get("version", "")
-    cvss   = f.get("cvss", 0.0)
+    cve_id      = f.get("cve") or f.get("osv_id") or ""
+    pkg         = f.get("package", "")
+    ver         = f.get("version", "")
+    cvss        = f.get("cvss", 0.0)
+    fixed_ver   = f.get("fixed_version", "")
+    in_kev      = f.get("in_kev", False)
 
     return {
         "finding_id":       f"SCA-AUTO-{seq:03d}",
@@ -1405,17 +1502,18 @@ def _sca_finding_to_auto_finding(f: dict, seq: int) -> dict:
         "description": (
             f"{cve_id} — {f.get('summary', '')} "
             f"(CVSS {cvss:.1f}"
-            + (" / CISA KEV 등재" if f.get("in_kev") else "")
+            + (" / CISA KEV 등재" if in_kev else "")
             + ")"
         ),
-        "recommendation": _SCA_RECOMMENDATION,
+        "recommendation": _build_recommendation(pkg, fixed_ver, in_kev),
         "code_snippet":   "",
         "evidence":       [{
-            "cve":         cve_id,
-            "cvss":        cvss,
-            "cvss_vector": f.get("cvss_vector", ""),
-            "osv_id":      f.get("osv_id", ""),
-            "in_kev":      f.get("in_kev", False),
+            "cve":           cve_id,
+            "cvss":          cvss,
+            "cvss_vector":   f.get("cvss_vector", ""),
+            "osv_id":        f.get("osv_id", ""),
+            "in_kev":        in_kev,
+            "fixed_version": fixed_ver,
         }],
         "needs_review":   False,
     }

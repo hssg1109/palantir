@@ -12,8 +12,8 @@
 #### [RULE-1] SENSITIVE_LOGGING — 로그 레벨 단위 병합 (Step 6 엄수)
 
 자동스캔이 탐지한 SENSITIVE_LOGGING 개별 건들을 **반드시 아래 2버킷으로 통합**한다:
-- **DATA-LOG-001 (Critical)**: `info / warn / error / fatal` 레벨 PII 로깅 → 전 모듈 통합 1건
-- **DATA-LOG-002 (Medium)**: `debug / trace` 레벨 PII 로깅 → 전 모듈 통합 1건
+- **DATA-LOG-001 (High, result: 취약)**: `info / warn / error / fatal` 레벨 PII 로깅 → 전 모듈 통합 1건
+- **DATA-LOG-002 (Medium, result: 정보)**: `debug / trace` 레벨 PII 로깅 → 전 모듈 통합 1건 (운영 환경 기본 비활성화 → 잠재 위험, 정보성 처리)
 
 **금지**: 모듈별 분리(`DATA-LOG-001(shoppingtab)`, `DATA-LOG-001(pointcon)`)
 **금지**: 파일별 분리(파일당 1건 finding 출력)
@@ -32,7 +32,10 @@
 - `affected_endpoints` 있음 → Controller 코드 **직접 Read**해서 판정:
   - 본인 정보 반환 API (Safe by Design) → 양호
   - `@JsonIgnore` / `@JsonSerialize(using=MaskSerializer.class)` 적용 → 양호
-  - PII 필드 노출 + 타인 조회 가능 → 취약 (finding 확정)
+  - PII 필드 노출 + 타인 조회 가능 → **취약 (finding 확정, result: 취약, severity: High)**
+- **`@ToString`/`@Data` 어노테이션 only — API 직접 노출 추적 불가 또는 `affected_endpoints` 비어있으나 `toString()` 로그 경유 잠재 노출**:
+  - `result: 정보, severity: Medium` — 직접 API 응답 노출이 아닌 2단계 간접 경로(어노테이션 + toString() 호출)이므로 정보성 처리
+  - finding title에 "Lombok @ToString PII 필드 노출" 명시
 - 한글 주석 파싱 버그(ex: `민감 필드(//)`, `민감 필드(용)`) → 코드 확인 후 FP 처리
 
 #### [RULE-4] 고객사 민감정보 마스킹 — finding 출력 전 필수 (진단 및 보고서 공통)
@@ -89,8 +92,8 @@
 | SENSITIVE_LOGGING (LOG-001) | `## 영향 파일 목록 (N건)` |
 | SENSITIVE_LOGGING (LOG-002) | `## 디버그 로그 파일 목록 (N건)` |
 | API_RESPONSE_PII | `## PII 노출 엔드포인트 목록` |
-| DTO_EXPOSURE (Critical) | `## Critical DTO 클래스 목록` |
-| DTO_EXPOSURE (High) | `## High DTO 클래스 목록` |
+| DTO_EXPOSURE (Medium, @ToString 간접 노출) | `## DTO 클래스 목록 (N건, @ToString PII 노출)` |
+| DTO_EXPOSURE (High, API 직접 노출) | `## PII 노출 DTO 클래스 목록` |
 
 ---
 
@@ -325,7 +328,7 @@ BFF 서버가 서버사이드 환경변수에서 토큰을 로드하여 외부 A
 
 | 버킷 | 조건 | finding 1건으로 통합 | 결과 | 심각도 |
 |---|---|---|---|---|
-| `high` | `info/warn/error/fatal` 레벨 보호 필수 변수 로깅 | 전체 파일 × 라인 집계 | **취약** | **Critical** |
+| `high` | `info/warn/error/fatal` 레벨 보호 필수 변수 로깅 | 전체 파일 × 라인 집계 | **취약** | **High** |
 | `low` | `debug/trace` 레벨 보호 필수 변수 로깅 | 전체 파일 × 라인 집계 | 정보 | **Medium** |
 
 **evidence 기재 방법:**
@@ -370,12 +373,15 @@ BFF 서버가 서버사이드 환경변수에서 토큰을 로드하여 외부 A
 ```
 분석 흐름:
 task25.json DTO finding
-  └─ affected_endpoints 존재 여부
-       ├─ 없음(INTERNAL/Consumer DTO) → FP → 7-1~7-4 FP 규칙 적용
-       └─ 있음 → 해당 Controller 코드 확인
-                   ├─ 본인 정보 반환 API → Safe by Design → 양호
-                   ├─ PII 필드에 @JsonIgnore 적용 → 양호
-                   └─ PII 필드 노출 + 타인 조회 가능 → 취약 (finding 확정)
+  └─ 탐지 유형 분기
+       ├─ @ToString/@Data 어노테이션 only (API 역추적 불가)
+       │    └─ result: 정보, severity: Medium (2단계 간접 경로 → 정보성)
+       └─ affected_endpoints 존재 여부 (API 역추적 완료)
+            ├─ 없음(INTERNAL/Consumer DTO) → FP → 7-1~7-4 FP 규칙 적용
+            └─ 있음 → 해당 Controller 코드 확인
+                        ├─ 본인 정보 반환 API → Safe by Design → 양호
+                        ├─ PII 필드에 @JsonIgnore 적용 → 양호
+                        └─ PII 필드 노출 + 타인 조회 가능 → 취약 (result: 취약, severity: High)
 ```
 
 > `affected_endpoints`가 없고(`[]`) `--api-inventory` 옵션을 사용하지 않은 경우:

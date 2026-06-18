@@ -173,7 +173,6 @@ SKILL_CONFIG = {
             "        ※ 소스 확인 필요 시 read_file 또는 grep으로 해당 파일만 핀포인트 조회\n"
             "Step 3. write_file '{prefix}/findings_INJ.json' (최종 finding 목록)\n"
             "        write_file '{prefix}/summary_injection.md' (통계 + 테이블)\n"
-            "Step 3. run_cleanup(prefix='{prefix}', repo='{repo}')\n"
             "prefix={prefix}, repo={repo}"
         ),
     },
@@ -207,7 +206,6 @@ SKILL_CONFIG = {
             "        ※ 소스 확인 필요 시 read_file 또는 grep으로 해당 파일만 핀포인트 조회\n"
             "Step 3. write_file '{prefix}/findings_XSS.json'\n"
             "        write_file '{prefix}/summary_xss.md'\n"
-            "Step 3. run_cleanup(prefix='{prefix}', repo='{repo}')\n"
             "prefix={prefix}, repo={repo}"
         ),
     },
@@ -237,7 +235,6 @@ SKILL_CONFIG = {
             "        ※ 소스 확인 필요 시 read_file 또는 grep으로 해당 파일만 핀포인트 조회\n"
             "Step 3. write_file '{prefix}/findings_FILE.json'\n"
             "        write_file '{prefix}/summary_file.md'\n"
-            "Step 3. run_cleanup(prefix='{prefix}', repo='{repo}')\n"
             "prefix={prefix}, repo={repo}"
         ),
     },
@@ -269,7 +266,6 @@ SKILL_CONFIG = {
             "        ※ 소스 확인 필요 시 read_file 또는 grep으로 해당 파일만 핀포인트 조회\n"
             "Step 3. write_file '{prefix}/findings_DATA.json'\n"
             "        write_file '{prefix}/summary_data.md'\n"
-            "Step 3. run_cleanup(prefix='{prefix}', repo='{repo}')\n"
             "prefix={prefix}, repo={repo}"
         ),
     },
@@ -299,7 +295,6 @@ SKILL_CONFIG = {
             "           [4] 한국어 취약점 설명 (이 프로젝트 영향 범위 포함)\n"
             "Step 3. write_file '{prefix}/findings_SCA.json'\n"
             "        write_file '{prefix}/summary_sca.md'\n"
-            "Step 3. run_cleanup(prefix='{prefix}', repo='{repo}')\n"
             "prefix={prefix}, repo={repo}"
         ),
     },
@@ -369,24 +364,6 @@ TOOL_SCHEMAS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "run_cleanup",
-            "description": (
-                "testbed 소스코드를 삭제합니다. "
-                "Summary 출력 완료 후 마지막 단계로 호출하세요."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "prefix": {"type": "string", "description": "결과 경로 (예: state/gws/20260415_0915)"},
-                    "repo":   {"type": "string", "description": "repo 슬러그 (예: gws)"},
-                },
-                "required": ["prefix", "repo"],
-            },
-        },
-    },
 ]
 
 # ─── 도구 실행 ────────────────────────────────────────────────────────────────
@@ -397,8 +374,7 @@ def _resolve(path_str: str) -> Path:
     return p if p.is_absolute() else PALANTIR_DIR / p
 
 
-def execute_tool(name: str, inputs: dict, *,
-                 batch: bool = False, skip_cleanup: bool = False) -> str:
+def execute_tool(name: str, inputs: dict, *, batch: bool = False) -> str:
     # 배치 모드: 도구 출력 크기를 줄여 컨텍스트 누적 속도 억제
     READ_LIMIT = 12_000 if batch else 32_000
     GREP_LIMIT =  6_000 if batch else 16_000
@@ -449,20 +425,7 @@ def execute_tool(name: str, inputs: dict, *,
             return "\n".join(rel) if rel else "(없음)"
 
         elif name == "run_cleanup":
-            prefix = inputs["prefix"]
-            repo   = inputs["repo"]
-
-            if skip_cleanup:
-                return "skip_cleanup 옵션으로 testbed 보존."
-
-            print(f"\n  [정리] cleanup_testbed.py {repo} --force")
-            r2 = subprocess.run(
-                ["python3", "tools/cleanup_testbed.py", repo, "--force"],
-                capture_output=True, text=True, cwd=str(PALANTIR_DIR),
-            )
-            cleanup_out = (r2.stdout + r2.stderr).strip()
-            print(f"  {cleanup_out[:500]}")
-            return f"testbed 정리 완료.\n{cleanup_out[:200]}"
+            return "[INFO] run_cleanup은 비활성화됨 — testbed는 수동으로 관리합니다."
 
         return f"[ERROR] 알 수 없는 도구: {name}"
 
@@ -967,14 +930,13 @@ HARD RULES:
 
 def run_llm_check_claude_cli(skill: str, src: str, prefix: str,
                               model: str | None, max_turns: int,
-                              skip_upload: bool, batch: bool, skip_cleanup: bool,
+                              batch: bool,
                               max_budget_usd: float = 3.0) -> None:
     """
     claude -p CLI를 LLM 엔진으로 사용.
     Claude Pro 구독 토큰 사용 (API 키 불필요).
     allowedTools=Read,Write,Grep,Glob → Bash/Edit 차단으로 스크립트 자기수정 루프 구조적 방지.
     max_budget_usd: 1회 실행당 토큰 비용 상한 (기본 $3.0 — skill 진단 이상 소비 방지).
-    Upload/Cleanup은 claude -p 종료 후 parent Python이 직접 처리.
     """
     repo = Path(src).name
 
@@ -1070,14 +1032,6 @@ def run_llm_check_claude_cli(skill: str, src: str, prefix: str,
         return
     print(f"  ✓ {findings_path.name} ({findings_path.stat().st_size:,} bytes)")
 
-    # Cleanup (parent가 직접 처리 — LLM 없이)
-    if not skip_cleanup:
-        print(f"\n  [정리] cleanup_testbed.py {repo} --force")
-        r2 = subprocess.run(
-            ["python3", "tools/cleanup_testbed.py", repo, "--force"],
-            capture_output=True, text=True, cwd=str(PALANTIR_DIR),
-        )
-        print(f"  {(r2.stdout + r2.stderr).strip()[:300]}")
 
 
 # ─── Anthropic 도구 스키마 변환 ───────────────────────────────────────────────
@@ -1099,8 +1053,8 @@ def _to_anthropic_tools(openai_schemas: list[dict]) -> list[dict]:
 
 def run_llm_check_anthropic(skill: str, src: str, prefix: str,
                              model: str, api_key: str,
-                             max_turns: int, skip_upload: bool,
-                             batch: bool, skip_cleanup: bool) -> None:
+                             max_turns: int,
+                             batch: bool) -> None:
     try:
         import anthropic as anthropic_sdk
     except ImportError:
@@ -1124,14 +1078,9 @@ def run_llm_check_anthropic(skill: str, src: str, prefix: str,
         {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}
     ]
 
-    anthropic_tools = _to_anthropic_tools(
-        TOOL_SCHEMAS if not skip_upload
-        else [t for t in TOOL_SCHEMAS if t["function"]["name"] != "run_cleanup"]
-    )
+    anthropic_tools = _to_anthropic_tools(TOOL_SCHEMAS)
 
     user_msg = _make_llm_prompt(skill, src, prefix)
-    if skip_upload:
-        user_msg += "\n\n(이번 실행에서는 Cleanup은 건너뜁니다.)"
 
     messages: list[dict] = [{"role": "user", "content": user_msg}]
 
@@ -1188,7 +1137,7 @@ def run_llm_check_anthropic(skill: str, src: str, prefix: str,
             for tb in tool_blocks:
                 arg_preview = ", ".join(f"{k}={str(v)[:60]}" for k, v in dict(tb.input).items())
                 print(f"  [Tool] {tb.name}({arg_preview})")
-                result = execute_tool(tb.name, dict(tb.input), batch=batch, skip_cleanup=skip_cleanup)
+                result = execute_tool(tb.name, dict(tb.input), batch=batch)
                 tool_results.append({
                     "type":        "tool_result",
                     "tool_use_id": tb.id,
@@ -1209,7 +1158,7 @@ _BATCH_GUARDRAILS = """
 [BATCH MODE — 토큰 절약 가드레일 (CRITICAL, 반드시 준수)]
 1. 스크립트 오류 금지 대응: 스크립트(scan_* 등) 실행 오류가 발생하면
    원본 Python 코드를 절대 열어보거나 수정하지 말 것.
-   즉시 실패 사유 한 줄을 write_file로 기록하고 run_cleanup을 호출하여 종료.
+   즉시 실패 사유 한 줄을 write_file로 기록하고 종료.
 2. 소스 직접 탐색 최소화:
    - [허용] 진단 참조 문서(.md 파일, ref 목록 내 경로): read_file로 자유롭게 읽을 것.
    - [제한] testbed/ 하위 소스파일(.java/.kt/.py 등): JSON의 code_snippet/evidence로
@@ -1322,7 +1271,6 @@ def build_system_prompt(skill: str, batch: bool = False) -> str:
 HARD RULES:
 - "계속할까요?", "do you want to proceed?" 등 확인 질문 절대 금지
 - Auto-Scan은 이미 완료된 상태 — 스캔 스크립트를 다시 실행하지 마세요
-- LLM-Check 완료 후 반드시 run_cleanup 도구를 호출하세요
 - write_file은 state/ 하위 경로에만 허용됩니다
 {refs_hint}
 
@@ -1335,8 +1283,8 @@ HARD RULES:
 
 def run_llm_check(skill: str, src: str, prefix: str,
                   provider: str, model: str, api_key: str | None, base_url: str | None,
-                  max_turns: int, skip_upload: bool,
-                  batch: bool = False, skip_cleanup: bool = False) -> None:
+                  max_turns: int,
+                  batch: bool = False) -> None:
     try:
         from openai import OpenAI, RateLimitError, APIStatusError
     except ImportError:
@@ -1361,14 +1309,9 @@ def run_llm_check(skill: str, src: str, prefix: str,
     # 배치 모드 컨텍스트 한도 (chars): 초과 시 조기 종료
     MAX_CTX_CHARS = 400_000 if batch else 900_000
 
-    # cleanup 스킵 시 run_cleanup 도구 제거
-    tools = TOOL_SCHEMAS if not skip_upload else [
-        t for t in TOOL_SCHEMAS if t["function"]["name"] != "run_cleanup"
-    ]
+    tools = TOOL_SCHEMAS
 
     user_msg = _make_llm_prompt(skill, src, prefix)
-    if skip_upload:
-        user_msg += "\n\n(이번 실행에서는 Cleanup은 건너뜁니다.)"
 
     messages: list[dict] = [{"role": "user", "content": user_msg}]
 
@@ -1463,7 +1406,7 @@ def run_llm_check(skill: str, src: str, prefix: str,
                 )
                 print(f"  [Tool] {name}({arg_preview})")
 
-                result = execute_tool(name, args, batch=batch, skip_cleanup=skip_cleanup)
+                result = execute_tool(name, args, batch=batch)
 
                 tool_results.append({
                     "role":         "tool",
@@ -1529,9 +1472,6 @@ def main():
                         help="API 키 (생략 시 provider 환경변수 자동 탐지)")
     parser.add_argument("--skip-scan",    action="store_true", help="Auto-Scan 건너뜀")
     parser.add_argument("--skip-llm",     action="store_true", help="LLM-Check 건너뜀")
-    parser.add_argument("--skip-upload",  action="store_true", help="(레거시 — --skip-cleanup 사용 권장) Cleanup 건너뜀")
-    parser.add_argument("--skip-cleanup", action="store_true",
-                        help="testbed 삭제 생략 (배치 모드에서 멀티 skill 재사용 시 사용)")
     parser.add_argument("--batch",        action="store_true", default=True,
                         help="배치 모드: 토큰 절약 가드레일 활성화 (기본 ON). --no-batch로 해제")
     parser.add_argument("--no-batch",     action="store_false", dest="batch",
@@ -1596,22 +1536,22 @@ def main():
             run_llm_check_claude_cli(
                 args.skill, args.src, args.prefix,
                 model if model != pconf["default_model"] or args.model else None,
-                max_turns, args.skip_upload,
-                batch=args.batch, skip_cleanup=args.skip_cleanup,
+                max_turns,
+                batch=args.batch,
                 max_budget_usd=args.max_budget_usd,
             )
         elif native is True:
             run_llm_check_anthropic(
                 args.skill, args.src, args.prefix,
-                model, api_key, max_turns, args.skip_upload,
-                batch=args.batch, skip_cleanup=args.skip_cleanup,
+                model, api_key, max_turns,
+                batch=args.batch,
             )
         else:
             run_llm_check(
                 args.skill, args.src, args.prefix,
                 args.provider, model, api_key, base_url,
-                max_turns, args.skip_upload,
-                batch=args.batch, skip_cleanup=args.skip_cleanup,
+                max_turns,
+                batch=args.batch,
             )
     else:
         print("\n[Phase 2] LLM-Check — 스킵")
