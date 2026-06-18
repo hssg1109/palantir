@@ -175,12 +175,12 @@ state/my-service-api/
 [LLM 분석] 서비스 유형: 인증/회원 API (B2C), OCB 포인트 적립 처리
 [LLM 분석] 특이사항: 외부 제휴사 연동 API 다수, 개인정보 처리 없음
 
-추가 진단 필요 여부를 입력하세요 (동적 진단, 추가 시나리오 모의해킹 등):
+동적진단 등 추가진단 필요여부를 입력하세요 (동적 진단, 추가 시나리오 모의해킹 등):
   y = 필요 / n = 불필요 [n]:
 ```
 
 - 진단자가 `y`/`n` 입력 → `state/<repo>/review_meta.json`에 저장
-- 최종 보고서 **진단 개요** 테이블에 "서비스 특징" 및 "추가 진단 필요 여부" 행으로 반영
+- 최종 보고서 **진단 개요** 테이블에 "동적진단 등 추가진단 필요여부" 행으로 반영
 
 #### finding 판정
 
@@ -482,10 +482,9 @@ python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
 | 항목 | 내용 |
 | 진단 레포 | my-service-api |
 | 서비스 유형 | ... |
-| 서비스 특징 | Spring Boot 2.7 / Java 11 / 인증·회원 API |
 | 진단 일시 | 2026-06-09 |
 | 취약점 건수 | Critical 1 / High 3 / Medium 2 / Low 2 |
-| 추가 진단 필요 여부 | 불필요 |
+| 동적진단 등 추가진단 필요여부 | 불필요 |
 
 ## 2. 취약점 목록
 | ID | 분류 | 제목 | 위험도 | 조치 기한 |
@@ -668,7 +667,7 @@ palantir/
 │   ├── clone_repo.py               # 소스코드 clone
 │   ├── pipeline_runner.py          # 배치 파이프라인
 │   ├── approve_report.py           # 보고서 생성 + 배포 통합
-│   ├── generate_final_report.py    # Markdown 보고서 생성 (서비스 특징 포함)
+│   ├── generate_final_report.py    # Markdown 보고서 생성 (추가진단 여부 포함)
 │   ├── audit_utils.py              # vuln_registry / audit_log JSON 관리
 │   ├── update_vuln_registry.py     # vuln_registry 수동 갱신 유틸
 │   ├── ihaeng_compare.py           # 이행 점검 비교 도구
