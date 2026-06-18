@@ -25,7 +25,7 @@ STATE_DIR    = PALANTIR_DIR / "state"
 LOGS_DIR     = PALANTIR_DIR / "logs"
 
 SKILL_ORDER   = ["injection", "xss", "file", "data", "sca"]
-BB_REMOTE_URL = "https://code.skplanet.com/scm/vulchk/audit_result.git"
+BB_REMOTE_URL = "https://code.skplanet.com/scm/vulchk/palantir_result.git"
 
 PSEXE        = "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"
 # git workspace (clone of audit_result)
@@ -117,7 +117,7 @@ def _collect_scan_meta(repo: str) -> Path | None:
 
 def _run_powershell(ps_script: str) -> int:
     try:
-        PS_TMP_WSL.write_text(ps_script, encoding="utf-8")
+        PS_TMP_WSL.write_text(ps_script, encoding="utf-8-sig")
     except Exception as e:
         print(f"[WARN] PS1 임시 파일 생성 실패: {e} — 인라인 실행")
         result = subprocess.run([PSEXE, "-NoProfile", "-NonInteractive", "-Command", ps_script])
@@ -211,6 +211,9 @@ def main() -> int:
     git_auth = f"-c credential.helper= -c \"http.extraHeader=Authorization: Bearer {token}\""
 
     ps_script = "\n".join([
+        "chcp 65001 | Out-Null",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "$OutputEncoding = [System.Text.Encoding]::UTF8",
         "$ErrorActionPreference = 'Continue'",
         "$env:PATH = 'C:\\Program Files\\Git\\bin;C:\\Program Files\\Git\\cmd;' + $env:PATH",
         f"$remote = '{BB_REMOTE_URL}'",

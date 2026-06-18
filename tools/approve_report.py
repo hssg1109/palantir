@@ -166,7 +166,51 @@ def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
     return counts
 
 
-def _send_to_jira_gateway(repo: str, page_id: str, report_key: str) -> None:
+def _extract_review_notes(repo: str, run_id: str | None) -> list[dict]:
+    """
+    findings_*.json에서 리뷰 완료된 finding의 review_note를 추출한다.
+    매니저 검토 UI에서 티켓 발행 여부 판단 근거로 활용된다.
+    """
+    paths = _collect_findings_paths(repo, run_id)
+    notes: list[dict] = []
+
+    for path in paths:
+        try:
+            skill = path.parent.parent.name  # state/<repo>/<skill>/<run_id>/
+            doc   = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+
+        for f in doc.get("findings", []):
+            if not f.get("reviewed"):
+                continue
+            review_status = f.get("review_status", "")
+            if review_status == "그룹병합":
+                continue
+
+            note_text = (f.get("review_note") or "").strip()
+            if not note_text and review_status == "오탐":
+                note_text = "오탐 판정 — 보고서에서 제외됨"
+
+            notes.append({
+                "finding_id":    f.get("finding_id", ""),
+                "skill":         skill,
+                "title":         f.get("title", ""),
+                "severity":      f.get("severity", ""),
+                "decision":      review_status,
+                "review_result": f.get("review_result") or f.get("result", ""),
+                "review_note":   note_text,
+            })
+
+    return notes
+
+
+def _send_to_jira_gateway(
+    repo: str,
+    page_id: str,
+    report_key: str,
+    review_notes: list | None = None,
+) -> None:
     """게이트웨이에 MD 페이로드를 POST — 검토 대기(pending) 티켓으로 등록."""
     import os
     from dotenv import load_dotenv
@@ -193,6 +237,7 @@ def _send_to_jira_gateway(repo: str, page_id: str, report_key: str) -> None:
             "page_id":      page_id or "",
             "md_text":      md_text,
             "jira_project": jira_project,
+            "review_notes": review_notes or [],
         }, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             f"{gateway_url.rstrip('/')}/api/pending",
@@ -228,6 +273,7 @@ def main() -> int:
 
     run_id   = args.run_id
     run_label = run_id if run_id else "(레포 단위)"
+    _confluence_url = ""   # 게시 완료 후 채워짐 (audit 기록용)
     print(f"\n[approve] RUN_ID={run_label}  repo={args.repo}")
     print("=" * 60)
 
@@ -318,6 +364,7 @@ def main() -> int:
                     load_dotenv(PALANTIR_DIR / ".env")
                     base_url = os.getenv("CONFLUENCE_BASE_URL", "https://wiki.skplanet.com")
                     report_url = f"{base_url}/pages/viewpage.action?pageId={page_id}"
+                    _confluence_url = report_url
                     print(f"\n      체크리스트 보고서 컬럼 갱신 중 ... ({report_url})")
                     _run([sys.executable, "tools/update_ocb_plan.py",
                           "--report", args.repo, report_url])
@@ -325,7 +372,9 @@ def main() -> int:
                     print(f"\n      [WARN] .confluence_pages.json에서 {report_key} 를 찾지 못해 체크리스트 갱신 생략")
             # Jira 티켓 게이트웨이 전송
             print(f"\n[4/4] Jira 티켓 게이트웨이 전송...")
-            _send_to_jira_gateway(args.repo, page_id or "", report_key)
+            _review_notes = _extract_review_notes(args.repo, run_id)
+            print(f"      review_notes 추출: {len(_review_notes)}건")
+            _send_to_jira_gateway(args.repo, page_id or "", report_key, _review_notes)
     else:
         print("\n[3/4] Confluence 게시 생략 (--publish 미지정)")
         if run_id:
@@ -336,8 +385,8 @@ def main() -> int:
                             f"--repo {args.repo} --publish")
         print(f"      게시하려면: {publish_hint}")
 
-    # 진단이력 업로드 (VULCHK/audit_result)
-    print("\n[audit] 진단이력 업로드 중 (VULCHK/audit_result)...")
+    # 진단이력 업로드 (VULCHK/palantir_result)
+    print("\n[audit] 진단이력 업로드 중 (VULCHK/palantir_result)...")
     try:
         import importlib.util, os as _os
         spec = importlib.util.spec_from_file_location(
@@ -353,6 +402,58 @@ def main() -> int:
             _hint += f" --run-id {run_id}"
         print(f"  [WARN] 업로드 실패: {_exc}")
         print(f"  수동 실행: {_hint}")
+
+    # vuln_registry 갱신 + service_meta/runs 통합 + audit log 기록
+    print("\n[audit] vuln_registry 갱신 및 audit_log 기록 중...")
+    try:
+        sys.path.insert(0, str(PALANTIR_DIR))
+        from tools.audit_utils import (
+            update_registry_from_findings,
+            update_service_meta,
+            add_run_entry,
+            log_report_published,
+        )
+        # findings[] 갱신
+        reg_stats = update_registry_from_findings(
+            repo=args.repo,
+            run_id=run_id,
+            report_url=_confluence_url,
+        )
+        print(f"  registry.findings: 신규 +{reg_stats['added']} / 업데이트 {reg_stats['updated']}")
+
+        # service_meta 동기화 (scan_meta + review_meta → registry)
+        update_service_meta(args.repo)
+        print("  registry.service_meta: 동기화 완료")
+
+        # runs[] 실행 이력 추가
+        add_run_entry(
+            args.repo,
+            run_id,
+            finding_counts={
+                "total":      stats.get("total_findings", 0),
+                "reportable": stats.get("reportable", 0),
+                "fp_applied": stats.get("updated", 0),
+            },
+            report_path=report_path,
+            confluence_url=_confluence_url,
+        )
+        print("  registry.runs: 실행 이력 추가 완료")
+
+        # audit_log.json 글로벌 이벤트 기록 (유지)
+        log_report_published(
+            repo=args.repo,
+            run_id=run_id,
+            report_path=report_path,
+            confluence_url=_confluence_url,
+            findings_count={
+                "total":      stats.get("total_findings", 0),
+                "reportable": stats.get("reportable", 0),
+                "fp_applied": stats.get("updated", 0),
+            },
+        )
+        print("  audit_log: report_published 이벤트 기록 완료")
+    except Exception as _exc:
+        print(f"  [WARN] audit 기록 실패: {_exc}")
 
     # 완료 요약
     print("\n" + "=" * 60)

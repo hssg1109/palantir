@@ -28,7 +28,7 @@
 ## 실행 전 준비
 
 ```bash
-# 스캔 결과 로드
+# 스캔 결과 로드 — 라이브러리별 CVE 목록 + recommended_version 확인
 cat state/<prefix>/sca.json | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
@@ -37,9 +37,15 @@ print('프로젝트:', meta.get('project_name'))
 print('스캔방법:', meta.get('scan_method'))
 print('HIGH+CRITICAL CVE:', meta.get('high_critical_cve'))
 for g in d.get('grouped', []):
-    print(f\"  [{g['severity']}] {g['package']} {g['version']} — CVE {len(g['cves'])}건\")
+    rv = g.get('recommended_version', '')
+    rv_str = f' → 권고버전: {rv}' if rv else ' → 권고버전: 미확인'
+    print(f\"  [{g['severity']}] {g['package']} {g['version']} — CVE {len(g['cves'])}건{rv_str}\")
 "
 ```
+
+> **`recommended_version` 주의사항**: 스캐너가 OSV.dev `affected[].ranges` 데이터에서 자동 추출한
+> 모든 CVE의 fixed 버전 중 최댓값이다. 이 버전으로 업그레이드하면 식별된 CVE가 모두 패치된다.
+> 값이 비어 있으면 OSV 데이터에 fixed 버전 정보가 없는 것이므로 공식 릴리즈 노트를 참고한다.
 
 ---
 
@@ -128,9 +134,11 @@ rg -l "@PreAuthorize\|@Secured\|@EnableMethodSecurity\|hasRole\|hasAuthority" <s
       "version": "10.1.40",
       "relevance_status": "제한적",
       "relevance_reason": "MultipartFile 업로드 API 다수 존재하나 getOriginalFilename() 직접 경로 조합 패턴은 미발견. UUID 기반 파일명 사용 확인.",
+      "recommended_version": "10.1.42",
       "cves": [
         {
           "cve": "CVE-2025-55754",
+          "fixed_version": "10.1.42",
           "description_ko": "Apache Tomcat HTTP/2 요청 처리 과정에서 응답 헤더 인젝션이 가능한 취약점",
           "impact_ko": "HTTP/2 활성화 시 공격자가 CRLF 시퀀스를 주입하여 응답 스플리팅 공격이 가능. 이 프로젝트는 Embedded Tomcat 기본 설정으로 운영 중이며 영향을 받을 수 있음.",
           "condition_ko": "HTTP/2 프로토콜 활성화 시 발생. application.properties에서 server.http2.enabled 설정 확인 필요.",
@@ -201,9 +209,14 @@ LLM-Check Phase 완료 후 `state/<prefix>/findings_SCA.json`을 생성한다.
 3. **동일 라이브러리 복수 CVE 병합 (HARD RULE)**: 같은 `group:artifact` + `version` 조합에 CVE가 여러 건이면 **1개 finding으로 병합**한다.
    - `scope.cve_id`: CVSS 최상위 CVE를 대표 ID로 기재
    - `scope.affected_cves`: 모든 CVE를 배열로 기재 `[{cve_id, cvss, severity, fixed_version}]`
+     - `fixed_version`은 `sca.json`의 `grouped[].cves[].fixed_version` 값을 그대로 사용
+   - `scope.recommended_version`: `grouped[].recommended_version` 값 (모든 CVE fixed_version의 최댓값)
    - `severity`: 개별 CVE 중 최대값 적용 (합산 금지)
    - `title`: CVE 1건이면 `취약 오픈소스 — <lib> <ver> (<CVE>)`, 2건 이상이면 `취약 오픈소스 — <lib> <ver> (<대표CVE> 외 N건)` 형식
-   - `recommendation`: 단일 패치 버전(최대 fixed_version 기준)으로 통합 작성
+   - `recommendation`: **`recommended_version`을 명시하여 구체적으로 작성할 것**
+     - 형식: `"<artifactId> <recommended_version> 이상으로 업그레이드하세요. 업그레이드가 불가한 경우 WAF 룰 등으로 완화 조치를 적용하세요."`
+     - `recommended_version`이 없는 경우: `"최신 패치 버전으로 업그레이드하세요."` (제네릭 fallback)
+     - CISA KEV 등재 CVE 포함 시: 문장 끝에 `" CISA KEV 등재 CVE이므로 즉시 조치가 필요합니다."` 추가
 4. finding_id 재부여: `SCA-001` 순번 (severity 내림차순 → CVSS 내림차순)
 5. `state/<prefix>/findings_SCA.json` 저장
 
@@ -241,12 +254,13 @@ LLM-Check Phase 완료 후 `state/<prefix>/findings_SCA.json`을 생성한다.
         "package": "group:artifact",
         "version": "1.0.0",
         "cve_id": "CVE-XXXX-XXXXX",
+        "recommended_version": "x.y.z",
         "affected_cves": [
           {"cve_id": "CVE-XXXX-XXXXX", "cvss": 0.0, "severity": "High", "fixed_version": "x.y.z"}
         ]
       },
       "description": "한국어 CVE 설명 (LLM 검토 결과 반영)",
-      "recommendation": "최신 패치 버전으로 업그레이드",
+      "recommendation": "<artifactId> <recommended_version> 이상으로 업그레이드하세요. ...",
       "code_snippet": "",
       "evidence": [{"cve": "", "cvss": 0.0, "in_kev": false}],
       "needs_review": false

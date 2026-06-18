@@ -28,6 +28,20 @@ description: 1차 보고서 오탐/정탐 인터랙티브 리뷰 — findings_*.
   /sec-review 20260506_1430 ocb-webview-api
 ```
 
+### 0b. Audit 세션 초기화
+
+findings 수집 전, 아래 명령으로 리뷰 세션을 audit_log에 등록하고 SESSION_ID를 확보한다:
+
+```bash
+SESSION_ID=$(python3 tools/audit_utils.py init-session \
+  --repo <repo> \
+  [--run-id <run_id>])
+```
+
+- run_id가 없는 레포 단위 모드에서는 `--run-id` 인수 생략
+- 출력된 SESSION_ID 문자열을 이 리뷰 세션 전체에서 사용한다
+- 명령 실패 시 SESSION_ID="" 로 설정하고 리뷰를 계속 진행 (audit 기록은 생략됨)
+
 ### 1. findings 수집
 
 **RUN_ID 모드**: `state/<repo>/*/<RUN_ID>/findings_*.json` 패턴으로 수집.
@@ -42,6 +56,92 @@ skill별로 RUN_ID 내림차순(최신) 파일 하나씩 선택:
 **제외 목록** (evidence_trail 전용 또는 정상): `"양호"`, `"양호(FP)"`, `"해당없음"`, `"safe"`
 
 `"취약"`, `"정보"` 는 물론, 비표준 값(`"수동검토필요"`, `"정보(수동검토필요)"` 등 스캐너 버그로 발생)도 리뷰 대상에 포함한다.
+
+### 1b. 서비스 특징 분석 및 추가 진단 필요 여부 입력
+
+`state/<repo>/review_meta.json` 존재 여부에 따라 두 가지 경로로 분기한다.
+
+---
+
+#### 경로 A — review_meta.json 없음 (최초 실행)
+
+**서비스 특징 LLM 분석**:
+
+`testbed/<repo>/` 의 디렉터리 구조, 주요 컨트롤러/서비스 클래스, 빌드 설정(build.gradle / package.json), README 등을 탐색하여 아래 항목을 분석하고 출력한다:
+
+- **기술 스택**: 언어, 프레임워크, 주요 라이브러리
+- **서비스 도메인**: 핵심 업무 영역
+- **주요 기능**: 인증, API, 데이터 처리, 외부 연동 등
+- **취급 민감 데이터**: PII(개인정보), 금융정보, 카드정보, 세션 토큰 등
+- **보안 리스크 프로파일**: 외부 노출 범위, 주요 공격 표면
+
+분석 결과를 아래 형식으로 출력한 뒤, 추가 진단 필요 여부를 입력받는다.
+
+---
+
+#### 경로 B — review_meta.json 존재 (재실행)
+
+기존 데이터를 출력하고 업데이트 여부를 선택받는다:
+
+```
+=== 서비스 특징 (기존 데이터) ===
+{service_characteristics 값}
+추가 진단 필요 여부: 필요 / 불필요
+============================
+업데이트하시겠습니까?
+  y  →  서비스 특징 LLM 재분석 + 추가 진단 여부 재입력
+  d  →  추가 진단 여부만 재입력 (서비스 특징 분석 생략)
+  Enter  →  변경 없이 스킵
+
+[y/d/Enter]:
+```
+
+- `y` 입력 → 경로 A 전체 실행 (LLM 재분석 포함)
+- `d` 입력 → LLM 분석 생략, 추가 진단 필요 여부 입력만 진행
+- Enter → Step 1b 전체 스킵, 기존 review_meta.json 유지
+
+---
+
+**출력 형식** (경로 A 또는 경로 B-y 실행 시):
+
+```
+=== 서비스 특징 분석 ===
+기술 스택    : Spring Boot 2.7 / Java 11 / MyBatis / Redis
+서비스 도메인 : OK Cashbag 포인트 조회·적립 API
+주요 기능    : 회원 인증, 포인트 거래 이력, 외부 가맹점 API 연동
+민감 데이터  : 회원 ID, 거래 금액, 카드 마지막 4자리
+리스크 프로파일: 대외 노출 API, 금융 데이터 취급
+==========================
+```
+
+**추가 진단 필요 여부 입력** (경로 A / B-y / B-d 공통):
+
+> **BLOCKING INPUT** — 이 단계는 **자율 완주 규칙의 예외**다.  
+> Claude가 서비스 특징을 분석하더라도 추가 진단 필요 여부를 **스스로 판단하거나 자동 저장하지 않는다.**  
+> 반드시 아래 프롬프트를 출력하고 **auditor의 실제 입력을 받은 뒤에만** 저장·진행한다.
+
+```
+=== 추가 진단 필요 여부 (동적 진단 / 모의해킹 등) ===
+y  →  추가 진단 필요
+n  또는 Enter  →  불필요
+
+판정 [y/n/Enter]:
+```
+
+**저장**: `state/<repo>/review_meta.json` 에 아래 형식으로 저장한다 (경로 B-Enter 제외):
+
+```json
+{
+  "repo": "<repo>",
+  "service_characteristics": "기술 스택: Spring Boot / Java 11 | 서비스 도메인: 포인트 API | 민감 데이터: 회원 ID, 거래 금액",
+  "additional_diagnosis_needed": true,
+  "updated_at": "2026-06-17T10:30:00"
+}
+```
+
+- `additional_diagnosis_needed`: `y` 입력 시 `true`, `n` 또는 Enter 시 `false`
+- Claude가 리스크 프로파일을 참고해 권고 의견을 제시할 수 있으나, **최종 판정 입력은 auditor만 한다**
+- `testbed/<repo>/` 가 없으면 LLM 분석 생략, `service_characteristics: "—"` 로 저장
 
 ### 2. 전체 취약점 개요 출력
 
@@ -298,6 +398,64 @@ title 패턴 `[SCA] <groupId>:<artifactId> <version> — <CVE>` 에서 `<groupId
   mysql:mysql-connector-java (SCA-003), org.springframework:spring-core (SCA-007), ...
 ```
 
+#### §4c. Audit 판정 기록
+
+**log-review 실행 시점: §4a 자동 실행(소스 탐색 및 review_note 교체) 완료 후, findings_*.json 저장 직후.**
+
+사용자가 간단한 메모만 입력했더라도 §4a가 코드베이스를 탐색하여 내용을 교체·보강했다면, log-review에는 반드시 **교체 완료 후 파일에 실제로 저장된 값**을 기록한다. 원본 메모(입력 당시 초안)가 아닌 최종 상태가 기준이다.
+
+##### 인터랙티브 리뷰 (SCA 외) — finding별 §4a 완료 후 기록
+
+정탐/오탐 판정 → (§4a 지시사항 자동 실행 → review_note 교체) → findings_*.json 저장 → **log-review 실행**:
+
+```bash
+python3 tools/audit_utils.py log-review \
+  --session-id  "$SESSION_ID" \
+  --repo        "<repo>" \
+  --run-id      "<run_id>" \
+  --skill       "<skill>" \
+  --finding-id  "<finding_id>" \
+  --finding-title "<title>" \
+  --scan-severity "<scan_severity_판정전_원본>" \
+  --scan-result   "<scan_result_판정전_원본>" \
+  --decision    "<정탐|오탐|스킵>" \
+  [--review-result   "<취약|정보>"] \
+  [--severity-before "<old_severity>"] \
+  [--severity-after  "<new_severity>"] \
+  [--review-note     "<findings_*.json에_저장된_최종_review_note>"] \
+  [--auditor-questions '["<사용자_입력_질문1>", "<사용자_입력_질문2>"]'] \
+  [--code-analysis   "<§4a_탐색_및_교체_내용_요약>"]
+```
+
+인수 매핑 규칙:
+
+| 인수 | 값 출처 | 주의 |
+|------|---------|------|
+| `--scan-severity` | 판정 **전** finding의 `severity` 원본값 | 위험도 조정 전 스냅샷 |
+| `--scan-result` | 판정 **전** finding의 `result` 원본값 | |
+| `--decision` | 사용자 입력 (정탐/오탐/스킵) | |
+| `--review-result` | 정탐 후 결과 판정값 (`취약`/`정보`), 스킵 시 생략 | |
+| `--severity-before` | 위험도 조정 전 severity (변경한 경우만) | |
+| `--severity-after` | 위험도 조정 후 severity (변경한 경우만) | |
+| `--review-note` | **findings_*.json에 최종 저장된 `review_note` 전체** | §4a 교체 후 값. 사용자 원본 메모가 짧았더라도 교체 후 enriched content를 기록 |
+| `--auditor-questions` | 사용자가 자유 텍스트로 입력한 질문 목록 (JSON 배열) | 코드 분석 요청 질문만 포함 |
+| `--code-analysis` | §4a가 수행한 탐색·교체 내용 요약 | 어떤 패턴을 탐색했는지, 몇 건을 발견했는지, 메모를 어떻게 보강했는지 1~3문장으로 기술 |
+
+**`--code-analysis` 작성 기준** — §4a가 실행된 경우, 아래 내용을 포함한다:
+
+- 탐색 대상 파일/패턴 (예: `grep -rn "logger.*mbrId" testbed/<repo>/`)
+- 발견 건수 및 핵심 결과 (예: "17개 파일, 42줄에서 PII 로그 확인")
+- review_note 교체 여부 및 교체 전/후 요약 (예: "원본: '목록화 필요' → 교체: 파일·라인·PII필드 표 42행 생성")
+- §4a가 트리거되지 않았거나 소스를 찾지 못한 경우: `""` (빈 문자열)로 전달
+
+##### SCA 일괄 처리 — Step 5 완료 후 일괄 기록
+
+§4b Step 5 출력 직후, 처리된 모든 SCA finding(대표 + 그룹병합 + 단독)에 대해 순서대로 log-review를 실행한다:
+
+- **대표 finding / 단독 finding**: `--decision 정탐 --review-result 취약`
+- **그룹병합 finding**: `--decision 정탐 --review-result 취약 --review-note "SCA 라이브러리 그룹병합 — <primary_id>에 통합"`
+- `--code-analysis "SCA LLM 검토 완료 — llm_checked:true 일괄 승인"` 공통 추가
+
 ---
 
 #### Phase 2 — SCA 그룹 report_expand 규칙
@@ -445,6 +603,21 @@ SQL Injection이 발현될 수 있다.
 | UserInfoService.java | 해당라인 | gender | String — SQL 직접 삽입 |
 | UserInfoService.java | 해당라인 | ageGroup | int — 타입 제약으로 위험 낮음 |
 ```
+
+### 5c. Audit 세션 종료
+
+Phase 2 (report_expand 생성) 완료 직후, 세션 종료를 audit_log에 기록한다:
+
+```bash
+python3 tools/audit_utils.py end-session \
+  --session-id "$SESSION_ID" \
+  --정탐 <정탐_건수> \
+  --오탐 <오탐_건수> \
+  --스킵 <스킵_건수>
+```
+
+- 건수는 Phase 1~2 전체 처리 결과 집계값을 사용한다
+- SESSION_ID가 없는 경우(초기화 실패) 이 단계를 생략한다
 
 ### 6. 완료 요약
 

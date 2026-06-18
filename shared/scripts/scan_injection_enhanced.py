@@ -1095,11 +1095,32 @@ def build_mybatis_index(source_dir: Path, extra_source_dirs: list = None) -> dic
         if not re.search(r'<(?:sqlMap|mapper)[\s>]', content):
             continue
 
-        # ElementTree 파싱
+        # ElementTree 파싱 (EUC-KR 등 멀티바이트 인코딩 XML 처리 포함)
         try:
             tree = ET.parse(xml_file)
         except ET.ParseError:
             continue
+        except ValueError:
+            # multi-byte encodings (EUC-KR, CP949 등) → 직접 디코딩 후 재파싱
+            try:
+                raw = xml_file.read_bytes()
+                for enc in ("euc-kr", "cp949", "euc-jp", "shift-jis"):
+                    try:
+                        text = raw.decode(enc)
+                        text = re.sub(
+                            r'<\?xml[^>]+encoding=["\'][^"\']+["\'][^>]*\?>',
+                            '<?xml version="1.0" encoding="utf-8"?>',
+                            text
+                        )
+                        root = ET.fromstring(text.encode("utf-8"))
+                        tree = ET.ElementTree(root)
+                        break
+                    except (UnicodeDecodeError, ET.ParseError):
+                        continue
+                else:
+                    continue
+            except Exception:
+                continue
         root = tree.getroot()
 
         # namespace 추출

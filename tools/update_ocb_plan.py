@@ -44,13 +44,13 @@ STATUS_JSON   = PALANTIR_DIR / "docs" / ".ocb_scan_status.json"
 
 VALID_SKILLS  = ["injection", "xss", "file", "data", "sca"]
 
-# skill → findings 파일명 매핑
+# skill → findings 파일명 매핑 (신버전 우선, 구버전 소문자 fallback)
 SKILL_FINDINGS = {
-    "injection": "findings_INJ.json",
-    "xss":       "findings_XSS.json",
-    "file":      "findings_FILE.json",
-    "data":      "findings_DATA.json",
-    "sca":       "findings_SCA.json",
+    "injection": ["findings_INJ.json",  "findings_injection.json"],
+    "xss":       ["findings_XSS.json",  "findings_xss.json"],
+    "file":      ["findings_FILE.json", "findings_file.json"],
+    "data":      ["findings_DATA.json", "findings_data.json"],
+    "sca":       ["findings_SCA.json",  "findings_sca.json"],
 }
 
 # 체크리스트 테이블의 컬럼 인덱스 (split("|") 기준)
@@ -172,7 +172,7 @@ def sync_from_state(no_sync: bool = False) -> int:
             if not skill_dir.exists():
                 continue
 
-            findings_file = SKILL_FINDINGS[skill]
+            findings_candidates = SKILL_FINDINGS[skill]
 
             # 이미 완료로 기록된 경우 건너뜀
             already = status.get("completed", {}).get(repo_slug, {}).get(skill)
@@ -185,22 +185,50 @@ def sync_from_state(no_sync: bool = False) -> int:
                 reverse=True,
             )
             for ts_dir in ts_dirs:
-                if (ts_dir / findings_file).exists():
-                    # YYYYMMDD_HHMM → YYYY-MM-DD
-                    ts = ts_dir.name
-                    try:
-                        date_str = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}"
-                    except Exception:
-                        date_str = datetime.now().strftime("%Y-%m-%d")
+                # findings 파일 탐색 (신버전 대문자 → 구버전 소문자 순)
+                findings_path = None
+                for fname in findings_candidates:
+                    if (ts_dir / fname).exists():
+                        findings_path = ts_dir / fname
+                        break
 
-                    n = mark_done(repo_slug, [skill], date=date_str)
-                    if n > 0:
-                        print(f"  [AUTO] {repo_slug:<35s} {skill:<10s} → ✅ {date_str}")
-                        status.setdefault("completed", {}) \
-                              .setdefault(repo_slug, {})[skill] = date_str
-                        changed_md = True
-                        total += 1
-                    break  # 가장 최신 타임스탬프만 사용
+                if findings_path is None:
+                    continue
+
+                # findings 내부 llm_checked 필드로 실제 완료 여부 판단
+                # rate_limit_exceeded로 llm_check_failed.json이 생겨도,
+                # findings에 llm_checked=True + findings>0 이면 LLM 분석이 완료된 것.
+                # 단, findings=0 + reviewed=0 + llm_check_failed 동반 시 분석 불완전 → skip
+                if (ts_dir / "llm_check_failed.json").exists():
+                    try:
+                        fdata = json.loads(findings_path.read_text(encoding="utf-8"))
+                        f_findings = fdata.get("findings", [])
+                        f_reviewed = sum(1 for f in f_findings if f.get("reviewed"))
+                        f_llm_checked = fdata.get("llm_checked", False)
+                        # 0건 + 미리뷰 + llm_checked 이어도 완료 신호 없으면 불완전으로 간주
+                        if not f_llm_checked or (len(f_findings) == 0 and f_reviewed == 0):
+                            print(f"  [SKIP] {repo_slug:<35s} {skill:<10s} — llm 불완전 (0건/미리뷰, run={ts_dir.name})")
+                            continue
+                        # findings>0이거나 reviewed>0이면 분석 완료로 인정
+                    except Exception:
+                        print(f"  [SKIP] {repo_slug:<35s} {skill:<10s} — findings 파싱 오류 (run={ts_dir.name})")
+                        continue
+
+                # 정상 완료 — YYYYMMDD_HHMM → YYYY-MM-DD
+                ts = ts_dir.name
+                try:
+                    date_str = f"{ts[:4]}-{ts[4:6]}-{ts[6:8]}"
+                except Exception:
+                    date_str = datetime.now().strftime("%Y-%m-%d")
+
+                n = mark_done(repo_slug, [skill], date=date_str)
+                if n > 0:
+                    print(f"  [AUTO] {repo_slug:<35s} {skill:<10s} → ✅ {date_str}")
+                    status.setdefault("completed", {}) \
+                          .setdefault(repo_slug, {})[skill] = date_str
+                    changed_md = True
+                    total += 1
+                break  # 가장 최신 유효 타임스탬프만 사용
 
     if changed_md:
         _save_status(status)

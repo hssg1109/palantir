@@ -234,6 +234,18 @@ def load_clone_info(repo: str) -> dict:
 
 _EXPOSURE_ICON = {"대외": "🌐", "대내": "🔒", "대내외": "↔️"}
 
+
+def load_review_meta(repo: str) -> dict:
+    """state/<repo>/review_meta.json 로드. 없으면 빈 dict 반환."""
+    p = STATE_DIR / repo / "review_meta.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def load_service_exposure(repo: str) -> str:
     """docs/service_inventory.json에서 repo의 대외/대내/대내외 분류를 반환."""
     p = DOCS_DIR / "service_inventory.json"
@@ -716,13 +728,19 @@ def _sanitize_secret_expand(text: str, category: str) -> str:
 def _render_taint_expand(evidence: dict) -> list[str]:
     """Taint flow 정보를 :::expand 블록으로 렌더링."""
     lines: list[str] = []
-    taint_flow = evidence.get("taint_flow") or {}
+    taint_flow_raw = evidence.get("taint_flow")
+    taint_flow = taint_flow_raw if isinstance(taint_flow_raw, dict) else {}
+    taint_flow_str = taint_flow_raw if isinstance(taint_flow_raw, str) else ""
     taint_evidence = evidence.get("taint_evidence") or []
 
-    if not taint_flow and not taint_evidence:
+    if not taint_flow and not taint_flow_str and not taint_evidence:
         return lines
 
     lines.append(":::expand Taint Flow 상세 (참조용)")
+
+    if taint_flow_str:
+        lines.append(f"**Taint Flow**: {taint_flow_str}")
+        lines.append("")
 
     if taint_flow:
         source = taint_flow.get("source", "")
@@ -910,6 +928,10 @@ def render_markdown(
     project       = clone_info.get("project", "—")
     maintainer    = clone_info.get("last_commit_author") or "—"
     exposure_type = load_service_exposure(repo)
+    review_meta   = load_review_meta(repo)
+
+    svc_char      = review_meta.get("service_characteristics", "—")
+    add_diag      = "필요" if review_meta.get("additional_diagnosis_needed") else "불필요"
 
     # ── 1. 진단 개요 ──────────────────────────────────────────────────────────
     lines += [
@@ -921,7 +943,9 @@ def render_markdown(
         "|------|------|",
         f"| 진단 대상 | {repo} |",
         f"| 서비스 유형 | {exposure_type} |",
+        f"| 서비스 특징 | {svc_char} |",
         f"| Bitbucket 프로젝트 | {project} |",
+        f"| 소스코드 저장소 | {clone_url} |" if clone_url != "—" else "| 소스코드 저장소 | — |",
         f"| 진단 브랜치 | {branch} |",
         f"| 커밋 해시 | `{commit[:12]}` |" if commit != "—" else f"| 커밋 해시 | — |",
         f"| *담당자 | {maintainer} |",
@@ -930,6 +954,7 @@ def render_markdown(
         f"| 진단 유형 | SAST (정적 분석) + LLM 교차검증 |",
         f"| 진단 도구 | palantir (Claude Code 기반) |",
         f"| 전체 발견 건수 | {total_cnt}건 |",
+        f"| 추가 진단 필요 여부 | {add_diag} |",
         "",
         "\\* 담당자는 해당 repo clone 시 가장 최근 commit 한 개발 매니저로 임의 설정되어있습니다. 변경 필요시 댓글부탁드립니다.",
         "",

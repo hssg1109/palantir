@@ -35,7 +35,7 @@ STATE_DIR    = PALANTIR_DIR / "state"
 LOGS_DIR     = PALANTIR_DIR / "logs"
 
 SKILL_ORDER   = ["injection", "xss", "file", "data", "sca"]
-BB_REMOTE_URL = "https://code.skplanet.com/scm/vulchk/audit_result.git"
+BB_REMOTE_URL = "https://code.skplanet.com/scm/vulchk/palantir_result.git"
 
 # PowerShell 실행 파일 (WSL에서 접근)
 PSEXE      = "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -125,7 +125,7 @@ def _collect_final_report(repo: str, run_id: str | None) -> Path | None:
 def _run_powershell(ps_script: str) -> int:
     """PS1 파일로 저장 후 PowerShell 실행."""
     try:
-        PS_TMP_WSL.write_text(ps_script, encoding="utf-8")
+        PS_TMP_WSL.write_text(ps_script, encoding="utf-8-sig")
     except Exception as e:
         print(f"  [WARN] PS1 임시 파일 생성 실패: {e} — 인라인 실행")
         result = subprocess.run([PSEXE, "-NoProfile", "-NonInteractive", "-Command", ps_script])
@@ -168,8 +168,8 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
         print(f"  [ERROR] findings 파일 없음 — state/{repo}/*/")
         return 1
 
-    # 저장 폴더명: 지정 > RUN_ID > 현재 날짜시간
-    folder_name = folder or run_id or datetime.now().strftime("%Y%m%d_%H%M")
+    # 저장 폴더명: 지정 > RUN_ID > 오늘 날짜 (같은 날 재실행 시 git no-changes로 중복 방지)
+    folder_name = folder or run_id or datetime.now().strftime("%Y%m%d")
     dest_wsl    = STAGE_WSL / repo / folder_name
     dest_wsl.mkdir(parents=True, exist_ok=True)
 
@@ -206,6 +206,9 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
 
     # PowerShell 스크립트: workspace 자동 관리 + stage 복사 + commit + push
     ps_script = "\n".join([
+        "chcp 65001 | Out-Null",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "$OutputEncoding = [System.Text.Encoding]::UTF8",
         "$ErrorActionPreference = 'Continue'",
         "$env:PATH = 'C:\\Program Files\\Git\\bin;C:\\Program Files\\Git\\cmd;' + $env:PATH",
         f"$remote = '{BB_REMOTE_URL}'",
@@ -226,6 +229,7 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
         "    Remove-Item -Recurse -Force $tmp",
         "    git -C $ws reset origin/main --mixed 2>&1 | Out-Null",
         "}",
+        "git -C $ws config core.autocrlf false",
         "",
         "# stage → workspace 복사",
         f"$stageDir = '{stage_subfolder}'",
@@ -254,7 +258,7 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
 
     if rc == 0:
         audit_url = (
-            f"https://code.skplanet.com/projects/VULCHK/repos/audit_result"
+            f"https://code.skplanet.com/projects/VULCHK/repos/palantir_result"
             f"/browse/{repo}/{folder_name}"
         )
         print(f"  업로드 완료: {audit_url}")

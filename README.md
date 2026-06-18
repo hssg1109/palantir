@@ -32,41 +32,53 @@
 ## 전체 워크플로
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                           palantir 진단 파이프라인                             │
-├──────────┬──────────────┬───────────────┬───────────────┬─────────────────── ┤
-│  STEP 1  │    STEP 2    │    STEP 3     │    STEP 4     │      STEP 5         │
-│  Clone   │  SAST 진단   │   리뷰        │   보고서       │   배포              │
-│          │              │               │               │                     │
-│ clone_   │ /sec-scan-   │ /sec-review   │ approve_      │ • Confluence 게시   │
-│ repo.py  │ injection    │  <RUN_ID>     │  report.py    │ • Jira 티켓 생성    │
-│          │ /sec-scan-   │  <repo>       │  --publish    │ • audit_result      │
-│ testbed/ │ xss          │               │               │   업로드            │
-│ <repo>/  │ /sec-scan-   │ 정탐/오탐     │ logs/         │                     │
-│          │ file         │ 판정          │ final_*.md    │                     │
-│          │ /sec-scan-   │               │               │                     │
-│          │ data         │               │               │                     │
-│          │ /sec-scan-   │               │               │                     │
-│          │ sca          │               │               │                     │
-└──────────┴──────────────┴───────────────┴───────────────┴─────────────────── ┘
+┌─────────────────────────────────────────────────────────────────────────────────────┐
+│                              palantir 진단 파이프라인                                  │
+├──────────┬──────────────┬──────────────────────┬───────────────┬──────────────────── ┤
+│  STEP 1  │    STEP 2    │       STEP 3          │    STEP 4     │      STEP 5          │
+│  Clone   │  SAST 진단   │      리뷰             │   보고서       │   배포               │
+│          │              │                       │               │                      │
+│ clone_   │ /sec-scan-   │ /sec-review           │ approve_      │ • Confluence 게시    │
+│ repo.py  │ injection    │  <repo>               │  report.py    │ • Jira Gateway       │
+│          │ /sec-scan-   │                       │  --publish    │   티켓 등록          │
+│ testbed/ │ xss          │ ① 서비스 특징 분석    │               │ • vuln_registry      │
+│ <repo>/  │ /sec-scan-   │   (LLM 자동)          │ logs/         │   v2.0 갱신          │
+│          │ file         │ ② 추가 진단 여부 입력 │ final_*.md    │ • audit_result       │
+│          │ /sec-scan-   │ ③ finding 정탐/오탐   │               │   업로드             │
+│          │ data         │   판정                │               │                      │
+│          │ /sec-scan-   │ ④ Phase 2             │               │                      │
+│          │ sca          │   report_expand 생성  │               │                      │
+└──────────┴──────────────┴──────────────────────┴───────────────┴──────────────────── ┘
 ```
 
 **산출물 흐름:**
 
 ```
 state/<repo>/injection/<RUN_ID>/findings_INJ.json   ─┐
-state/<repo>/xss/<RUN_ID>/findings_XSS.json          ├─▶ /sec-review
-state/<repo>/file/<RUN_ID>/findings_FILE.json         │      │
-state/<repo>/data/<RUN_ID>/findings_DATA.json         │      ▼
-state/<repo>/sca/<RUN_ID>/findings_SCA.json          ─┘  review_status 기록
+state/<repo>/xss/<RUN_ID>/findings_XSS.json          ├─▶ /sec-review ──▶ review_status 기록
+state/<repo>/file/<RUN_ID>/findings_FILE.json         │       │             report_expand 생성
+state/<repo>/data/<RUN_ID>/findings_DATA.json         │       │
+state/<repo>/sca/<RUN_ID>/findings_SCA.json          ─┘       ▼
+state/<repo>/review_meta.json (서비스 특징 · 추가진단)──────── ┘
                                                               │
-                                                              ▼
-                                                    logs/final_<repo>_<date>.md
+                                                 approve_report.py --publish
                                                               │
-                                          ┌───────────────────┼───────────────┐
-                                          ▼                   ▼               ▼
-                                   Confluence 페이지    Jira 티켓 생성    audit_result
-                                   (자동 게시)          (취약점별)        (Bitbucket)
+                          ┌───────────────────────────────────┤
+                          ▼                   ▼               ▼               ▼
+                   Confluence 페이지    Jira Gateway    audit_result    vuln_registry.json
+                   (자동 게시)          (티켓 등록)     (Bitbucket)     (service_meta +
+                                                                         runs[] + findings[])
+```
+
+**1 repo = 1 누적 JSON** (`state/<repo>/vuln_registry.json`):
+
+```json
+{
+  "schema_version": "2.0",
+  "service_meta": { "bb_project": "...", "service_characteristics": "...", "additional_diagnosis_needed": false },
+  "runs": [ { "run_id": "20260617_1030", "confluence_url": "...", "finding_counts": {...} } ],
+  "findings": [ { "uid": "...", "status": "open", "history": [...] } ]
+}
 ```
 
 ---
@@ -153,6 +165,25 @@ state/my-service-api/
 /sec-review my-service-api
 ```
 
+#### Step 1b — 서비스 특징 분석 (자동 실행)
+
+리뷰 시작 시 Claude가 `testbed/<repo>/` 소스를 분석하여 **서비스 특징**을 도출한다.
+
+```
+=== Step 1b: 서비스 특징 분석 ===
+[LLM 분석] 기술 스택: Spring Boot 2.7 / Java 11 / MyBatis / React SPA
+[LLM 분석] 서비스 유형: 인증/회원 API (B2C), OCB 포인트 적립 처리
+[LLM 분석] 특이사항: 외부 제휴사 연동 API 다수, 개인정보 처리 없음
+
+추가 진단 필요 여부를 입력하세요 (동적 진단, 추가 시나리오 모의해킹 등):
+  y = 필요 / n = 불필요 [n]:
+```
+
+- 진단자가 `y`/`n` 입력 → `state/<repo>/review_meta.json`에 저장
+- 최종 보고서 **진단 개요** 테이블에 "서비스 특징" 및 "추가 진단 필요 여부" 행으로 반영
+
+#### finding 판정
+
 리뷰 화면 예시:
 
 ```
@@ -167,8 +198,6 @@ state/my-service-api/
   3 | data      | DATA-003    | High   | 하드코딩 API Key — application.properties
 ...
 ```
-
-**판정 입력:**
 
 | 입력 | 동작 |
 |------|------|
@@ -195,7 +224,8 @@ python3 tools/approve_report.py --run-id 20260609_1030 --repo my-service-api --p
 [approve]  정탐 8건 / 오탐 4건 확인
 [report]   logs/final_my-service-api_20260609.md 생성
 [publish]  Confluence 게시 완료 → https://wiki.company.com/...
-[jira]     Jira 티켓 8건 생성 완료
+[jira]     Jira 티켓 8건 생성 완료 (라벨: 2026-06, 2606, PALANTIR, MY-SVC, 정기)
+[registry] state/my-service-api/vuln_registry.json 갱신 (v2.0 — service_meta + runs[] + findings[])
 [audit]    VULCHK/audit_result 업로드 완료
 ```
 
@@ -438,7 +468,8 @@ python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
 [report]   generate_final_report.py 호출 → Markdown 보고서 생성
            → logs/final_<repo>_<YYYYMMDD>.md
 [publish]  Confluence REST API로 페이지 생성/업데이트  ← --publish 시
-[jira]     취약 finding별 Jira 이슈 생성              ← --publish 시
+[jira]     취약 finding별 Jira 이슈 생성 (라벨 자동 부여)  ← --publish 시
+[registry] vuln_registry.json v2.0 갱신 (service_meta + runs 추가)  ← 항상 실행
 [audit]    VULCHK/audit_result 레포에 진단이력 업로드  ← --publish 시
 ```
 
@@ -450,8 +481,11 @@ python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
 ## 1. 진단 개요
 | 항목 | 내용 |
 | 진단 레포 | my-service-api |
+| 서비스 유형 | ... |
+| 서비스 특징 | Spring Boot 2.7 / Java 11 / 인증·회원 API |
 | 진단 일시 | 2026-06-09 |
 | 취약점 건수 | Critical 1 / High 3 / Medium 2 / Low 2 |
+| 추가 진단 필요 여부 | 불필요 |
 
 ## 2. 취약점 목록
 | ID | 분류 | 제목 | 위험도 | 조치 기한 |
@@ -478,9 +512,10 @@ python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
 | 프로젝트 | `.env`의 `JIRA_PROJECT_KEY` |
 | 이슈 유형 | Bug |
 | 제목 | `[보안] <finding 제목>` |
-| 설명 | 취약점 설명, 재현 경로, 위험 시나리오 |
+| 설명(Wiki Markup) | 1. 진단 개요 → 2. [필수 회신] 안내 → 3. 취약점 요약 → 참조 진단절차 |
 | 우선순위 | severity 매핑 (Critical→Highest, High→High, ...) |
 | 조치 기한 | `JIRA_REMEDIATION_DATE_FIELD_ID` 커스텀 필드 |
+| 라벨 | `YYYY-MM`, `YYMM`, `PALANTIR`, `{PROJECT_KEY}`, `정기` (5개 자동 생성) |
 
 ### 수동 티켓 생성
 
@@ -633,12 +668,15 @@ palantir/
 │   ├── clone_repo.py               # 소스코드 clone
 │   ├── pipeline_runner.py          # 배치 파이프라인
 │   ├── approve_report.py           # 보고서 생성 + 배포 통합
-│   ├── generate_final_report.py    # Markdown 보고서 생성
+│   ├── generate_final_report.py    # Markdown 보고서 생성 (서비스 특징 포함)
+│   ├── audit_utils.py              # vuln_registry / audit_log JSON 관리
+│   ├── update_vuln_registry.py     # vuln_registry 수동 갱신 유틸
+│   ├── ihaeng_compare.py           # 이행 점검 비교 도구
 │   ├── publish_confluence.py       # Confluence 게시
 │   ├── create_jira_ticket.py       # Jira 티켓 생성
 │   ├── push_audit_result.py        # 진단이력 단건 업로드
 │   ├── bulk_push_audit_result.py   # 진단이력 일괄 업로드
-│   └── ...
+│   └── run_skill.py                # skill 실행 래퍼
 │
 ├── trigger/
 │   ├── scan_targets.example.yaml   # 배치 대상 예시 (공개)
@@ -646,6 +684,11 @@ palantir/
 │
 ├── testbed/                        # 고객사 소스코드 (gitignore)
 ├── state/                          # 진단 결과 JSON (gitignore)
+│   └── <repo>/
+│       ├── <skill>/<RUN_ID>/findings_*.json
+│       ├── scan_meta.json
+│       ├── review_meta.json         # 서비스 특징 + 추가진단 여부 (sec-review Step 1b)
+│       └── vuln_registry.json       # v2.0: service_meta + runs[] + findings[]
 ├── logs/                           # 최종 보고서 Markdown (gitignore)
 ├── rules/                          # 커스텀 탐지 규칙
 ├── requirements.txt

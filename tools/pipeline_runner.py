@@ -6,7 +6,7 @@ pipeline_runner.py — 전체 파이프라인 오케스트레이터
   1. Auto-Clone   : testbed/<repo> 없으면 Bitbucket에서 자동 clone
   2. Auto-Scan    : Python 스캐너 직접 실행 (skill × repo)
   3. LLM-Check    : LLM 교차검증 + findings 출력
-  4. Cleanup      : testbed 소스코드 삭제
+  4. Cleanup      : (비활성화됨 — testbed는 수동 관리)
   5. Report       : --report draft 시 1차 보고서 자동 생성
 
 결과 경로 규칙:
@@ -31,8 +31,6 @@ pipeline_runner.py — 전체 파이프라인 오케스트레이터
   --force-clone         기존 testbed 삭제 후 재clone
   --skip-scan           Auto-Scan 건너뜀 (이미 실행된 경우)
   --skip-llm            LLM-Check 건너뜀
-  --skip-upload         (레거시) Cleanup 건너뜀
-  --skip-cleanup        testbed 보존
   --max-budget-usd N    skill당 최대 토큰 비용 (기본: targets 설정 또는 3.0)
   --max-turns N         LLM 최대 턴 수 (기본: targets 설정 또는 80)
   --report draft|final  완료 후 보고서 생성 (draft=LLM판정 기준, final=audit확정)
@@ -164,8 +162,6 @@ def run_skill(
     max_turns: int,
     skip_scan: bool,
     skip_llm: bool,
-    skip_upload: bool,
-    skip_cleanup: bool,
 ) -> bool:
     """run_skill.py 1회 실행. 성공 시 True."""
     src    = str(PALANTIR_DIR / "testbed" / repo)
@@ -180,10 +176,8 @@ def run_skill(
         "--max-budget-usd", str(max_budget_usd),
         "--max-turns",      str(max_turns),
     ]
-    if skip_scan:    cmd.append("--skip-scan")
-    if skip_llm:     cmd.append("--skip-llm")
-    if skip_upload:  cmd.append("--skip-upload")
-    if skip_cleanup: cmd.append("--skip-cleanup")
+    if skip_scan: cmd.append("--skip-scan")
+    if skip_llm:  cmd.append("--skip-llm")
 
     print(f"\n  skill  : {skill}")
     print(f"  prefix : state/{repo}/{skill}/{run_id}/")
@@ -329,8 +323,6 @@ def main() -> int:
                         help="기존 testbed 삭제 후 재clone")
     parser.add_argument("--skip-scan",    action="store_true")
     parser.add_argument("--skip-llm",     action="store_true")
-    parser.add_argument("--skip-upload",  action="store_true")
-    parser.add_argument("--skip-cleanup", action="store_true")
     parser.add_argument("--max-budget-usd", type=float, default=None)
     parser.add_argument("--max-turns",      type=int,   default=None)
     parser.add_argument("--report",  choices=["draft", "final"], default=None)
@@ -432,8 +424,6 @@ def main() -> int:
                 max_turns=max_turns,
                 skip_scan=args.skip_scan,
                 skip_llm=args.skip_llm,
-                skip_upload=args.skip_upload,
-                skip_cleanup=args.skip_cleanup,
             )
             results.append({"repo": repo, "skill": skill, "ok": ok})
 

@@ -13,6 +13,39 @@ Claude Code 보안 진단 모듈 모음 — 취약점 유형별 독립 실행 �
 - 오류 발생 시 → fallback 자동 적용 후 다음 단계 즉시 진행
 - 유일한 예외: 토큰/자격증명 누락 등 사람만 해결 가능한 blocking 오류 → 보고 후 대기
 
+## BOUNDARY RULE — Skill 실행 범위 제한
+
+**자율 완주 규칙은 명시적으로 호출된 skill 내부에만 적용된다.**
+
+### 1. Skill 간 자동 연결 금지
+
+각 skill은 독립 실행 단위이며, 완료 후 다음 단계로 자동 이행하지 않는다.
+
+| 금지 행위 | 올바른 동작 |
+|-----------|------------|
+| `/sec-scan-*` 완료 후 `/sec-review` 자동 실행 | skill 완료 요약 출력 후 대기 |
+| `/sec-review` 완료 후 `approve_report.py` 자동 실행 | 완료 요약 출력 후 대기 |
+| 5개 scan skill 중 하나 완료 후 다음 scan skill 자동 실행 | 완료 요약 출력 후 대기 |
+
+> **근거**: 각 skill 완료 후 사용자가 결과를 검토하고 다음 단계를 직접 지시해야 한다.
+
+### 2. Context Compaction 후 자동 재개 금지
+
+Auto-compact에 의해 새 세션이 시작된 경우, compaction summary의 "Pending Tasks" 또는 "Optional Next Step"을 자동 실행하지 않는다.
+
+**금지 행위:**
+- Compaction summary의 pending tasks를 보고 자율 실행
+- "이전 세션에서 진행 중이었으므로" 이유로 skill/script 자동 시작
+- 사용자 메시지 없이 compaction 직후 즉시 작업 재개
+
+**올바른 동작:**
+- 새 세션 시작 시 중단 상태를 **요약만** 출력하고 다음 지시 대기
+- 사용자가 명시적으로 재개 지시를 내릴 때까지 대기
+
+**예외 (자동 재개 허용):**
+- 사용자가 해당 세션에서 직접 skill을 호출하고, skill 실행 **도중**(Phase 중간)에 compaction이 발생한 경우  
+  → 해당 skill의 현재 Phase만 재개 (다른 skill/단계로 이행 금지)
+
 ## 레포 구조
 
 ```
