@@ -214,9 +214,14 @@ LLM-Check Phase 완료 후 `state/<prefix>/findings_SCA.json`을 생성한다.
    - `severity`: 개별 CVE 중 최대값 적용 (합산 금지)
    - `title`: CVE 1건이면 `취약 오픈소스 — <lib> <ver> (<CVE>)`, 2건 이상이면 `취약 오픈소스 — <lib> <ver> (<대표CVE> 외 N건)` 형식
    - `recommendation`: **`recommended_version`을 명시하여 구체적으로 작성할 것**
-     - 형식: `"<artifactId> <recommended_version> 이상으로 업그레이드하세요. 업그레이드가 불가한 경우 WAF 룰 등으로 완화 조치를 적용하세요."`
+     - **작성 전 필수 확인**: `scope.version`(현재 사용)과 `recommended_version`(수정 버전)의 **major 버전**을 비교한다.
+       - **major 버전이 다른 경우** (예: 현재 `3.2.5`, 수정 버전 `4.0.4`):  
+         → `"<artifactId> <현재major>.x 계열 전체가 취약하며(현재 사용 버전: <scope.version>), 수정 버전은 <recommended_version> 이상입니다. major 버전 업그레이드가 필요합니다. 단기 조치로 WAF/ACL 완화 적용을 권고합니다."` 형식으로 작성
+       - **major 버전이 같은 경우** (예: 현재 `3.2.5`, 수정 버전 `3.2.9`):  
+         → `"<artifactId>를 <recommended_version> 이상으로 업그레이드하세요. 업그레이드가 불가한 경우 WAF 룰 등으로 완화 조치를 적용하세요."` 형식으로 작성
      - `recommended_version`이 없는 경우: `"최신 패치 버전으로 업그레이드하세요."` (제네릭 fallback)
      - CISA KEV 등재 CVE 포함 시: 문장 끝에 `" CISA KEV 등재 CVE이므로 즉시 조치가 필요합니다."` 추가
+     - ⚠️ **현재 사용 버전의 major 계열 기준으로 "최신 패치"를 추론하여 작성하지 말 것** — 반드시 `recommended_version` 값 자체를 명시할 것
 4. finding_id 재부여: `SCA-001` 순번 (severity 내림차순 → CVSS 내림차순)
 5. `state/<prefix>/findings_SCA.json` 저장
 

@@ -918,3 +918,86 @@ LLM-Check Phase 완료 후 `state/<prefix>/findings_DATA.json`을 생성한다.
   "evidence_trail": []
 }
 ```
+
+---
+
+## [Frontend] 프론트엔드 데이터 보호 LLM 판정 기준
+
+> **적용 대상**: `scan_data_protection.py`가 `frontend` 모드로 실행된 결과 (`scan_coverage.mode == "frontend"`)
+> 스캐너가 탐지한 TS/JS/TSX/JSX/Vue 파일의 findings를 LLM이 아래 기준으로 최종 판정한다.
+
+### [FLOG] console.* PII 노출
+
+**판정 기준**:
+
+| 케이스 | 판정 | 위험도 | 사유 |
+|--------|------|--------|------|
+| `console.log` / `console.error` / `console.warn` + PII 변수 | 정탐 | **High** | 운영 로그에 PII 노출 가능성, 모니터링 서비스 수집 위험 |
+| `console.debug` + PII 변수 | 정탐 | **Medium** | 개발 전용이나 번들에 잔존 시 DevTools 확인 가능 |
+| 변수명이 PII처럼 보이나 실제로는 비식별 ID(feedId, pushType 등) | 오탐 | — | FP: 비식별 식별자는 PII 아님 |
+| 운영 빌드에서 `drop_console: true` 옵션 명시 확인 | 오탐 | — | FP: 빌드 단계에서 자동 제거됨 |
+
+**확인 절차**:
+1. 해당 변수가 실제 PII(이름/연락처/생년월일/인증토큰 등)인지 코드 컨텍스트 확인
+2. `vite.config.ts` / `webpack.config.js`에 `drop_console` 또는 `terser` 설정 존재 여부 확인
+3. 운영 환경(`.env.production`) 기준으로 로그 레벨 설정 확인
+
+---
+
+### [FSTO] localStorage / sessionStorage 민감 데이터 저장
+
+**판정 기준**:
+
+| 케이스 | 판정 | 위험도 | 사유 |
+|--------|------|--------|------|
+| `localStorage.setItem('token' / 'accessToken' / 'authToken', ...)` | 정탐 | **High** | XSS 시 스크립트로 즉시 탈취 가능 |
+| `sessionStorage.setItem('token' / 'sessionKey', ...)` | 정탐 | **Medium** | 탭 종료 시 삭제되나 XSS 취약 |
+| HttpOnly 쿠키로 관리하고 localStorage는 UI 상태만 저장 | 오탐 | — | FP: 설계 의도에 따라 안전 |
+| 키 이름이 민감하게 보이나 저장 값이 만료 시간·UI 플래그 등 비감 데이터 | 오탐 | — | FP: 실제 민감 정보 아님 |
+
+**확인 절차**:
+1. `setItem` 두 번째 인수(저장 값)의 출처 추적 — JWT 토큰 문자열인지 확인
+2. 앱 전체에서 `HttpOnly` 쿠키 전략을 쓰는지 확인 (`document.cookie` vs `localStorage` 전략)
+
+---
+
+### [FSEC] 하드코딩 시크릿 (JS/TS)
+
+**판정 기준**:
+
+| 케이스 | 판정 | 위험도 | 사유 |
+|--------|------|--------|------|
+| `const apiKey = "AKIAI..."` 형태 직접 할당 | 정탐 | **High** | 클라이언트 번들에 포함, 누구나 추출 가능 |
+| `process.env.API_KEY` 참조 (환경변수) | 오탐 | — | FP: 런타임 환경변수, 소스에 노출 안 됨 |
+| `import.meta.env.VITE_KEY` 참조 | 오탐 | — | FP: 빌드 타임 환경변수 참조 |
+| 테스트 파일(`*.spec.ts`, `*.test.ts`)의 가짜 시크릿 | 오탐 | — | FP: 테스트 픽스처 |
+
+---
+
+### [FSEC] NEXT_PUBLIC_ 민감 환경변수 번들 노출
+
+**판정 기준**:
+
+| 케이스 | 판정 | 위험도 | 사유 |
+|--------|------|--------|------|
+| `NEXT_PUBLIC_SECRET_KEY` / `NEXT_PUBLIC_API_PASSWORD` 등 참조 | 정탐 | **Medium** | 클라이언트 번들에 값 포함 → 브라우저에서 확인 가능 |
+| `NEXT_PUBLIC_API_URL` (공개 URL 노출) | 정탐 고려 | **Low** | API URL 자체는 공개 가능하나 내부 서버 주소면 정탐 |
+| 실제 값이 `.env.local`에만 정의되고 CI에서 비어있음이 확인될 때 | 오탐 | — | FP: 실제 시크릿 값 없음 |
+
+**확인 절차**:
+1. `.env`, `.env.local`, `.env.production` 파일에서 해당 변수의 실제 값 확인
+2. Next.js 공식 가이드: NEXT_PUBLIC_ 없는 변수는 서버에서만 접근 가능함을 대조
+
+---
+
+### Frontend findings 공통 위험도 기준
+
+```
+운영 console.log PII    → 취약 / High
+localStorage 인증토큰   → 취약 / High
+하드코딩 API Key        → 취약 / High
+sessionStorage 인증토큰 → 정보 / Medium
+console.debug PII       → 정보 / Medium
+응답 객체 통째 로그     → 정보 / Medium
+NEXT_PUBLIC_ 시크릿     → 정보 / Medium
+```

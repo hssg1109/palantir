@@ -185,7 +185,45 @@ print(f'[OK] needs_review={n}  task22_llm={has_llm}')
 
 통과 조건: `needs_review == 0` OR `task22_llm.json 존재`.
 
-통과 조건 충족 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
+통과 조건 충족 후 Phase C-1을 수행한다.
+
+---
+
+### Step C: Phase C-1 — LLM 데이터 접근 로그 업데이트
+
+> **정책**: `shared/references/llm_data_cleansing_policy.md` | **절차**: `shared/references/phase_c_cleansing.md`
+
+LLM-Check 완료 직후 수행. **testbed는 이 단계에서 삭제하지 않는다** (이후 xss/file/data/sca 진단에 필요).  
+testbed 삭제 + Confluence 등록은 `/sec-review` 완료 시 Phase C-2에서 수행.
+
+**수행**:
+
+1. 이 세션에서 `testbed/<repo>/` 경로를 Read 도구로 접근한 파일 목록 정리 (Phase 1 / Phase 3 구분)
+2. `state/<repo>/llm_data_access_log.json` 생성(없으면) 또는 `skills[]` 배열에 injection 항목 append:
+   ```json
+   {
+     "skill": "injection",
+     "scan_dir": "state/<repo>/injection/<YYYYMMDD_HHMM>",
+     "scanned_at": "<진단 시작 ISO8601 +09:00>",
+     "llm_accessed_files": [
+       { "phase": "Phase 1 - Asset Identification", "purpose": "자산 식별", "files": ["testbed/<repo>/build.gradle", "..."] },
+       { "phase": "Phase 3 - LLM-Check", "purpose": "교차검증", "files": ["testbed/<repo>/src/..."] }
+     ]
+   }
+   ```
+3. 신규 생성 시 `project`는 `state/<repo>/20*/scan_meta.json`의 `bb_project` 값 사용 (없으면 `"?"`)
+4. `cleansing_completed: false` 유지
+
+**완료 출력**:
+```
+[Phase C-1] llm_data_access_log.json 업데이트 완료
+  skill  : injection
+  접근파일: N건 (Phase 1: N / Phase 3: N)
+  로그   : state/<repo>/llm_data_access_log.json
+  [다음] /sec-review 완료 시 testbed 삭제 + Confluence 레지스트리 등록 수행
+```
+
+Phase C-1 완료 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
 
 ## Resources
 

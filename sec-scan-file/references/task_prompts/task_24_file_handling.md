@@ -541,3 +541,75 @@ LLM-Check Phase 완료 후 `state/<prefix>/findings_FILE.json`을 생성한다.
   "evidence_trail": []
 }
 ```
+
+---
+
+## [Frontend] 프론트엔드 파일 처리 LLM 판정 기준
+
+> **적용 대상**: `scan_file_processing.py`가 `frontend` 모드로 실행된 결과 (`scan_metadata.mode == "frontend"`)
+> 스캐너가 탐지한 TS/JS/TSX/JSX/Vue 파일의 findings를 LLM이 아래 기준으로 최종 판정한다.
+
+### [upload_frontend / FormData] FormData 파일 업로드
+
+**판정 기준**:
+
+| 케이스 | 판정 | 위험도 | 사유 |
+|--------|------|--------|------|
+| FormData.append(file) + MIME 미검증 + 크기 미제한 | 정탐 | **Medium** | 악성 파일 업로드 시 서버 측 보안 의존 — 클라이언트 1차 검증 부재 |
+| FormData.append(file) + file.type 확인 + file.size 확인 | 오탐 | — | FP: 클라이언트 사전 검증 적용됨 |
+| `accept="image/*"` 속성만 있고 file.type 코드 검증 없음 | 정탐 고려 | **Low** | `accept` 속성은 우회 가능 → 코드 레벨 검증 권고 |
+| 서버 API에서 최종 검증을 수행하는 구조 (코드 주석 또는 서버 코드 확인 시) | 오탐 | — | FP: 서버 측 완전 검증이 입증되면 클라이언트 미검증은 UX 이슈 수준 |
+
+**확인 절차**:
+1. `file.type` 참조 위치 확인 — FormData 생성 전/후 MIME 타입 비교 여부
+2. `file.size` 또는 `maxSize` 상수 비교 여부
+3. 업로드 대상 API 서버 코드(`scan_file_processing.py` 백엔드 결과)에서 Tika/확장자 검증 존재 여부 교차 확인
+
+---
+
+### [upload_frontend / FileReader_sink] FileReader 위험 싱크 전달
+
+**판정 기준**:
+
+| 케이스 | 판정 | 위험도 | 사유 |
+|--------|------|--------|------|
+| `reader.result` → `innerHTML` / `outerHTML` / `eval` | 정탐 | **High** | 악성 HTML/JS 파일을 읽어 DOM에 주입 — Stored XSS / 코드 실행 위험 |
+| `reader.result` → `innerText` / `textContent` | 오탐 | — | FP: 텍스트 노드 삽입 — HTML 인터프리팅 안 됨 |
+| `reader.result` → 서버 전송(fetch/axios body) | 오탐 | — | FP: 서버로 전송만 하는 경우 — 로컬 XSS 없음 |
+
+---
+
+### [upload_frontend / input_file] <input type="file"> 단독 사용
+
+**판정 기준**:
+
+| 케이스 | 판정 | 위험도 | 사유 |
+|--------|------|--------|------|
+| `<input type="file">` + MIME/accept 미확인 + 크기 미제한 | 정탐 | **Low** | 클라이언트 1차 검증 부재 (정보 수준) |
+| `<input type="file" accept="image/*,.pdf">` | 오탐 | — | FP: accept 속성으로 1차 필터링 적용 |
+
+---
+
+### [download_frontend / blob_url] Blob URL 다운로드
+
+**판정 기준**:
+
+| 케이스 | 판정 | 위험도 | 사유 |
+|--------|------|--------|------|
+| `URL.createObjectURL(blob)` + `a.href = url` + `.click()` + 서버 파일명 그대로 사용 | 정탐 고려 | **Low** | 서버가 Content-Disposition 헤더 없이 파일명을 제어하는 경우 경로 이슈 가능 |
+| 파일명을 클라이언트에서 고정(하드코딩)하여 사용 | 오탈 | — | FP: 클라이언트가 파일명 결정 → 사용자 입력 반영 없음 |
+
+**확인 절차**:
+1. `a.download` 속성에 설정되는 파일명 출처 추적 — 서버 응답 헤더(`Content-Disposition`) 또는 클라이언트 고정값 여부
+2. 서버가 파일명을 사용자 입력으로 반영하는지 백엔드 코드 교차 확인
+
+---
+
+### Frontend file findings 공통 위험도 기준
+
+```
+FileReader → innerHTML/eval   → 취약 / High
+FormData MIME+크기 미검증     → 정보 / Medium
+<input type="file"> 미검증   → 정보 / Low
+Blob URL 다운로드            → 정보 / Low
+```

@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 
 # ── 업로드 탐지 패턴 ──────────────────────────────────────────────────────────
 
@@ -152,6 +152,66 @@ _PROP_MAX_REQ_RE = re.compile(
 _YAML_MAX_FILE_RE = re.compile(r'max-file-size\s*:\s*(\S+)', re.IGNORECASE)
 _YAML_MAX_REQ_RE = re.compile(r'max-request-size\s*:\s*(\S+)', re.IGNORECASE)
 
+# ── 프론트엔드 파일 처리 스캔 설정 ───────────────────────────────────────────
+_FE_SCAN_EXTS = frozenset({".ts", ".tsx", ".js", ".jsx", ".vue"})
+
+_FE_EXCLUDE_DIRS = frozenset({
+    "node_modules", ".next", "dist", "build", ".nuxt",
+    "coverage", ".cache", "__pycache__", ".git",
+    "vendor", "bower_components",
+})
+
+# FormData 생성
+_FE_FORMDATA_RE = re.compile(r'new\s+FormData\s*\(', re.IGNORECASE)
+
+# FormData.append(파일)
+_FE_APPEND_FILE_RE = re.compile(
+    r'\.append\s*\(\s*["\'][^"\']*["\'],\s*\w*[Ff]ile\w*',
+    re.IGNORECASE,
+)
+
+# input[type=file] (JSX/TSX/HTML)
+_FE_INPUT_FILE_RE = re.compile(
+    r'<input[^>]*type\s*=\s*["\']?file["\']?',
+    re.IGNORECASE,
+)
+
+# FileReader 사용
+_FE_FILE_READER_RE = re.compile(r'new\s+FileReader\s*\(', re.IGNORECASE)
+
+# FileReader 결과를 innerHTML / eval 등 위험 싱크에 전달
+_FE_READER_SINK_RE = re.compile(
+    r'\.result\b.*(?:innerHTML|outerHTML|document\.write|eval\s*\()',
+    re.IGNORECASE,
+)
+
+# MIME 타입 검증 패턴 (file.type 참조)
+_FE_MIME_CHECK_RE = re.compile(
+    r'(?:file|files\[\d+\]|f)\s*\.\s*type\b|'
+    r'accept\s*=\s*["\'][^"\']+["\']',
+    re.IGNORECASE,
+)
+
+# 파일 크기 검증 패턴 (file.size 참조)
+_FE_SIZE_CHECK_RE = re.compile(
+    r'(?:file|files\[\d+\]|f)\s*\.\s*size\b|'
+    r'maxSize\b|maxFileSize\b',
+    re.IGNORECASE,
+)
+
+# Blob / URL.createObjectURL (다운로드 패턴)
+_FE_BLOB_DOWNLOAD_RE = re.compile(
+    r'URL\.createObjectURL\s*\(|new\s+Blob\s*\(',
+    re.IGNORECASE,
+)
+
+# a.href = blobUrl + .click() 패턴
+_FE_DOWNLOAD_CLICK_RE = re.compile(
+    r'\.href\s*=\s*(?:url|blobUrl|objectUrl|downloadUrl)\b|'
+    r'download.*href|href.*download',
+    re.IGNORECASE,
+)
+
 # ── 헬퍼 함수 ─────────────────────────────────────────────────────────────────
 
 def _read_file(path: Path) -> str:
@@ -217,6 +277,31 @@ def _relative(path: Path, base: Path) -> str:
         return str(path.relative_to(base))
     except ValueError:
         return str(path)
+
+
+def _is_frontend_repo(source_dir: Path) -> bool:
+    """순수 프론트엔드 레포 판별: Java/Kotlin < 5개 + package.json 존재"""
+    java_count = sum(1 for _ in source_dir.rglob("*.java"))
+    kt_count   = sum(1 for _ in source_dir.rglob("*.kt"))
+    has_pkg    = (source_dir / "package.json").exists()
+    return (java_count + kt_count) < 5 and has_pkg
+
+
+def _iter_fe_sources(source_dir: Path):
+    """프론트엔드 소스 파일 이터레이터 (node_modules/.next 등 제외)"""
+    for fp in source_dir.rglob("*"):
+        if fp.suffix not in _FE_SCAN_EXTS:
+            continue
+        if any(ex in fp.parts for ex in _FE_EXCLUDE_DIRS):
+            continue
+        yield fp
+
+
+def _snippet_fe(content: str, pos: int, window: int = 200) -> str:
+    """pos 기준 현재 라인 텍스트 반환 (프론트엔드 스니펫용)"""
+    s = content.rfind("\n", 0, pos) + 1
+    e = content.find("\n", pos)
+    return content[s:(e if e != -1 else len(content))].strip()[:window]
 
 
 # ── 업로드 스캔 ────────────────────────────────────────────────────────────────
@@ -784,6 +869,166 @@ def _write_llm_summary(output: dict, out_path: Path) -> None:
     print(f"LLM 요약본 저장: {summary_path}")
 
 
+# ── 프론트엔드 파일 처리 스캔 ─────────────────────────────────────────────────
+
+def scan_uploads_frontend(source_dir: Path) -> list[dict]:
+    """프론트엔드 TS/JS 소스의 파일 업로드 취약점 탐지.
+
+    탐지 패턴:
+      - FormData 생성 + 파일 append
+      - <input type="file"> 인라인 사용
+      - FileReader 결과를 innerHTML/eval 등 위험 싱크에 전달
+      - MIME 타입(file.type) 검증 부재
+      - 파일 크기(file.size) 제한 부재
+    """
+    results: list[dict] = []
+
+    for fp in sorted(_iter_fe_sources(source_dir)):
+        content = _read_file(fp)
+        rel     = _relative(fp, source_dir)
+
+        # ── FormData 업로드 탐지 ─────────────────────────────────────────────
+        for m in _FE_FORMDATA_RE.finditer(content):
+            block_start = m.start()
+            # 현재 줄 + 앞뒤 20줄 범위 컨텍스트
+            ctx_start = content.rfind("\n", 0, block_start)
+            ctx_start = max(0, ctx_start - 500)
+            ctx_end   = min(len(content), block_start + 800)
+            ctx       = content[ctx_start:ctx_end]
+
+            has_append  = bool(_FE_APPEND_FILE_RE.search(ctx))
+            has_mime    = bool(_FE_MIME_CHECK_RE.search(ctx))
+            has_size    = bool(_FE_SIZE_CHECK_RE.search(ctx))
+
+            if not has_append:
+                continue
+
+            missing = []
+            if not has_mime:
+                missing.append("MIME 타입(file.type) 검증 미확인")
+            if not has_size:
+                missing.append("파일 크기(file.size) 제한 미확인")
+
+            if missing:
+                result, severity = "info", "Medium"
+                detail = "보안 보완 권고: " + " / ".join(missing)
+            else:
+                result, severity = "safe", "Informational"
+                detail = "MIME 검증 + 크기 제한 적용됨"
+
+            line_no = _line_of(content, block_start)
+            results.append({
+                "type":           "upload_frontend",
+                "subtype":        "FormData",
+                "controller_file": rel,
+                "controller_line": line_no,
+                "checks": {
+                    "has_mime_check": has_mime,
+                    "has_size_limit": has_size,
+                },
+                "result":       result,
+                "severity":     severity,
+                "detail":       detail,
+                "needs_review": result != "safe",
+                "code_snippet": _snippet_fe(content, block_start),
+            })
+
+        # ── FileReader 위험 싱크 탐지 ────────────────────────────────────────
+        for m in _FE_FILE_READER_RE.finditer(content):
+            ctx_start = m.start()
+            ctx       = content[ctx_start: ctx_start + 600]
+            if _FE_READER_SINK_RE.search(ctx):
+                line_no = _line_of(content, ctx_start)
+                results.append({
+                    "type":           "upload_frontend",
+                    "subtype":        "FileReader_sink",
+                    "controller_file": rel,
+                    "controller_line": line_no,
+                    "checks": {
+                        "has_mime_check": False,
+                        "has_size_limit": False,
+                    },
+                    "result":       "vulnerable",
+                    "severity":     "High",
+                    "detail":       "FileReader.result를 innerHTML/eval 등 위험 싱크에 전달 — XSS/코드 실행 위험",
+                    "needs_review": True,
+                    "code_snippet": _snippet_fe(content, ctx_start),
+                })
+
+        # ── <input type="file"> 단독 사용 (MIME/크기 검증 부재) ─────────────
+        for m in _FE_INPUT_FILE_RE.finditer(content):
+            ctx_start = max(0, m.start() - 200)
+            ctx_end   = min(len(content), m.start() + 600)
+            ctx       = content[ctx_start:ctx_end]
+
+            has_mime = bool(_FE_MIME_CHECK_RE.search(ctx)) or ("accept=" in m.group(0).lower())
+            has_size = bool(_FE_SIZE_CHECK_RE.search(ctx))
+
+            missing = []
+            if not has_mime:
+                missing.append("MIME 타입 / accept 속성 미확인")
+            if not has_size:
+                missing.append("파일 크기 제한 미확인")
+
+            if not missing:
+                continue
+
+            line_no = _line_of(content, m.start())
+            results.append({
+                "type":           "upload_frontend",
+                "subtype":        "input_file",
+                "controller_file": rel,
+                "controller_line": line_no,
+                "checks": {
+                    "has_mime_check": has_mime,
+                    "has_size_limit": has_size,
+                },
+                "result":       "info",
+                "severity":     "Low",
+                "detail":       "보안 보완 권고: " + " / ".join(missing),
+                "needs_review": True,
+                "code_snippet": _snippet_fe(content, m.start()),
+            })
+
+    return results
+
+
+def scan_downloads_frontend(source_dir: Path) -> list[dict]:
+    """프론트엔드 TS/JS 소스의 Blob 다운로드 취약점 탐지.
+
+    탐지 패턴:
+      - URL.createObjectURL(blob) + a.href + click() 패턴
+      - filename 미검증 시 경로 조작 가능성
+    """
+    results: list[dict] = []
+
+    for fp in sorted(_iter_fe_sources(source_dir)):
+        content = _read_file(fp)
+        rel     = _relative(fp, source_dir)
+
+        for m in _FE_BLOB_DOWNLOAD_RE.finditer(content):
+            ctx_start = m.start()
+            ctx       = content[ctx_start: ctx_start + 400]
+
+            if not _FE_DOWNLOAD_CLICK_RE.search(ctx):
+                continue
+
+            line_no = _line_of(content, ctx_start)
+            results.append({
+                "type":           "download_frontend",
+                "subtype":        "blob_url",
+                "controller_file": rel,
+                "controller_line": line_no,
+                "result":         "info",
+                "severity":       "Low",
+                "detail":         "Blob URL 다운로드 — 서버 응답 파일명 미검증 시 경로 조작 위험 (LLM 수동 확인 필요)",
+                "needs_review":   True,
+                "code_snippet":   _snippet_fe(content, ctx_start),
+            })
+
+    return results
+
+
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -806,6 +1051,74 @@ def main() -> None:
 
     print(f"[INFO] Scanning: {source_dir}")
 
+    is_frontend = _is_frontend_repo(source_dir)
+    scan_mode   = "frontend" if is_frontend else "backend"
+    print(f"[INFO] 모드: {scan_mode} 레포 감지")
+
+    if is_frontend:
+        print("[INFO] 프론트엔드 파일 처리 스캔 실행...")
+        fe_uploads   = scan_uploads_frontend(source_dir)
+        fe_downloads = scan_downloads_frontend(source_dir)
+
+        fe_file_count = sum(1 for _ in _iter_fe_sources(source_dir))
+        auto_findings, evidence_trail = _build_file_auto_findings_and_trail(
+            fe_uploads, fe_downloads, []
+        )
+
+        output = {
+            "task_id": "file",
+            "status": "completed",
+            "scan_metadata": {
+                "version":    VERSION,
+                "source_dir": str(source_dir),
+                "scanned_at": datetime.now().isoformat(timespec="seconds"),
+                "mode":       "frontend",
+                "fe_files_scanned": fe_file_count,
+                "total_upload_endpoints":   len(fe_uploads),
+                "total_download_endpoints": len(fe_downloads),
+                "total_rfi_endpoints": 0,
+                "total_view_injection_suspects": 0,
+            },
+            "upload_diagnoses":        fe_uploads,
+            "download_diagnoses":      fe_downloads,
+            "rfi_diagnoses":           [],
+            "view_injection_suspects": [],
+            "config_findings":         [],
+            "auto_findings":           auto_findings,
+            "evidence_trail":          evidence_trail,
+            "summary": {
+                "upload":   {"vulnerable": sum(1 for r in fe_uploads   if r["result"] == "vulnerable"),
+                             "info":       sum(1 for r in fe_uploads   if r["result"] == "info"),
+                             "safe":       sum(1 for r in fe_uploads   if r["result"] == "safe")},
+                "download": {"vulnerable": sum(1 for r in fe_downloads if r["result"] == "vulnerable"),
+                             "info":       sum(1 for r in fe_downloads if r["result"] == "info"),
+                             "safe":       sum(1 for r in fe_downloads if r["result"] == "safe")},
+                "rfi":      {"vulnerable": 0, "safe": 0},
+                "config":   {"has_size_limit": None},
+                "total_needs_review":    sum(1 for r in fe_uploads + fe_downloads if r.get("needs_review")),
+                "auto_findings_count":   len(auto_findings),
+                "evidence_trail_count":  len(evidence_trail),
+                "view_injection_suspects": 0,
+            },
+        }
+
+        if args.output:
+            out_path = Path(args.output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(json.dumps(output, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"[DONE] 결과 저장: {out_path}")
+            _write_llm_summary(output, out_path)
+        else:
+            print(json.dumps(output, ensure_ascii=False, indent=2))
+
+        print(
+            f"\n[요약-FE] 업로드: {len(fe_uploads)}건 "
+            f"| 다운로드(Blob): {len(fe_downloads)}건 "
+            f"| 수동검토 필요: {output['summary']['total_needs_review']}건"
+        )
+        return
+
+    # ── 백엔드(Java/Kotlin) 스캔 ──────────────────────────────────────────────
     uploads = scan_uploads(source_dir)
     downloads = scan_downloads(source_dir)
     view_injections = scan_view_injection(source_dir)
@@ -822,6 +1135,7 @@ def main() -> None:
             "version": VERSION,
             "source_dir": str(source_dir),
             "scanned_at": datetime.now().isoformat(timespec="seconds"),
+            "mode": "backend",
             "total_upload_endpoints": len(uploads),
             "total_download_endpoints": len(downloads),
             "total_rfi_endpoints": len(rfis),

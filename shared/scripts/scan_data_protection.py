@@ -32,7 +32,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-VERSION = "1.4.0"
+VERSION = "1.5.0"
 
 # ============================================================
 #  0. 공통 유틸
@@ -42,6 +42,49 @@ _EXCLUDE_DIRS = frozenset({
     "test", "Test", "target", "build", "node_modules",
     ".git", "__pycache__", "generated", "resources/static",
 })
+
+# ── 프론트엔드 스캔 설정 ──────────────────────────────────────────────────────
+_FE_SCAN_EXTS = frozenset({".ts", ".tsx", ".js", ".jsx", ".vue"})
+
+_FE_EXCLUDE_DIRS = frozenset({
+    "node_modules", ".next", "dist", "build", ".nuxt",
+    "coverage", ".cache", "__pycache__", ".git",
+    "vendor", "bower_components",
+})
+
+_FE_CONSOLE_RE = re.compile(
+    r'console\s*\.\s*(log|debug|warn|error|info)\s*\(',
+    re.IGNORECASE,
+)
+_FE_PII_RE = re.compile(
+    r'\b(?:mbrId|memberId|userId|email|phone|passwd|password|token|cardNo|'
+    r'ci|di|birth|addr|account|credit|pin|ssn|mobile|mdn|rrn)\b',
+    re.IGNORECASE,
+)
+_FE_RESPONSE_VAR_RE = re.compile(
+    r'\b(?:response|res|data|result|resp)\s*[,)\s]',
+    re.IGNORECASE,
+)
+_FE_LOCAL_STORAGE_RE = re.compile(
+    r'localStorage\s*\.\s*setItem\s*\(\s*["\']'
+    r'([^"\']*(?:token|session|auth|password|secret|key|credential|jwt|access)[^"\']*)["\']',
+    re.IGNORECASE,
+)
+_FE_SESSION_STORAGE_RE = re.compile(
+    r'sessionStorage\s*\.\s*setItem\s*\(\s*["\']'
+    r'([^"\']*(?:token|session|auth|password|secret|key|credential|jwt|access)[^"\']*)["\']',
+    re.IGNORECASE,
+)
+_FE_NEXT_PUBLIC_SECRET_RE = re.compile(
+    r'NEXT_PUBLIC_\w*(?:SECRET|PASSWORD|TOKEN|API_KEY|APIKEY|PRIVATE)\w*',
+    re.IGNORECASE,
+)
+_FE_HARDCODED_SECRET_RE = re.compile(
+    r'(?:apiKey|api_key|secretKey|secret_key|password|passwd|'
+    r'private[_-]?key|auth[_-]?key|access[_-]?key)\s*[=:]\s*["\'][^"\']{8,}["\']',
+    re.IGNORECASE,
+)
+_FE_ENV_REF_RE = re.compile(r'process\.env\.|import\.meta\.env\.', re.IGNORECASE)
 
 _TEST_PATH_RE = re.compile(r'[\\/](?:test|Test|spec|mock|stub|fixture)[\\/]')
 
@@ -621,6 +664,24 @@ def _iter_props(source_dir: Path):
             if _is_excluded(fp):
                 continue
             yield fp
+
+
+def _is_frontend_repo(source_dir: Path) -> bool:
+    """순수 프론트엔드 레포 판별: Java/Kotlin < 5개 + package.json 존재"""
+    java_count = sum(1 for _ in source_dir.rglob("*.java"))
+    kt_count   = sum(1 for _ in source_dir.rglob("*.kt"))
+    has_pkg    = (source_dir / "package.json").exists()
+    return (java_count + kt_count) < 5 and has_pkg
+
+
+def _iter_fe_sources(source_dir: Path):
+    """프론트엔드 소스 파일 이터레이터 (node_modules/.next 등 제외)"""
+    for fp in source_dir.rglob("*"):
+        if fp.suffix not in _FE_SCAN_EXTS:
+            continue
+        if any(ex in fp.parts for ex in _FE_EXCLUDE_DIRS):
+            continue
+        yield fp
 
 
 def _snippet(content: str, pos: int, window: int = 120) -> str:
@@ -2467,6 +2528,202 @@ def _write_llm_summary(result_dict: dict, out_path: Path) -> None:
 
 
 # ============================================================
+#  11b. 프론트엔드 데이터 보호 스캔
+# ============================================================
+
+def scan_frontend_data_exposure(source_dir: Path) -> list[DPFinding]:
+    """프론트엔드 TS/JS 소스의 데이터 보호 취약점 탐지.
+
+    탐지 패턴:
+      - console.log/debug/warn/error PII 노출 (운영=High, debug=Medium)
+      - localStorage/sessionStorage 민감 데이터 저장
+      - API 응답 객체 통째 로그
+      - 하드코딩 시크릿 (API Key / Password)
+      - NEXT_PUBLIC_ 민감 환경변수 번들 노출
+    """
+    findings: list[DPFinding] = []
+    fid_counter = [0]
+
+    def _next_id(prefix: str) -> str:
+        fid_counter[0] += 1
+        return f"{prefix}-FE-{fid_counter[0]:03d}"
+
+    def _get_line_text(content: str, pos: int) -> str:
+        s = content.rfind("\n", 0, pos) + 1
+        e = content.find("\n", pos)
+        return content[s:(e if e != -1 else len(content))]
+
+    for fp in sorted(_iter_fe_sources(source_dir)):
+        content = _read(fp)
+        rel = _rel(fp, source_dir)
+
+        # ── 1. console.* PII / 응답 객체 로그 ────────────────────────────────
+        for m in _FE_CONSOLE_RE.finditer(content):
+            log_fn = m.group(1).lower()
+            line_text = _get_line_text(content, m.start())
+            line_no = _line_of(content, m.start())
+            has_pii  = bool(_FE_PII_RE.search(line_text))
+            has_resp = bool(_FE_RESPONSE_VAR_RE.search(line_text))
+
+            if has_pii:
+                is_debug = (log_fn == "debug")
+                findings.append(DPFinding(
+                    finding_id    = _next_id("FLOG"),
+                    category      = "SENSITIVE_LOGGING",
+                    severity      = "Medium" if is_debug else "High",
+                    title         = f"[Frontend] console.{log_fn} PII 노출 — {rel}:{line_no}",
+                    description   = (
+                        f"console.{log_fn}() 호출에서 개인식별정보(PII) 변수가 브라우저 "
+                        "콘솔에 출력됩니다. 운영 환경에서 DevTools를 통해 확인 가능하며, "
+                        "Sentry·Datadog 등 모니터링 서비스에 자동 수집될 수 있습니다."
+                    ),
+                    file          = rel,
+                    line          = line_no,
+                    code_snippet  = line_text.strip()[:200],
+                    cwe_id        = "CWE-532",
+                    owasp_category = "A02:2021 Cryptographic Failures",
+                    recommendation = (
+                        "운영 빌드에서 console.* 출력을 제거하거나 빌드 도구 "
+                        "(webpack/vite)의 drop_console 옵션으로 자동 제거하십시오."
+                    ),
+                    result        = "정보" if is_debug else "취약",
+                    needs_review  = True,
+                    evidence      = {"file": rel, "line": line_no, "code_snippet": line_text.strip()[:200]},
+                ))
+            elif has_resp:
+                findings.append(DPFinding(
+                    finding_id    = _next_id("FLOG"),
+                    category      = "SENSITIVE_LOGGING",
+                    severity      = "Medium",
+                    title         = f"[Frontend] API 응답 객체 통째 로그 — {rel}:{line_no}",
+                    description   = (
+                        "API 응답 객체(response/res/data)를 console.log()로 통째 출력합니다. "
+                        "응답에 PII·토큰·내부 서버 정보가 포함될 경우 브라우저 콘솔에 노출됩니다."
+                    ),
+                    file          = rel,
+                    line          = line_no,
+                    code_snippet  = line_text.strip()[:200],
+                    cwe_id        = "CWE-532",
+                    owasp_category = "A02:2021 Cryptographic Failures",
+                    recommendation = "운영 빌드에서 console.log(response) 패턴을 제거하십시오.",
+                    result        = "정보",
+                    needs_review  = True,
+                    evidence      = {"file": rel, "line": line_no, "code_snippet": line_text.strip()[:200]},
+                ))
+
+        # ── 2. localStorage 민감 데이터 저장 ──────────────────────────────────
+        for m in _FE_LOCAL_STORAGE_RE.finditer(content):
+            line_no  = _line_of(content, m.start())
+            key_name = m.group(1)
+            findings.append(DPFinding(
+                finding_id    = _next_id("FSTO"),
+                category      = "SENSITIVE_LOGGING",
+                severity      = "High",
+                title         = f"[Frontend] localStorage 민감 데이터 저장 — '{key_name}'",
+                description   = (
+                    f"localStorage.setItem('{key_name}', ...) 에서 인증 토큰·세션 정보를 "
+                    "브라우저 localStorage에 평문 저장합니다. "
+                    "XSS 취약점과 결합 시 탈취 가능성이 있습니다."
+                ),
+                file          = rel,
+                line          = line_no,
+                code_snippet  = _snippet(content, m.start()),
+                cwe_id        = "CWE-312",
+                owasp_category = "A02:2021 Cryptographic Failures",
+                recommendation = (
+                    "인증 토큰은 HttpOnly Secure 쿠키에 저장하십시오. "
+                    "localStorage 사용이 불가피한 경우 XSS 방어를 강화하십시오."
+                ),
+                result        = "취약",
+                needs_review  = True,
+                evidence      = {"file": rel, "line": line_no, "code_snippet": _snippet(content, m.start())},
+            ))
+
+        # ── 3. sessionStorage 민감 데이터 저장 ────────────────────────────────
+        for m in _FE_SESSION_STORAGE_RE.finditer(content):
+            line_no  = _line_of(content, m.start())
+            key_name = m.group(1)
+            findings.append(DPFinding(
+                finding_id    = _next_id("FSTO"),
+                category      = "SENSITIVE_LOGGING",
+                severity      = "Medium",
+                title         = f"[Frontend] sessionStorage 민감 데이터 저장 — '{key_name}'",
+                description   = (
+                    f"sessionStorage.setItem('{key_name}', ...) 에서 인증 관련 민감 데이터를 "
+                    "sessionStorage에 저장합니다. "
+                    "XSS 취약점과 결합 시 동일 세션 내 스크립트에 의해 탈취될 수 있습니다."
+                ),
+                file          = rel,
+                line          = line_no,
+                code_snippet  = _snippet(content, m.start()),
+                cwe_id        = "CWE-312",
+                owasp_category = "A02:2021 Cryptographic Failures",
+                recommendation = "인증 토큰은 HttpOnly Secure 쿠키에 저장하는 것을 권장합니다.",
+                result        = "정보",
+                needs_review  = True,
+                evidence      = {"file": rel, "line": line_no, "code_snippet": _snippet(content, m.start())},
+            ))
+
+        # ── 4. 하드코딩 시크릿 (JS/TS) ────────────────────────────────────────
+        for m in _FE_HARDCODED_SECRET_RE.finditer(content):
+            window = content[max(0, m.start() - 40): m.start() + 40]
+            if _FE_ENV_REF_RE.search(window):
+                continue
+            line_no = _line_of(content, m.start())
+            findings.append(DPFinding(
+                finding_id    = _next_id("FSEC"),
+                category      = "HARDCODED_SECRET",
+                severity      = "High",
+                title         = f"[Frontend] 하드코딩 시크릿 — {rel}:{line_no}",
+                description   = (
+                    "JS/TS 소스 코드에 API 키·비밀번호·토큰이 평문으로 하드코딩되어 있습니다. "
+                    "클라이언트 번들에 포함되어 누구나 확인 가능합니다."
+                ),
+                file          = rel,
+                line          = line_no,
+                code_snippet  = _masked_snippet(content, m.start()),
+                cwe_id        = "CWE-798",
+                owasp_category = "A02:2021 Cryptographic Failures",
+                recommendation = (
+                    "시크릿을 환경변수(.env)로 분리하고 서버 사이드에서만 접근하십시오."
+                ),
+                result        = "취약",
+                needs_review  = True,
+                evidence      = {"file": rel, "line": line_no, "code_snippet": _masked_snippet(content, m.start())},
+            ))
+
+        # ── 5. NEXT_PUBLIC_ 민감 환경변수 번들 노출 ───────────────────────────
+        for m in _FE_NEXT_PUBLIC_SECRET_RE.finditer(content):
+            line_no = _line_of(content, m.start())
+            env_var = m.group(0)
+            findings.append(DPFinding(
+                finding_id    = _next_id("FSEC"),
+                category      = "HARDCODED_SECRET",
+                severity      = "Medium",
+                title         = f"[Frontend] NEXT_PUBLIC_ 민감 환경변수 번들 노출 — {env_var}",
+                description   = (
+                    f"'{env_var}' 환경변수는 Next.js 빌드 시 클라이언트 번들에 포함됩니다. "
+                    "시크릿·API 키 등의 민감 정보를 NEXT_PUBLIC_ 접두사로 노출하면 "
+                    "누구나 번들을 통해 값을 확인할 수 있습니다."
+                ),
+                file          = rel,
+                line          = line_no,
+                code_snippet  = _snippet(content, m.start()),
+                cwe_id        = "CWE-200",
+                owasp_category = "A02:2021 Cryptographic Failures",
+                recommendation = (
+                    "시크릿·토큰은 NEXT_PUBLIC_ 없는 환경변수로 관리하고 "
+                    "서버 사이드(API Route/getServerSideProps)에서만 접근하십시오."
+                ),
+                result        = "정보",
+                needs_review  = True,
+                evidence      = {"file": rel, "line": line_no, "code_snippet": _snippet(content, m.start())},
+            ))
+
+    return findings
+
+
+# ============================================================
 #  12. Main
 # ============================================================
 
@@ -2504,47 +2761,66 @@ def main():
 
     print(f"[scan_data_protection v{VERSION}] 진단 시작: {source_dir}")
 
-    if "secret" not in skip:
-        print("  [S] 하드코딩 시크릿 스캔...")
-        all_findings.extend(scan_hardcoded_secrets(source_dir))
+    is_frontend = _is_frontend_repo(source_dir)
+    scan_mode   = "frontend" if is_frontend else "backend"
+    print(f"  [모드] {scan_mode} 레포 감지")
 
-    if "logging" not in skip:
-        print("  [L] 민감정보 로깅 스캔...")
-        all_findings.extend(scan_sensitive_logging(source_dir))
+    if is_frontend:
+        print("  [FE] 프론트엔드 데이터 노출 스캔...")
+        all_findings.extend(scan_frontend_data_exposure(source_dir))
+        scan_coverage = {
+            "mode": "frontend",
+            "fe_files_scanned": sum(1 for _ in _iter_fe_sources(source_dir)),
+            "java_files_scanned": 0,
+        }
+    else:
+        if "secret" not in skip:
+            print("  [S] 하드코딩 시크릿 스캔...")
+            all_findings.extend(scan_hardcoded_secrets(source_dir))
 
-    if "crypto" not in skip:
-        print("  [C] 취약 암호화 알고리즘 스캔...")
-        all_findings.extend(scan_weak_crypto(source_dir))
+        if "logging" not in skip:
+            print("  [L] 민감정보 로깅 스캔...")
+            all_findings.extend(scan_sensitive_logging(source_dir))
 
-    if "jwt" not in skip:
-        print("  [J] JWT 검증 불완전 스캔...")
-        all_findings.extend(scan_jwt_issues(source_dir))
+        if "crypto" not in skip:
+            print("  [C] 취약 암호화 알고리즘 스캔...")
+            all_findings.extend(scan_weak_crypto(source_dir))
 
-    if "dto" not in skip:
-        print("  [D] DTO 민감정보 노출 스캔...")
-        all_findings.extend(scan_dto_exposure(source_dir, api_inventory))
+        if "jwt" not in skip:
+            print("  [J] JWT 검증 불완전 스캔...")
+            all_findings.extend(scan_jwt_issues(source_dir))
 
-    if "tostring" not in skip:
-        print("  [D+] Lombok @ToString PII 노출 스캔...")
-        all_findings.extend(scan_toString_exposure(source_dir))
+        if "dto" not in skip:
+            print("  [D] DTO 민감정보 노출 스캔...")
+            all_findings.extend(scan_dto_exposure(source_dir, api_inventory))
 
-    if "apipii" not in skip:
-        print("  [P] API 응답 UserInfo PII 비마스킹 반환 스캔...")
-        all_findings.extend(scan_api_response_pii(source_dir))
+        if "tostring" not in skip:
+            print("  [D+] Lombok @ToString PII 노출 스캔...")
+            all_findings.extend(scan_toString_exposure(source_dir))
 
-    cors_findings, cors_status = [], {}
-    if "cors" not in skip:
-        print("  [R] CORS 오설정 스캔...")
-        cors_findings, cors_status = scan_cors_config(source_dir)
-        all_findings.extend(cors_findings)
-        global_status["cors"] = cors_status
+        if "apipii" not in skip:
+            print("  [P] API 응답 UserInfo PII 비마스킹 반환 스캔...")
+            all_findings.extend(scan_api_response_pii(source_dir))
 
-    header_findings, header_status = [], {}
-    if "header" not in skip:
-        print("  [H] 보안 헤더 미설정 스캔...")
-        header_findings, header_status = scan_security_headers(source_dir)
-        all_findings.extend(header_findings)
-        global_status["security_headers"] = header_status
+        cors_findings, cors_status = [], {}
+        if "cors" not in skip:
+            print("  [R] CORS 오설정 스캔...")
+            cors_findings, cors_status = scan_cors_config(source_dir)
+            all_findings.extend(cors_findings)
+            global_status["cors"] = cors_status
+
+        header_findings, header_status = [], {}
+        if "header" not in skip:
+            print("  [H] 보안 헤더 미설정 스캔...")
+            header_findings, header_status = scan_security_headers(source_dir)
+            all_findings.extend(header_findings)
+            global_status["security_headers"] = header_status
+
+        scan_coverage = {
+            "mode": "backend",
+            "fe_files_scanned": 0,
+            "java_files_scanned": sum(1 for _ in _iter_sources(source_dir)),
+        }
 
     summary = _build_summary(all_findings)
     auto_findings, evidence_trail = _build_data_auto_findings_and_trail(all_findings)
@@ -2564,6 +2840,7 @@ def main():
     result_dict = asdict(result)
     result_dict["auto_findings"]  = auto_findings
     result_dict["evidence_trail"] = evidence_trail
+    result_dict["scan_coverage"]  = scan_coverage
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
