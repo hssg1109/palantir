@@ -3,8 +3,8 @@
 sync_plan_confluence.py — SVC 진단 현황 관련 Confluence 페이지 일괄 동기화
 
 동기화 대상:
-  docs/scan_plan.md            → pageId=<PAGE_ID> (보안진단 체크리스트 전체 현황)
-  docs/llm_data_cleansing_registry.md → pageId=<PAGE_ID> (LLM 클렌징 레지스트리)
+  docs/scan_plan.md            → pageId=<YOUR_PARENT_PAGE_ID> (보안진단 체크리스트 전체 현황)
+  docs/llm_data_cleansing_registry.md → pageId=<YOUR_REGISTRY_PAGE_ID> (LLM 클렌징 레지스트리)
 
 인증: .env의 CONFLUENCE_TOKEN (Personal Access Token, Bearer 방식)
 네트워크: wiki.example.com 사내망 전용 → Windows PowerShell 경유 (WSL 자동 우회)
@@ -30,13 +30,13 @@ TARGETS = [
     {
         "key":     "scan_plan",
         "md_path": PALANTIR_DIR / "docs" / "scan_plan.md",
-        "page_id": "<PAGE_ID>",
+        "page_id": "<YOUR_PARENT_PAGE_ID>",
         "title":   "SVC 서비스 군 보안진단 체크리스트 전체 현황",
     },
     {
         "key":     "cleansing",
         "md_path": PALANTIR_DIR / "docs" / "llm_data_cleansing_registry.md",
-        "page_id": "<PAGE_ID>",
+        "page_id": "<YOUR_REGISTRY_PAGE_ID>",
         "title":   "LLM 데이터 클렌징 이력 레지스트리",
     },
 ]
