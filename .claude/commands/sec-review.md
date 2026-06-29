@@ -42,6 +42,48 @@ SESSION_ID=$(python3 tools/audit_utils.py init-session \
 - 출력된 SESSION_ID 문자열을 이 리뷰 세션 전체에서 사용한다
 - 명령 실패 시 SESSION_ID="" 로 설정하고 리뷰를 계속 진행 (audit 기록은 생략됨)
 
+### 0c. 판정 기준 파일 로드 ⚠️ 필수 — 세션 시작마다 반드시 실행
+
+> **목적**: compact / 세션 중단 후 재실행 시에도 판정 기준이 컨텍스트 상위에 확보되도록 한다.
+> 이 단계를 건너뛰면 기준이 MEMORY.md 한 줄 요약에만 의존하게 되어 엣지케이스 판단이 흔들린다.
+
+아래 4개 파일을 Read 도구로 순서대로 읽는다:
+
+1. `~/.claude/projects/-home-geunsolo-palantir/memory/feedback_conservative_security_policy.md`  
+   → Proxy XSS / SQL `${}` / SpEL StandardEvaluationContext → 입력 경로 무관 취약/High
+2. `~/.claude/projects/-home-geunsolo-palantir/memory/feedback_hardcoded_credential_severity.md`  
+   → 운영 동일 자격증명=취약/High, 별도 자격증명=취약/Medium
+3. `~/.claude/projects/-home-geunsolo-palantir/memory/feedback_log_dto_severity_standard.md`  
+   → 운영LOG=취약/High, debugLOG=정보/Medium, @ToString=정보/Medium
+4. `~/.claude/projects/-home-geunsolo-palantir/memory/feedback_severity_reporting_policy.md`  
+   → Informational(위험도 1) finding → 리포팅 불필요, 정탐 처리 시 최소 Medium 이상
+
+로드 후 아래 한 줄을 출력한다:
+```
+[기준 로드] 판정 기준 4개 파일 로드 완료 — conservative_policy / credential_severity / log_dto / severity_policy
+```
+
+### 0d. 세션 재개 감지 (compact / 세션 중단 후 재실행)
+
+> **목적**: 이전 세션에서 리뷰가 진행된 상태로 재실행된 경우, 중단 지점부터 재개하고 판정 기준을 재확인한다.
+
+Step 1 findings 수집 직후, `reviewed: true` 건수를 집계한다:
+
+- **0건**: 신규 세션 → 정상 진행
+- **1건 이상**: 이전 세션 중단 감지 → 아래를 출력하고 판정 기준 파일(0c)을 **재로드**한다
+
+```
+=== 이전 세션 재개 감지 ===
+판정 완료  : {N}건 (정탐: {정탐수} / 오탐: {오탐수})
+미판정 대기 : {M}건
+판정 기준 재로드 완료 (0c 기준 파일 4개)
+미판정 finding부터 리뷰를 재개합니다.
+==========================
+```
+
+- 재로드 순서: 0c와 동일 (4개 파일을 다시 Read)
+- 이미 `reviewed: true` 인 finding은 건너뜀, 미판정 finding부터 §4 진행
+
 ### 1. findings 수집
 
 **RUN_ID 모드**: `state/<repo>/*/<RUN_ID>/findings_*.json` 패턴으로 수집.
@@ -50,6 +92,8 @@ SESSION_ID=$(python3 tools/audit_utils.py init-session \
 skill별로 RUN_ID 내림차순(최신) 파일 하나씩 선택:
 - `state/<repo>/<skill>/*/findings_*.json` — skill별 최신 파일
 - 수집 후 어떤 RUN_ID를 사용했는지 skill별로 출력
+
+**SCA 스킬 제외**: `state/<repo>/sca/` 디렉터리는 수집 대상에서 제외한다 (SCA 진단은 별도 검증 후 진행 예정).
 
 각 파일에서 `reviewed` 가 `true` 가 아닌 finding 중 `result` 가 아래 **제외 목록에 없는** 항목을 리뷰 대상으로 추린다.
 
@@ -152,16 +196,17 @@ n  또는 Enter  →  불필요
 레포   : <repo>
 대상   : <N>건
 
- #  | 분류      | ID               | 위험도   | 제목 요약
-----+-----------+------------------+----------+-----------------------------------------------------
-  1 | injection | INJ-001          | High     | SQL Injection — userInfo 조회 파라미터 미검증
-  2 | xss       | XSS-AUTO-009     | High     | Persistent XSS — 댓글/피드 DB 저장 API 다수
+ #  | 분류      | ID               | 결과   | 위험도   | 제목 요약
+----+-----------+------------------+--------+----------+-----------------------------------------------------
+  1 | injection | INJ-001          | 취약   | High     | SQL Injection — userInfo 조회 파라미터 미검증
+  2 | xss       | XSS-AUTO-009     | 취약   | High     | Persistent XSS — 댓글/피드 DB 저장 API 다수
 ...
 ===========================================================
 ```
 
 - 제목 요약은 `title` 필드 그대로 사용 (60자 초과 시 말줄임)
-- `result` 가 비표준 값(`수동검토필요` 등)이면 위험도 뒤에 `[수동검토]` 표기
+- `결과` 컬럼: `result` 필드값 그대로 출력 (취약/정보 등)
+- `result` 가 비표준 값(`수동검토필요` 등)이면 결과 컬럼에 `[수동검토]` 표기
 - 이미 `reviewed: true` 인 항목은 목록에서 제외 (판정 완료 건은 별도 집계만)
 
 ### 3. 리뷰 시작 안내
@@ -315,96 +360,13 @@ RUN_ID : <RUN_ID>
 4. 이후 플래그 입력 분기를 그대로 적용 (메모 입력 포함)
 5. 분석 중 추가 질문이 들어오면 답변 후 다시 판정 요청 — finding이 종료될 때까지 반복
 
-### 4b. SCA 일괄 처리 및 라이브러리 그룹핑
-
-SCA findings(`category: "Vulnerable Dependency (SCA)"`)는 건별 인터랙티브 판정 루프를 **생략**하고 아래 절차로 일괄 처리한다.
-
-**실행 조건**: `llm_checked: true` 이거나 finding에 `llm_reviewed_at` 필드가 존재하는 경우
-
----
-
-**처리 절차**:
-
-#### Step 1. 라이브러리 그룹핑
-
-title 패턴 `[SCA] <groupId>:<artifactId> <version> — <CVE>` 에서 `<groupId>:<artifactId>` 를 추출하여 동일 아티팩트별로 묶는다.
-
-- 동일 `<groupId>:<artifactId>` 가 2건 이상 → **라이브러리 그룹** 으로 처리
-- 1건만 존재 → 단독 처리 (Step 3으로 바로)
-
-#### Step 2. 대표 finding 선정 (그룹인 경우)
-
-그룹 내에서 severity가 가장 높은 finding을 **대표 finding** 으로 지정한다.
-
-- 위험도 우선순위: `Critical > High > Medium > Low > Informational`
-- 동점 시: finding_id 기준 오름차순(숫자 낮은 쪽) 선택
-
-대표 finding에 아래 필드를 추가한다:
-
-```json
-{
-  "reviewed": true,
-  "review_status": "정탐",
-  "review_result": "취약",
-  "group_cves": [
-    { "finding_id": "SCA-001", "cve_id": "CVE-2022-31692", "severity": "Critical", "summary": "FORWARD/INCLUDE Dispatcher 인증 우회" },
-    { "finding_id": "SCA-004", "cve_id": "CVE-2024-22257", "severity": "High",     "summary": "인증 객체 조건 우회" }
-  ]
-}
-```
-
-- `group_cves` 에는 해당 라이브러리의 **모든 CVE** (대표 포함)를 severity 내림차순으로 포함
-- `summary` 는 title에서 CVE ID 이후 설명 부분을 추출
-
-#### Step 3. 하위 finding 병합 처리 (그룹인 경우)
-
-대표가 아닌 나머지 findings에 아래 필드를 추가한다:
-
-```json
-{
-  "reviewed": true,
-  "review_status": "그룹병합",
-  "review_result": "취약",
-  "group_primary_id": "SCA-001",
-  "review_note": "SCA-001(동일 라이브러리 최고 위험도 대표 finding)에 병합됨"
-}
-```
-
-> `그룹병합` finding은 `approve_report.py` 에서 보고서 finding 목록에서 제외되며,
-> 대표 finding의 `group_cves` 표로 통합 출력된다.
-
-#### Step 4. 단독 라이브러리 처리
-
-그룹이 없는 SCA finding(1건짜리)은 그룹 필드 없이 아래만 추가:
-
-```json
-{
-  "reviewed": true,
-  "review_status": "정탐",
-  "review_result": "취약"
-}
-```
-
-#### Step 5. 처리 완료 출력
-
-```
-[SCA 일괄 처리]
-전체 {N}건 → 대표(보고 대상) {M}건 / 그룹병합(통합) {K}건
-
-라이브러리 그룹:
-  org.springframework.security:spring-security-core — 2건 → SCA-001(Critical) 대표
-  com.fasterxml.jackson.core:jackson-databind      — 2건 → SCA-005(High) 대표
-단독:
-  mysql:mysql-connector-java (SCA-003), org.springframework:spring-core (SCA-007), ...
-```
-
 #### §4c. Audit 판정 기록
 
 **log-review 실행 시점: §4a 자동 실행(소스 탐색 및 review_note 교체) 완료 후, findings_*.json 저장 직후.**
 
 사용자가 간단한 메모만 입력했더라도 §4a가 코드베이스를 탐색하여 내용을 교체·보강했다면, log-review에는 반드시 **교체 완료 후 파일에 실제로 저장된 값**을 기록한다. 원본 메모(입력 당시 초안)가 아닌 최종 상태가 기준이다.
 
-##### 인터랙티브 리뷰 (SCA 외) — finding별 §4a 완료 후 기록
+##### finding별 §4a 완료 후 기록
 
 정탐/오탐 판정 → (§4a 지시사항 자동 실행 → review_note 교체) → findings_*.json 저장 → **log-review 실행**:
 
@@ -447,30 +409,6 @@ python3 tools/audit_utils.py log-review \
 - 발견 건수 및 핵심 결과 (예: "17개 파일, 42줄에서 PII 로그 확인")
 - review_note 교체 여부 및 교체 전/후 요약 (예: "원본: '목록화 필요' → 교체: 파일·라인·PII필드 표 42행 생성")
 - §4a가 트리거되지 않았거나 소스를 찾지 못한 경우: `""` (빈 문자열)로 전달
-
-##### SCA 일괄 처리 — Step 5 완료 후 일괄 기록
-
-§4b Step 5 출력 직후, 처리된 모든 SCA finding(대표 + 그룹병합 + 단독)에 대해 순서대로 log-review를 실행한다:
-
-- **대표 finding / 단독 finding**: `--decision 정탐 --review-result 취약`
-- **그룹병합 finding**: `--decision 정탐 --review-result 취약 --review-note "SCA 라이브러리 그룹병합 — <primary_id>에 통합"`
-- `--code-analysis "SCA LLM 검토 완료 — llm_checked:true 일괄 승인"` 공통 추가
-
----
-
-#### Phase 2 — SCA 그룹 report_expand 규칙
-
-- `review_status: "그룹병합"` finding은 Phase 2 대상에서 **제외**
-- 대표 finding의 `report_expand` 에는 `group_cves` 데이터를 기반으로 아래 섹션을 **필수 포함**:
-
-```markdown
-## 동일 라이브러리 CVE 전체 목록
-
-| CVE ID | 심각도 | 설명 요약 |
-|--------|--------|----------|
-| CVE-2022-31692 | Critical | FORWARD/INCLUDE Dispatcher 인증 우회 |
-| CVE-2024-22257 | High | 인증 객체 조건 우회 |
-```
 
 ### 5. 저장 형식
 
@@ -526,9 +464,20 @@ severity 허용 값: `"Critical"` / `"High"` / `"Medium"` / `"Low"` / `"Informat
 Phase 2는 `reviewed: true` + `review_status: "정탐"` 인 모든 finding에 대해 **`report_expand` 필드를 생성·저장**한다.  
 `report_expand`는 `generate_final_report.py`가 Confluence `:::expand 상세 검증 결과 (코드 직접 확인)` 블록에 직접 사용하는 보고서용 콘텐츠다. 내부 메모가 아닌 **외부 공개 가능한 기술 분석 내용**이어야 한다.
 
-**Phase 2 실행 절차**:
+**Phase 2 실행 전 판정 기준 재로드 ⚠️ 필수**
 
+> Phase 1 §4 전체 판정 + §4a 소스코드 누적으로 컨텍스트가 길어진 상태에서 Phase 2를 시작한다.
+> 이 시점에 기준 파일을 재로드하지 않으면 report_expand 서술이 판정 기준과 달라질 수 있다.
+
+0c의 4개 파일을 **다시 Read**한다:
+1. `feedback_conservative_security_policy.md` — Proxy XSS/SQL ${}/SpEL 기준
+2. `feedback_hardcoded_credential_severity.md` — prod/dev 크레덴셜 기준
+3. `feedback_log_dto_severity_standard.md` — 운영LOG=High/debugLOG=Medium
+4. `feedback_severity_reporting_policy.md` — Informational → 최소 Medium
+
+재로드 후 출력:
 ```
+[P2 기준 재로드] 판정 기준 4개 파일 재로드 완료
 === Phase 2: 보고서 expand 초안 생성 ===
 대상: {N}건 (reviewed=true, 정탐)
 각 finding에 대해 코드 직접 확인 후 report_expand 생성
@@ -547,6 +496,12 @@ Phase 2는 `reviewed: true` + `review_status: "정탐"` 인 모든 finding에 �
    - review_note에 담긴 리뷰어 판단(위험도 근거, 공격 경로, 특이사항)을 **이해**한다
    - 지시성 메모(파일 명시 필수, 목록화 필요, N개 클래스 등)가 있으면 codebase 탐색으로 즉시 이행한다
    - severity 변경 메모가 있으면 해당 finding의 severity 필드도 즉시 갱신한다
+
+   **review_note가 긴 경우 (20줄 초과 또는 `## ` 헤더 포함):**
+   - `## ` 헤더 이전의 평문 메모(1~5줄)를 **핵심 판단 근거**로 먼저 추출
+   - 헤더 이후 테이블/목록은 report_expand의 해당 섹션에 직접 인용
+   - 내용 분량이 많아도 **판정 기준 파일(0c)과의 대조를 생략하지 않는다**  
+     예: review_note에 대형 표가 있어도 severity가 Informational이면 기준 파일에 따라 Medium으로 처리
 
 3. **report_expand 작성** — 아래 형식으로 작성:
 
@@ -618,6 +573,74 @@ python3 tools/audit_utils.py end-session \
 
 - 건수는 Phase 1~2 전체 처리 결과 집계값을 사용한다
 - SESSION_ID가 없는 경우(초기화 실패) 이 단계를 생략한다
+
+### 5d. Phase C-2 — 클렌징 완료 처리
+
+> **정책**: `shared/references/llm_data_cleansing_policy.md` | **절차**: `shared/references/phase_c_cleansing.md`
+
+Audit 세션 종료 직후 자동 수행한다.
+
+**1. `state/<repo>/llm_data_access_log.json` 로드**
+- 파일 없는 경우 → 빈 `skills[]`로 신규 생성 후 진행
+
+**2. testbed 삭제**
+```bash
+rm -rf testbed/<repo>/
+```
+- 성공 → `cleansing_actions[testbed_deletion].confirmed = true`, `confirmed_at = <now ISO8601>`
+- 이미 없음 → `confirmed = true`, `note = "이미 삭제됨"`
+
+**3. state/ 소스코드 감사**
+```bash
+find state/<repo>/ \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "*.py" \) \
+  | grep -v "__pycache__" | head -5
+```
+- 0건 → `state_snippet_audit.confirmed = true`
+- 1건 이상 → 파일 목록 출력 + `note = "주의: 소스 파일 N건 발견"`, `confirmed = false`
+
+**4. 스캔 redact 확인**
+- `sec-scan-data` skill 실행 여부를 `state/<repo>/data/` 존재로 확인
+- data skill 실행됨 → `scan_script_redact.confirmed = true`, `note = "scan_data_protection.py _redact_snippet() 자동 적용"`
+- data skill 미실행 → `scan_script_redact.confirmed = false`, `note = "data skill 미실행"`
+
+**5. `cleansing_completed` 갱신**
+- `testbed_deletion.confirmed == true` AND `state_snippet_audit.confirmed == true` → `cleansing_completed = true`, `cleansing_completed_at = <now ISO8601>`
+- 이외 → `cleansing_completed = false`, `notes`에 미완료 사유 기록
+
+**6. Confluence 레지스트리 행 추가** (pageId: `750095285`)
+
+`.env`의 `CONFLUENCE_TOKEN`(Bearer)을 사용하여 REST API로 테이블 행을 추가한다.
+
+행 구성 (레포당 1행):
+| 필드 | 값 |
+|---|---|
+| 진단일 | `skills[]` 중 가장 최신 `scanned_at` 날짜 (YYYY-MM-DD) |
+| 고객사/프로젝트 | `project` 값 |
+| 레포 | `repo` 값 |
+| Skill | `all (injection/xss/file/data/sca)` — 실제 존재하는 skill만 나열 |
+| testbed 삭제 | ✅ 또는 ⚠️ |
+| state 감사 | ✅ 또는 ⚠️ |
+| 스캔 redact | ✅ 또는 ⚠️ |
+| 세션 종료 | 🔲 |
+| 완료 | 🔲 |
+| 로그 위치 | `state/<repo>/llm_data_access_log.json` |
+
+Confluence 페이지 업데이트 실패 시 → `notes`에 오류 기록 후 계속 진행
+
+**7. `llm_data_access_log.json` 최종 저장**
+
+**완료 출력**:
+```
+[Phase C-2] 클렌징 완료 처리
+  testbed 삭제   : ✅  testbed/<repo>/ 삭제
+  state 감사     : ✅  소스 파일 0건
+  스캔 redact    : ✅
+  Confluence     : ✅  레지스트리 행 추가 (pageId: 750095285)
+  로그           : state/<repo>/llm_data_access_log.json
+  ─────────────────────────────────────────
+  [운영자] 이 Claude 세션을 종료하고 새 세션을 시작하세요.
+  (고객사 소스코드가 포함된 대화 컨텍스트를 만료시키기 위한 필수 절차입니다)
+```
 
 ### 6. 완료 요약
 

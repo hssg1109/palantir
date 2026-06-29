@@ -570,39 +570,51 @@ LLM-Check 완료 전 임시 파일이 필요한 경우, 스크립트가 `finding
 ## llm_data_access_log.json Schema (LLM 데이터 접근 및 클렌징 기록)
 
 > **목적**: Phase 3 LLM-Check 완료 후 LLM이 접근한 고객사 소스코드 파일 목록 및 클렌징 수행 내역을 기록.  
-> **생성 시점**: Phase C (클렌징) 단계에서 Claude가 자동 생성.  
-> **저장 위치**: `state/<prefix>/llm_data_access_log.json`  
-> **정책 문서**: `shared/references/llm_data_cleansing_policy.md`
+> **생성 시점**: 각 skill Phase C-1 단계에서 자동 생성/업데이트; 클렌징 완료는 `/sec-review` Phase C-2에서 확정.  
+> **저장 위치**: `state/<repo>/llm_data_access_log.json` (레포당 1개 — 5개 skill 통합)  
+> **정책 문서**: `shared/references/llm_data_cleansing_policy.md`  
+> **절차 문서**: `shared/references/phase_c_cleansing.md`
 
 ```json
 {
-  "scan_id": "ocb-community-api_20260430_1400",
   "repo": "ocb-community-api",
   "project": "OCBWEBVIEW",
-  "skill": "injection",
   "provider": "claude-cli",
-  "scanned_at": "2026-04-30T14:00:00+09:00",
+  "retroactive": false,
   "cleansing_completed": true,
-  "cleansing_completed_at": "2026-04-30T16:30:00+09:00",
+  "cleansing_completed_at": "2026-05-15T11:00:00+09:00",
 
-  "llm_accessed_files": [
+  "skills": [
     {
-      "phase": "Phase 1 - Asset Identification",
-      "purpose": "자산 식별 (프레임워크, 기술스택, 빌드 구조 확인)",
-      "files": [
-        "testbed/ocb-community-api/build.gradle",
-        "testbed/ocb-community-api/settings.gradle",
-        "testbed/ocb-community-api/src/main/resources/application.yml"
+      "skill": "injection",
+      "scan_dir": "state/ocb-community-api/injection/20260427_1048",
+      "scanned_at": "2026-04-27T10:48:00+09:00",
+      "llm_accessed_files": [
+        {
+          "phase": "Phase 1 - Asset Identification",
+          "purpose": "자산 식별 (프레임워크, 기술스택, 빌드 구조 확인)",
+          "files": [
+            "testbed/ocb-community-api/build.gradle",
+            "testbed/ocb-community-api/settings.gradle",
+            "testbed/ocb-community-api/src/main/resources/application.yml"
+          ]
+        },
+        {
+          "phase": "Phase 3 - LLM-Check",
+          "purpose": "교차검증 (Taint 흐름 추적 — Controller → Service → Repository)",
+          "files": [
+            "testbed/ocb-community-api/src/main/java/.../CommunityController.java",
+            "testbed/ocb-community-api/src/main/java/.../CommunityService.java",
+            "testbed/ocb-community-api/src/main/resources/mapper/CommunityMapper.xml"
+          ]
+        }
       ]
     },
     {
-      "phase": "Phase 3 - LLM-Check",
-      "purpose": "교차검증 (Taint 흐름 추적 — Controller → Service → Repository)",
-      "files": [
-        "testbed/ocb-community-api/src/main/java/.../CommunityController.java",
-        "testbed/ocb-community-api/src/main/java/.../CommunityService.java",
-        "testbed/ocb-community-api/src/main/resources/mapper/CommunityMapper.xml"
-      ]
+      "skill": "xss",
+      "scan_dir": "state/ocb-community-api/xss/20260428_1419",
+      "scanned_at": "2026-04-28T14:19:00+09:00",
+      "llm_accessed_files": [ { "phase": "Phase 3 - LLM-Check", "purpose": "교차검증", "files": ["..."] } ]
     }
   ],
 
@@ -611,19 +623,20 @@ LLM-Check 완료 전 임시 파일이 필요한 경우, 스크립트가 `finding
       "action": "testbed_deletion",
       "target": "testbed/ocb-community-api/",
       "confirmed": true,
-      "confirmed_at": "2026-04-30T16:28:00+09:00"
+      "confirmed_at": "2026-05-15T11:00:00+09:00"
     },
     {
       "action": "state_snippet_audit",
       "description": "state/ 내 소스코드 전체 파일 복사 없음 확인 — findings의 code_snippet/taint_evidence만 존재",
       "confirmed": true,
-      "confirmed_at": "2026-04-30T16:29:00+09:00"
+      "confirmed_at": "2026-05-15T11:00:00+09:00"
     },
     {
-      "action": "gitleaks_redact_check",
-      "description": "seed_gitleaks.json --redact 적용 여부 확인",
+      "action": "scan_script_redact",
+      "description": "scan_data_protection.py _redact_snippet() 자동 적용 확인 — code_snippet 내 자격증명 값 마스킹",
       "confirmed": true,
-      "confirmed_at": "2026-04-30T16:29:00+09:00"
+      "confirmed_at": "2026-05-15T11:00:00+09:00",
+      "note": "data skill 실행됨 — _redact_snippet() 자동 적용"
     },
     {
       "action": "claude_session_closure",
@@ -637,27 +650,34 @@ LLM-Check 완료 전 임시 파일이 필요한 경우, 스크립트가 `finding
 }
 ```
 
-### llm_data_access_log.json 필드 정의
+### llm_data_access_log.json 최상위 필드
 
 | 필드 | 필수 | 설명 |
 |---|:---:|---|
-| `scan_id` | ✅ | `<repo>_<YYYYMMDD_HHMM>` 형식 (state prefix와 동일) |
 | `repo` | ✅ | 진단 대상 레포 이름 |
-| `project` | ✅ | Bitbucket 프로젝트 키 |
-| `skill` | ✅ | 실행된 skill 이름 (injection / xss / file / data / sca) |
-| `provider` | ✅ | LLM provider (claude-cli / anthropic-api) |
-| `scanned_at` | ✅ | 진단 시작 시각 (ISO8601) |
-| `cleansing_completed` | ✅ | 클렌징 전체 완료 여부 (`true` / `false`) |
-| `cleansing_completed_at` | | 클렌징 완료 시각 (ISO8601) |
-| `llm_accessed_files` | ✅ | Phase별 LLM이 Read 도구로 접근한 파일 목록 배열 |
-| `cleansing_actions` | ✅ | 수행된 클렌징 액션 목록 (testbed_deletion 필수) |
-| `notes` | | 특이사항 (클렌징 불가 사유 등) |
+| `project` | ✅ | Bitbucket 프로젝트 키 (`scan_meta.json`의 `bb_project`; 없으면 `"?"`) |
+| `provider` | ✅ | LLM provider (`claude-cli` / `anthropic-api`) |
+| `retroactive` | ✅ | 소급 처리 여부 (`false` = 정상 진단 시 생성, `true` = 소급 생성) |
+| `cleansing_completed` | ✅ | 클렌징 전체 완료 여부 (`true` = testbed 삭제 + 감사 완료) |
+| `cleansing_completed_at` | | 클렌징 완료 시각 (ISO8601); `cleansing_completed=false`면 `null` |
+| `skills` | ✅ | skill별 진단 실행 및 LLM 접근 파일 목록 배열 |
+| `cleansing_actions` | ✅ | 클렌징 액션 목록 (4개 고정) |
+| `notes` | | 특이사항 (클렌징 불가 사유, 소급 처리 메모 등) |
 
-### cleansing_actions — 고정 항목
+### skills[] 항목 필드
+
+| 필드 | 필수 | 설명 |
+|---|:---:|---|
+| `skill` | ✅ | skill 이름 (`injection` / `xss` / `file` / `data` / `sca`) |
+| `scan_dir` | ✅ | 진단 결과 디렉토리 (`state/<repo>/<skill>/<YYYYMMDD_HHMM>`) |
+| `scanned_at` | ✅ | 진단 시작 시각 (ISO8601) |
+| `llm_accessed_files` | ✅ | Phase별 LLM이 Read 도구로 접근한 파일 목록 배열 |
+
+### cleansing_actions — 고정 4항목
 
 | action | 설명 | 수행 주체 |
 |---|---|---|
-| `testbed_deletion` | `testbed/<repo>/` 삭제 | Claude (자동) |
-| `state_snippet_audit` | state/ 내 원본 소스코드 파일 복사 없음 확인 | Claude (자동) |
-| `gitleaks_redact_check` | seed_gitleaks.json `--redact` 적용 확인 | Claude (자동) |
+| `testbed_deletion` | `testbed/<repo>/` 삭제 | Claude (자동, `/sec-review` C-2) |
+| `state_snippet_audit` | state/ 내 원본 소스코드 파일 복사 없음 확인 | Claude (자동, `/sec-review` C-2) |
+| `scan_script_redact` | `scan_data_protection.py` `_redact_snippet()` 자동 적용 확인 | Claude (자동, `/sec-review` C-2) |
 | `claude_session_closure` | 진단 세션 종료 — 새 세션 시작으로 컨텍스트 만료 | 운영자 (수동) |

@@ -116,8 +116,48 @@ LLM 검토 절차는 `references/task_prompts/task_23_xss_review.md` 전체 절�
 #### §3a. 전역 XSS 필터 부재 — 구조적 취약점 Finding 생성
 
 Auto-Scan Step 3 또는 LLM-Check 완료 후 `xss_filter_assessment.filter_level == "none"` 인 경우,
-아래 구조의 **`finding_type: "structural"`** finding을 `findings[]`에 추가한다.
+**아래 사전 체크를 먼저 수행**하고, 조건을 모두 충족할 때만 structural finding을 생성한다.
 
+##### [사전 체크] XSS 필터 적용 대상 서비스 판별
+
+다음 **3가지 조건을 모두 충족하는 경우에만** finding을 생성한다. 하나라도 미충족이면 finding을 생성하지 않는다.
+
+| 조건 | 판별 방법 |
+|------|----------|
+| ① **사용자 입력 엔드포인트 존재** | `api_scan.json` 엔드포인트 중 HTTP 파라미터·RequestBody를 수신하는 엔드포인트 ≥ 1개 |
+| ② **HTML 렌더링 경로 존재** | JSP/Thymeleaf/Freemarker 등 서버사이드 템플릿 존재, 또는 `text/html` 응답 반환 경로 존재 |
+| ③ **XSS 필터 적용이 서비스 장애를 유발하지 않음** | 의도적 HTML 마크업을 수신·저장·출력하는 기능(rich text, WYSIWYG, CMS 등)이 없음 |
+
+**서비스 유형별 판정 기준표**:
+
+| 서비스 유형 | ① | ② | ③ | Finding 생성 여부 |
+|-------------|---|---|---|-----------------|
+| 배치/스케줄러 서버 (사용자 HTTP 입력 없음) | ✗ | — | — | **생성 안함** |
+| Kafka Consumer / MQ 처리 서버 (HTTP 없음) | ✗ | — | — | **생성 안함** |
+| 순수 REST JSON API (`@RestController` 전용, HTML 없음) | ✓ | ✗ | — | **생성 안함** |
+| 내부 B2B API (HTML 렌더링 없음) | ✓ | ✗ | — | **생성 안함** |
+| 웹 서비스 (JSP/Thymeleaf + 사용자 입력 존재) | ✓ | ✓ | ✓ | **생성** |
+| Rich Text/CMS (HTML 입력 의도적 허용) | ✓ | ✓ | ✗ | **생성 + recommendation 수정** |
+
+> **③ 서비스 장애 기준**: Rich text editor, 게시판 HTML 작성, CMS 콘텐츠 관리 등 의도적으로 HTML 마크업을 처리하는 기능이 있는 경우, 전역 Lucy XSS Filter 적용 시 콘텐츠가 이스케이프되어 기능 손상 발생 가능. 이 경우 recommendation에 "전역 필터 대신 엔드포인트별 Contextual Escaping 또는 AntiSamy 정책 기반 허용목록 방식 적용 권고" 문구로 대체한다.
+
+##### [추가 조건] 언어/런타임별 미들웨어 실효성 판단
+
+조건 ①②③을 충족하더라도 **언어·런타임에 따라 미들웨어의 실제 방어 범위가 다르다.** 서비스의 주 입력 경로에 대해 미들웨어가 실질적인 보호를 제공하는지 사전 판단한다.
+
+| 런타임 | 전역 필터 실효성 | 핵심 방어 수단 |
+|--------|----------------|--------------|
+| **Java (Spring/Servlet)** | 높음 — Lucy XSS Servlet Filter가 모든 HTTP 파라미터·바디·헤더를 일괄 정제 | Lucy XSS Filter, AntiSamy, ESAPI |
+| **Node.js/Express** | **제한적** — `xss-clean`, `express-validator`는 `req.body`, `req.query`만 정제. `req.url`(URL path)은 정제 대상 아님 | **템플릿 엔진 출력 인코딩** (Jade `!{JSON.stringify()}`, EJS `<%-` 대신 `<%=`, etc.) |
+| **Python (Django/Flask)** | 높음 — 템플릿 자동 이스케이핑 기본값, 미들웨어로 보완 가능 | 템플릿 `autoescape`, CSP 헤더 |
+
+**Node.js/Express 서비스의 structural finding 생성 조건 (추가)**:
+
+- 서비스의 주 입력 경로가 `req.url`(URL path) 전용이고 `req.body`/`req.query` 입력이 없는 경우 → **finding 생성 안함** (미들웨어 효과 없음)
+- 서비스가 `req.body`/`req.query` 를 HTML 응답에 반영하는 경우 → finding 생성 가능
+- finding 생성 시 recommendation은 **Lucy XSS Filter가 아닌** 템플릿 엔진 출력 인코딩 + helmet CSP 설정으로 대체 작성
+
+조건 충족 시 아래 구조의 **`finding_type: "structural"`** finding을 `findings[]`에 추가한다.
 이 finding은 개별 XSS endpoint 취약점과 독립된 정책 수준 취약점으로, 리포트에 별도 항목으로 포함된다.
 
 | 필드 | 값 |
@@ -419,7 +459,45 @@ XSS 유형별 — Reflected: N / Persistent: N / DOM: N / Redirect: N
 - findings 출처: `findings_XSS.json`의 `findings[]` 배열 기준
 - 양호는 통계에만 포함, 목록에는 미기재
 
-LLM-Check 완료 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
+LLM-Check 완료 후 Phase C-1을 수행한다.
+
+---
+
+### Step C: Phase C-1 — LLM 데이터 접근 로그 업데이트
+
+> **정책**: `shared/references/llm_data_cleansing_policy.md` | **절차**: `shared/references/phase_c_cleansing.md`
+
+LLM-Check 완료 직후 수행. **testbed는 이 단계에서 삭제하지 않는다** (이후 file/data/sca 진단에 필요).  
+testbed 삭제 + Confluence 등록은 `/sec-review` 완료 시 Phase C-2에서 수행.
+
+**수행**:
+
+1. 이 세션에서 `testbed/<repo>/` 경로를 Read 도구로 접근한 파일 목록 정리 (Phase 1 / Phase 3 구분)
+2. `state/<repo>/llm_data_access_log.json` 생성(없으면) 또는 `skills[]` 배열에 xss 항목 append:
+   ```json
+   {
+     "skill": "xss",
+     "scan_dir": "state/<repo>/xss/<YYYYMMDD_HHMM>",
+     "scanned_at": "<진단 시작 ISO8601 +09:00>",
+     "llm_accessed_files": [
+       { "phase": "Phase 1 - Asset Identification", "purpose": "자산 식별", "files": ["testbed/<repo>/build.gradle", "..."] },
+       { "phase": "Phase 3 - LLM-Check", "purpose": "교차검증", "files": ["testbed/<repo>/src/..."] }
+     ]
+   }
+   ```
+3. 신규 생성 시 `project`는 `state/<repo>/20*/scan_meta.json`의 `bb_project` 값 사용 (없으면 `"?"`)
+4. `cleansing_completed: false` 유지
+
+**완료 출력**:
+```
+[Phase C-1] llm_data_access_log.json 업데이트 완료
+  skill  : xss
+  접근파일: N건 (Phase 1: N / Phase 3: N)
+  로그   : state/<repo>/llm_data_access_log.json
+  [다음] /sec-review 완료 시 testbed 삭제 + Confluence 레지스트리 등록 수행
+```
+
+Phase C-1 완료 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
 
 ## Resources
 

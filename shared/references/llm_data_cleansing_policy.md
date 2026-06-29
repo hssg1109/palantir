@@ -39,8 +39,9 @@ palantir의 진단 워크플로는 **Phase 3 LLM-Check** 단계에서 Claude(LLM
 rm -rf testbed/<repo>/
 ```
 
-- 진단 완료 직후 자동 수행 (skill 자율 완주 절차에 포함)
-- 고객사 소스코드 원본이 로컬에 잔류하지 않도록 보장
+- `/sec-review` 완료 직후 Claude가 자동 수행 (Phase C-2)
+- **각 skill 완료 시 삭제하지 않는다** — 이후 skill 진단에 testbed가 필요하기 때문
+- 5개 skill 모두 완료 후 `/sec-review` 시점에 1회 삭제
 
 ### 3-2. LLM 세션 종료 (컨텍스트 클렌징)
 
@@ -51,15 +52,18 @@ rm -rf testbed/<repo>/
 
 - `state/<prefix>/` 에는 **취약점 스니펫 (findings의 `code_snippet`, `taint_evidence`)** 만 허용
 - 고객사 소스코드 파일 전체 내용을 state/에 복사·저장하는 것은 금지
-- Gitleaks 시크릿 스캔 결과(`seed_gitleaks.json`)는 `--redact` 적용 확인 필수 — 실제 시크릿 값이 저장되지 않도록
+- `scan_data_protection.py`의 내장 `_redact_snippet()` 함수가 code_snippet 생성 시 자동으로 자격증명 값을 마스킹(`[REDACTED]`)하므로 별도 외부 도구 실행 불필요
 
 ---
 
 ## 4. 클렌징 기록 — llm_data_access_log.json
 
-진단 완료 후 아래 스키마에 따라 `state/<prefix>/llm_data_access_log.json`을 생성하고, `docs/llm_data_cleansing_registry.md` 레지스트리에 요약 기록을 추가한다.
+각 skill Phase C-1 단계에서 `state/<repo>/llm_data_access_log.json` (레포당 1개 통합 파일)에 해당 skill의 LLM 접근 파일 목록을 기록하고, `/sec-review` Phase C-2 완료 시 클렌징 액션 결과와 Confluence 레지스트리 행 추가를 수행한다.
 
-스키마 정의: `shared/references/output_schemas.md` → `llm_data_access_log.json Schema` 섹션 참조.
+- **로그 위치**: `state/<repo>/llm_data_access_log.json` (레포당 1파일, 5 skill 통합)
+- **Confluence 레지스트리**: pageId `750095285` — 레포당 1행 추가
+- 스키마 정의: `shared/references/output_schemas.md` → `llm_data_access_log.json Schema` 섹션 참조.
+- 절차 상세: `shared/references/phase_c_cleansing.md` 참조.
 
 ---
 
@@ -75,11 +79,15 @@ rm -rf testbed/<repo>/
 
 ## 6. 클렌징 체크리스트 (Phase C 완료 기준)
 
-진단 1건(1 prefix) 완료 시 아래 항목을 모두 확인해야 Phase C가 완료된 것으로 간주한다.
+레포 1건 완료 시 아래 항목을 모두 확인해야 Phase C가 완료된 것으로 간주한다.
 
+**C-1 (각 skill 완료 시, 5회)**
+- [ ] `state/<repo>/llm_data_access_log.json` — 해당 skill 항목 append 완료
+
+**C-2 (/sec-review 완료 시, 1회)**
 - [ ] `testbed/<repo>/` 삭제 완료
-- [ ] `state/<prefix>/llm_data_access_log.json` 생성 완료
-- [ ] `seed_gitleaks.json` 존재 시 `--redact` 적용 여부 확인
 - [ ] state/ 내 소스코드 전체 파일 복사 없음 확인
-- [ ] `docs/llm_data_cleansing_registry.md` 레지스트리 행 추가 완료
+- [ ] `scan_data_protection.py` 스캔 redact 적용 확인 (data skill 실행 시 자동 ✅)
+- [ ] Confluence 레지스트리 (pageId: `750095285`) 행 추가 완료
+- [ ] `llm_data_access_log.json` `cleansing_completed: true` 저장 완료
 - [ ] LLM 세션 종료 예정 (운영자 수행)

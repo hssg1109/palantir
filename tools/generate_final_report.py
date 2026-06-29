@@ -263,22 +263,27 @@ def load_service_exposure(repo: str) -> str:
     return "—"
 
 
-def collect_findings(run_id: str | None, repo: str) -> dict[str, list[dict]]:
+def collect_findings(run_id: str | None, repo: str, skip_sca: bool = False) -> dict[str, list[dict]]:
     """
     run_id 지정 시: state/<repo>/<skill>/<run_id>/findings_*.json
     run_id=None 시: skill별 최신 RUN_ID 파일 하나씩 선택 (레포 단위 모드)
     llm_checked: true 파일만 읽어 { skill → [finding, ...] } 반환.
+    skip_sca=True 시 sca 스킬 findings 전체 제외.
     """
     data: dict[str, list[dict]] = defaultdict(list)
 
     if run_id is not None:
         paths = sorted(STATE_DIR.glob(f"{repo}/*/{run_id}/findings_*.json"))
+        if skip_sca:
+            paths = [p for p in paths if p.parts[-3] != "sca"]
     else:
         # 레포 단위 모드 — skill별 최신 RUN_ID 선택
         paths = []
         repo_dir = STATE_DIR / repo
         for skill_dir in sorted(repo_dir.iterdir()):
             if not skill_dir.is_dir():
+                continue
+            if skip_sca and skill_dir.name == "sca":
                 continue
             candidates = sorted(skill_dir.glob("*/findings_*.json"), reverse=True)
             if candidates:
@@ -1084,8 +1089,10 @@ def main() -> int:
                         help="완료 후 Confluence에 자동 게시")
     parser.add_argument("--parent",  type=int, default=750459063, metavar="PAGE_ID",
                         help="Confluence 부모 페이지 ID (기본: 750459063 — SKP 보안진단 루트)")
-    parser.add_argument("--title",   default=None,
+    parser.add_argument("--title",    default=None,
                         help="Confluence 페이지 제목 (기본: '<repo>-진단결과')")
+    parser.add_argument("--skip-sca", action="store_true",
+                        help="SCA(오픈소스 CVE) findings를 보고서에서 제외")
     args = parser.parse_args()
 
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1094,9 +1101,11 @@ def main() -> int:
 
     print(f"[최종보고서] RUN_ID={run_id_label}  repo={args.repo}")
     print(f"[최종보고서] findings 수집 중 (llm_checked: true 파일만)...")
+    if args.skip_sca:
+        print(f"[최종보고서] --skip-sca: SCA findings 제외")
 
     clone_info = load_clone_info(args.repo)
-    data       = collect_findings(args.run_id, args.repo)
+    data       = collect_findings(args.run_id, args.repo, skip_sca=args.skip_sca)
 
     total = sum(len(v) for v in data.values())
     print(f"[최종보고서] {len(data)}개 스킬  {total}건 findings")

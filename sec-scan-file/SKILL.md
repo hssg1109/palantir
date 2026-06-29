@@ -68,6 +68,17 @@ testbed/ 에 소스코드가 없으면 **위 명령을 직접 실행하고 clone
 - frontend/backend 판별, 언어/프레임워크 확인, 멀티 모듈 여부 확인
 - PHP 등 미지원 언어이면 Auto-Scan Phase skip 후 기록
 
+**Phase 1 → Auto-Scan 분기 결정**
+
+| 레포 유형 | 판별 기준 | Auto-Scan 동작 |
+|-----------|-----------|----------------|
+| 순수 백엔드 (Java/Kotlin) | `.java`/`.kt` ≥ 5개, `package.json` 없음 | 기존 Java 스캔 실행 (Upload/Download/LFI/RFI/Config) |
+| 순수 프론트엔드 (TS/JS) | `.java`/`.kt` < 5개 + `package.json` 존재 | `scan_uploads_frontend()` + `scan_downloads_frontend()` 실행 (FormData/FileReader/Blob) |
+| 풀스택 (Java + TS) | `.java`/`.kt` ≥ 5개 + `package.json` 존재 | Java 스캔 실행 (현재) — 추후 양쪽 스캔으로 확장 예정 |
+| PHP / 미지원 언어 | `.php` 주요 파일 존재 | Auto-Scan skip, LLM 수동 진단으로 전환 |
+
+> **스크립트 자동 감지**: `_is_frontend_repo()` 함수가 Java/Kotlin 파일 수와 `package.json` 존재 여부를 자동 판별하므로 `scan_file_processing.py` 실행 시 별도 플래그 불필요.
+
 **Auto-Scan Phase — 파일 처리 취약점 정적 분석 (Python 스크립트)**
 
 ```bash
@@ -81,11 +92,18 @@ python3 shared/scripts/scan_file_processing.py <src> \
 > 파일 처리 패턴을 직접 탐색하므로 `scan_api.py` 선행 실행 없이 단독 실행 가능합니다.
 
 스크립트가 Upload / Download / LFI / RFI 엔드포인트를 감지하고 `needs_review` 플래그를 출력.
-`needs_review: true` 항목에 대해 `references/task_prompts/task_24_file_handling.md`의 4종 LLM 프롬프트 템플릿 적용:
+
+**백엔드 모드** — `needs_review: true` 항목에 대해 `references/task_prompts/task_24_file_handling.md`의 4종 LLM 프롬프트 템플릿 적용:
 1. 프롬프트 1 — 다운로드 권한 검증 (IDOR/BOLA)
 2. 프롬프트 2 — 업로드 검증 우회 (이중 확장자/Null Byte/MIME 스푸핑)
 3. 프롬프트 3 — 파일 무해화 (Sanitization)
 4. 프롬프트 4 — LFI/RFI View Resolver / Whitelist 우회
+
+**프론트엔드 모드** — `needs_review: true` 항목에 대해 `task_24_file_handling.md`의 [Frontend] 섹션 판정 기준 적용:
+- FormData MIME/크기 미검증 → Medium 정보
+- FileReader → innerHTML/eval 위험 싱크 → High 취약
+- `<input type="file">` accept 미설정 → Low 정보
+- Blob URL 다운로드 파일명 미검증 → Low 정보
 
 출력: `state/<prefix>/file.json` + `state/<prefix>/task24_llm.json` (LLM 보완)
 
@@ -169,7 +187,45 @@ print('[OK] LLM-Check 완료 확인')
 "
 ```
 
-통과 조건 충족 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
+통과 조건 충족 후 Phase C-1을 수행한다.
+
+---
+
+### Step C: Phase C-1 — LLM 데이터 접근 로그 업데이트
+
+> **정책**: `shared/references/llm_data_cleansing_policy.md` | **절차**: `shared/references/phase_c_cleansing.md`
+
+LLM-Check 완료 직후 수행. **testbed는 이 단계에서 삭제하지 않는다** (이후 data/sca 진단에 필요).  
+testbed 삭제 + Confluence 등록은 `/sec-review` 완료 시 Phase C-2에서 수행.
+
+**수행**:
+
+1. 이 세션에서 `testbed/<repo>/` 경로를 Read 도구로 접근한 파일 목록 정리 (Phase 1 / Phase 3 구분)
+2. `state/<repo>/llm_data_access_log.json` 생성(없으면) 또는 `skills[]` 배열에 file 항목 append:
+   ```json
+   {
+     "skill": "file",
+     "scan_dir": "state/<repo>/file/<YYYYMMDD_HHMM>",
+     "scanned_at": "<진단 시작 ISO8601 +09:00>",
+     "llm_accessed_files": [
+       { "phase": "Phase 1 - Asset Identification", "purpose": "자산 식별", "files": ["testbed/<repo>/build.gradle", "..."] },
+       { "phase": "Phase 3 - LLM-Check", "purpose": "교차검증", "files": ["testbed/<repo>/src/..."] }
+     ]
+   }
+   ```
+3. 신규 생성 시 `project`는 `state/<repo>/20*/scan_meta.json`의 `bb_project` 값 사용 (없으면 `"?"`)
+4. `cleansing_completed: false` 유지
+
+**완료 출력**:
+```
+[Phase C-1] llm_data_access_log.json 업데이트 완료
+  skill  : file
+  접근파일: N건 (Phase 1: N / Phase 3: N)
+  로그   : state/<repo>/llm_data_access_log.json
+  [다음] /sec-review 완료 시 testbed 삭제 + Confluence 레지스트리 등록 수행
+```
+
+Phase C-1 완료 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
 
 ## Resources
 

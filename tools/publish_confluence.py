@@ -33,12 +33,17 @@ import re
 import subprocess
 import sys
 import tempfile
+import uuid
 from pathlib import Path
 
 PALANTIR_DIR = Path(__file__).parent.parent
 REGISTRY_PATH = PALANTIR_DIR / "docs" / ".confluence_pages.json"
 
 _ENV_PATH = PALANTIR_DIR / ".env"
+
+# Jira 매크로 상수 (SKP 내부 Jira Application Link)
+_JIRA_SERVER_NAME = "Jira"
+_JIRA_SERVER_ID   = "66c70ce4-eb7d-3ce9-8070-9705b6b477fa"
 
 
 def _load_env() -> dict:
@@ -99,13 +104,26 @@ def md_to_confluence(md: str) -> str:
     i = 0
 
     def _inline(text: str) -> str:
-        # 1. 인라인 코드를 플레이스홀더로 먼저 교체 (** 등 메타 문자 보호)
+        # 1. 인라인 코드 및 Jira 매크로를 플레이스홀더로 먼저 교체 (XML 이스케이프 방지)
         code_spans: list[str] = []
         def _stash_code(m: re.Match) -> str:
             idx = len(code_spans)
             inner = m.group(1).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
             code_spans.append(f'<code>{inner}</code>')
             return f'\x00CODE{idx}\x00'
+        def _stash_jira(m: re.Match) -> str:
+            key = m.group(1)
+            idx = len(code_spans)
+            code_spans.append(
+                f'<ac:structured-macro ac:name="jira" ac:schema-version="1"'
+                f' ac:macro-id="{uuid.uuid4()}">'
+                f'<ac:parameter ac:name="server">{_JIRA_SERVER_NAME}</ac:parameter>'
+                f'<ac:parameter ac:name="serverId">{_JIRA_SERVER_ID}</ac:parameter>'
+                f'<ac:parameter ac:name="key">{key}</ac:parameter>'
+                f'</ac:structured-macro>'
+            )
+            return f'\x00CODE{idx}\x00'
+        text = re.sub(r'\[JIRA:([A-Z]+-\d+)\]', _stash_jira, text)
         text = re.sub(r'`([^`]+)`', _stash_code, text)
         # 2. XML 특수문자 이스케이프 (코드 스팬 제외한 나머지)
         text = text.replace('&', '&amp;')

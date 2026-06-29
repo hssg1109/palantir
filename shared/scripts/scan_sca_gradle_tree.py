@@ -1759,10 +1759,21 @@ def _scan_jar_libs(project_dir: Path) -> set[tuple[str, str, str]]:
 # P2: Maven 지원 (mvnw / pom.xml 직접 파싱 fallback)
 # ─────────────────────────────────────────────────────────────────
 
+def _has_gradle_build(project_dir: Path) -> bool:
+    """build.gradle / build.gradle.kts / gradlew 중 하나라도 존재하면 True."""
+    return any(
+        (project_dir / name).exists()
+        for name in ("build.gradle", "build.gradle.kts", "gradlew", "gradlew.bat")
+    )
+
+
 def _detect_maven(project_dir: Path) -> Optional[Path]:
-    """pom.xml + mvnw/mvnw.cmd 존재 시 mvnw 경로 반환."""
+    """pom.xml + mvnw/mvnw.cmd 존재 시 mvnw 경로 반환.
+    build.gradle 이 함께 존재하는 경우 Gradle 우선 — None 반환."""
     if not (project_dir / "pom.xml").exists():
         return None
+    if _has_gradle_build(project_dir):
+        return None  # Gradle 프로젝트가 배포용 pom.xml 을 함께 보유하는 경우
     for name in ("mvnw", "mvnw.cmd"):
         candidate = project_dir / name
         if candidate.exists():
@@ -1771,7 +1782,10 @@ def _detect_maven(project_dir: Path) -> Optional[Path]:
 
 
 def _detect_pom_only(project_dir: Path) -> bool:
-    """mvnw 없이 pom.xml만 존재하는 경우 True."""
+    """mvnw 없이 pom.xml만 존재하는 경우 True.
+    build.gradle 이 함께 존재하면 Gradle 프로젝트로 간주 — False 반환."""
+    if _has_gradle_build(project_dir):
+        return False
     return (project_dir / "pom.xml").exists() and _detect_maven(project_dir) is None
 
 

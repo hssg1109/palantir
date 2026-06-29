@@ -41,6 +41,7 @@ docs/*:Zone.Identifier
 docs/generate_career_doc.py
 docs/2026_유성근_*
 docs/유성근_*
+docs/generate_resume_sds.py
 tools/build_resume_docx.py
 
 ### 임시 파일 ###

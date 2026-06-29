@@ -45,17 +45,21 @@ Phase 3: LLM-Check (자동스캔 결과 교차검증 + 수동 심층진단)
   ├─ [백엔드] 데이터보호 교차검증 → task25_llm.json
   └─ SCA LLM 검토                 → sca_llm.json
 
-Phase C: LLM 데이터 클렌징 ⚠️ 필수 — Phase 3 완료 후, Phase 4 이전
-  ├─ llm_data_access_log.json 생성 (Phase 1~3 LLM 접근 파일 목록 + 클렌징 기록)
-  │   → state/<prefix>/llm_data_access_log.json
-  ├─ testbed/<repo>/ 삭제 확인
-  ├─ state/ 내 원본 소스코드 파일 복사 없음 확인 (findings 스니펫만 허용)
-  ├─ seed_gitleaks.json 존재 시 --redact 적용 여부 확인
-  ├─ docs/llm_data_cleansing_registry.md 레지스트리 행 추가
+Phase C-1: LLM 데이터 접근 로그 업데이트 ⚠️ 필수 — 각 skill Phase 3 완료 직후
+  └─ state/<repo>/llm_data_access_log.json 생성 또는 skills[] append
+      (로그 위치: 레포당 1개 통합 파일)
+
+Phase C-2: 클렌징 완료 처리 ⚠️ 필수 — /sec-review 완료 직후
+  ├─ testbed/<repo>/ 삭제
+  ├─ state/<repo>/ 내 원본 소스코드 파일 복사 없음 확인
+  ├─ scan_data_protection.py _redact_snippet() 자동 적용 확인 (data skill 실행 시 ✅)
+  ├─ Confluence 레지스트리(pageId: 750095285) 행 추가 (레포당 1행)
+  ├─ llm_data_access_log.json cleansing_completed = true 저장
   └─ [운영자] Claude 세션 종료 → 새 세션 시작 (컨텍스트 만료)
 ```
 
 > **정책 문서**: `shared/references/llm_data_cleansing_policy.md`  
+> **절차 문서**: `shared/references/phase_c_cleansing.md`  
 > **Phase 4(보고서 생성/Confluence 게시) + Phase 5(SSC 정합성 검증)** 절차는 **sec-audit-playbook** 레포 참조.
 
 ## Task별 프롬프트

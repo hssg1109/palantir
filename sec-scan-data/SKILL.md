@@ -68,6 +68,17 @@ testbed/ 에 소스코드가 없으면 **위 명령을 직접 실행하고 clone
 - frontend/backend 판별, 언어/프레임워크 확인, 설정 파일 위치(`application.yml`, `.env`) 식별
 - PHP 등 미지원 언어이면 Auto-Scan Phase skip 후 기록
 
+**Phase 1 → Auto-Scan 분기 결정**
+
+| 레포 유형 | 판별 기준 | Auto-Scan 동작 |
+|-----------|-----------|----------------|
+| 순수 백엔드 (Java/Kotlin) | `.java`/`.kt` ≥ 5개, `package.json` 없음 | 기존 Java 스캔 실행 (Secrets/Logging/Crypto/JWT/DTO/CORS/Header) |
+| 순수 프론트엔드 (TS/JS) | `.java`/`.kt` < 5개 + `package.json` 존재 | `scan_frontend_data_exposure()` 실행 (console PII/localStorage/하드코딩 시크릿/NEXT_PUBLIC_) |
+| 풀스택 (Java + TS) | `.java`/`.kt` ≥ 5개 + `package.json` 존재 | Java 스캔 실행 (현재) — 추후 양쪽 스캔으로 확장 예정 |
+| PHP / 미지원 언어 | `.php` 주요 파일 존재 | Auto-Scan skip, LLM 수동 진단으로 전환 |
+
+> **스크립트 자동 감지**: `_is_frontend_repo()` 함수가 Java/Kotlin 파일 수와 `package.json` 존재 여부를 자동 판별하므로 `scan_data_protection.py` 실행 시 별도 플래그 불필요.
+
 **Auto-Scan Phase — 데이터 보호 정적 분석 (Python 스크립트)**
 
 ```bash
@@ -79,14 +90,22 @@ python3 shared/scripts/scan_data_protection.py <src> \
 > `scan_api.py` 선행 실행 없이 단독 실행 가능합니다.
 > (선택적으로 `--api-inventory`를 지정하면 DTO 노출 진단의 엔드포인트 역추적이 강화됩니다.)
 
-진단 항목:
+진단 항목 (백엔드 모드 — Java/Kotlin):
 - **CORS**: `Access-Control-Allow-Origin: *`, 동적 Origin 반영 여부
-- **Secrets**: 하드코딩된 API 키/비밀번호/토큰 (Gitleaks 연계, `secret_scanning.md` 참조)
+- **Secrets**: 하드코딩된 API 키/비밀번호/토큰 (내장 패턴 탐지 — `_redact_snippet()`으로 code_snippet 자동 마스킹)
 - **JWT**: 알고리즘 검증 누락, 약한 시크릿, `none` 알고리즘 허용
 - **Cryptography**: 약한 알고리즘(MD5/SHA1/DES/ECB), 고정 IV/Salt
-- **PII Logging**: `logger.*` / `console.log`에 개인식별정보 포함 여부
+- **PII Logging**: `logger.*`에 개인식별정보 포함 여부
 - **API_RESPONSE_PII**: 서비스 레이어에서 userInfo PII 필드(mdn/userName/birthDate/ciNo 등)를 마스킹 없이 응답 DTO에 직접 할당하는 패턴 — CWE-359
 - **DTO_EXPOSURE (@ToString PII)**: `@ToString`/`@Data` 클래스 내 PII 필드(mbrId/userId/email 등)가 `@ToString.Exclude` 없이 포함 — CWE-532
+
+진단 항목 (프론트엔드 모드 — TS/JS/TSX/JSX/Vue):
+- **console PII**: `console.log/debug/warn/error()` 내 PII 변수 출력 (운영=High, debug=Medium)
+- **localStorage 민감정보**: `localStorage.setItem('token'/..., ...)` — High
+- **sessionStorage 민감정보**: `sessionStorage.setItem('token'/..., ...)` — Medium
+- **API 응답 통째 로그**: `console.log(response/res/data)` — Medium
+- **하드코딩 시크릿**: `const apiKey = "..."` 형태 직접 할당 — High
+- **NEXT_PUBLIC_ 번들 노출**: 시크릿이 `NEXT_PUBLIC_` 접두사로 클라이언트 번들에 포함 — Medium
 
 > **DTO_EXPOSURE 기본 심각도 정책**
 > - HTTP 직렬화 경로(엔드포인트 매핑) 없이 `@ToString`만 있는 경우: **기본 Medium / 정보(Informational)**
@@ -176,7 +195,45 @@ print('[OK] LLM-Check 완료 확인')
 "
 ```
 
-통과 조건 충족 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
+통과 조건 충족 후 Phase C-1을 수행한다.
+
+---
+
+### Step C: Phase C-1 — LLM 데이터 접근 로그 업데이트
+
+> **정책**: `shared/references/llm_data_cleansing_policy.md` | **절차**: `shared/references/phase_c_cleansing.md`
+
+LLM-Check 완료 직후 수행. **testbed는 이 단계에서 삭제하지 않는다** (이후 sca 진단에 필요).  
+testbed 삭제 + Confluence 등록은 `/sec-review` 완료 시 Phase C-2에서 수행.
+
+**수행**:
+
+1. 이 세션에서 `testbed/<repo>/` 경로를 Read 도구로 접근한 파일 목록 정리 (Phase 1 / Phase 3 구분)
+2. `state/<repo>/llm_data_access_log.json` 생성(없으면) 또는 `skills[]` 배열에 data 항목 append:
+   ```json
+   {
+     "skill": "data",
+     "scan_dir": "state/<repo>/data/<YYYYMMDD_HHMM>",
+     "scanned_at": "<진단 시작 ISO8601 +09:00>",
+     "llm_accessed_files": [
+       { "phase": "Phase 1 - Asset Identification", "purpose": "자산 식별", "files": ["testbed/<repo>/build.gradle", "..."] },
+       { "phase": "Phase 3 - LLM-Check", "purpose": "교차검증", "files": ["testbed/<repo>/src/..."] }
+     ]
+   }
+   ```
+3. 신규 생성 시 `project`는 `state/<repo>/20*/scan_meta.json`의 `bb_project` 값 사용 (없으면 `"?"`)
+4. `cleansing_completed: false` 유지
+
+**완료 출력**:
+```
+[Phase C-1] llm_data_access_log.json 업데이트 완료
+  skill  : data
+  접근파일: N건 (Phase 1: N / Phase 3: N)
+  로그   : state/<repo>/llm_data_access_log.json
+  [다음] /sec-review 완료 시 testbed 삭제 + Confluence 레지스트리 등록 수행
+```
+
+Phase C-1 완료 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
 
 ## Resources
 

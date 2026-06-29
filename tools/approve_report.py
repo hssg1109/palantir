@@ -43,7 +43,7 @@ def _run(cmd: list[str]) -> subprocess.CompletedProcess:
 REVIEW_EXEMPT_RESULTS = {"양호", "양호(FP)", "해당없음", "safe"}
 
 
-def _collect_findings_paths(repo: str, run_id: str | None) -> list[Path]:
+def _collect_findings_paths(repo: str, run_id: str | None, skip_sca: bool = False) -> list[Path]:
     """findings_*.json 경로 목록 수집 (apply_review_results와 동일 로직)."""
     if run_id is None:
         paths: list[Path] = []
@@ -52,6 +52,8 @@ def _collect_findings_paths(repo: str, run_id: str | None) -> list[Path]:
             return paths
         for skill_dir in sorted(repo_dir.iterdir()):
             if not skill_dir.is_dir():
+                continue
+            if skip_sca and skill_dir.name == "sca":
                 continue
             run_dirs = sorted(
                 (d for d in skill_dir.iterdir() if d.is_dir()),
@@ -64,16 +66,19 @@ def _collect_findings_paths(repo: str, run_id: str | None) -> list[Path]:
                     break
         return paths
     else:
-        return sorted(STATE_DIR.glob(f"{repo}/*/{run_id}/findings_*.json"))
+        all_paths = sorted(STATE_DIR.glob(f"{repo}/*/{run_id}/findings_*.json"))
+        if skip_sca:
+            all_paths = [p for p in all_paths if p.parts[-3] != "sca"]
+        return all_paths
 
 
-def _check_review_complete(repo: str, run_id: str | None) -> list[tuple[str, str]]:
+def _check_review_complete(repo: str, run_id: str | None, skip_sca: bool = False) -> list[tuple[str, str]]:
     """
     /sec-review 완료 여부를 검증한다.
     reviewed != True 이고 result가 제외 목록에 없는 finding 목록을 반환한다.
     빈 리스트 반환 시 게이트 통과.
     """
-    paths = _collect_findings_paths(repo, run_id)
+    paths = _collect_findings_paths(repo, run_id, skip_sca=skip_sca)
     unreviewed: list[tuple[str, str]] = []
 
     for path in paths:
@@ -94,7 +99,7 @@ def _check_review_complete(repo: str, run_id: str | None) -> list[tuple[str, str
     return unreviewed
 
 
-def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
+def apply_review_results(repo: str, run_id: str | None, skip_sca: bool = False) -> dict[str, int]:
     """
     findings_*.json 파일을 읽어 오탐 판정 finding의 result를 "양호"로 변경하고
     파일 수준에서 approved: true, llm_checked: true 를 설정한다.
@@ -102,7 +107,7 @@ def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
     run_id=None 이면 레포 단위 모드 — skill별 최신 RUN_ID 파일 하나씩 선택.
     반환: {"updated": N, "skipped": N, "total_findings": N}
     """
-    paths = _collect_findings_paths(repo, run_id)
+    paths = _collect_findings_paths(repo, run_id, skip_sca=skip_sca)
 
     if not paths:
         pattern = f"{repo}/*/{run_id}/findings_*.json" if run_id else f"{repo}/*/latest/findings_*.json"
@@ -166,12 +171,28 @@ def apply_review_results(repo: str, run_id: str | None) -> dict[str, int]:
     return counts
 
 
-def _extract_review_notes(repo: str, run_id: str | None) -> list[dict]:
+def _count_sca_reportable(repo: str, run_id: str | None) -> int:
+    """SCA findings 중 취약·정보 건수 (skip_sca=False로 SCA 포함 수집)."""
+    all_paths = _collect_findings_paths(repo, run_id, skip_sca=False)
+    sca_paths = [p for p in all_paths if p.parent.parent.name == "sca"]
+    count = 0
+    for path in sca_paths:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            for f in doc.get("findings", []):
+                if f.get("result") in ("취약", "정보"):
+                    count += 1
+        except Exception:
+            pass
+    return count
+
+
+def _extract_review_notes(repo: str, run_id: str | None, skip_sca: bool = False) -> list[dict]:
     """
     findings_*.json에서 리뷰 완료된 finding의 review_note를 추출한다.
     매니저 검토 UI에서 티켓 발행 여부 판단 근거로 활용된다.
     """
-    paths = _collect_findings_paths(repo, run_id)
+    paths = _collect_findings_paths(repo, run_id, skip_sca=skip_sca)
     notes: list[dict] = []
 
     for path in paths:
@@ -267,19 +288,24 @@ def main() -> int:
                         help="Confluence 자동 게시")
     parser.add_argument("--title",   default=None,
                         help="Confluence 페이지 제목 (생략 시 {repo}-진단결과)")
-    parser.add_argument("--force",   action="store_true",
+    parser.add_argument("--force",    action="store_true",
                         help="/sec-review 완료 여부 게이트 강제 통과 (긴급 시에만 사용)")
+    parser.add_argument("--skip-sca", action="store_true",
+                        help="SCA(오픈소스 CVE) findings를 보고서·Jira 티켓에서 제외")
     args = parser.parse_args()
 
     run_id   = args.run_id
     run_label = run_id if run_id else "(레포 단위)"
+    skip_sca  = args.skip_sca
     _confluence_url = ""   # 게시 완료 후 채워짐 (audit 기록용)
     print(f"\n[approve] RUN_ID={run_label}  repo={args.repo}")
+    if skip_sca:
+        print("[approve] --skip-sca: SCA findings 제외 모드")
     print("=" * 60)
 
     # 0. [GATE] /sec-review 완료 여부 강제 검증
     if not args.force:
-        unreviewed = _check_review_complete(args.repo, run_id)
+        unreviewed = _check_review_complete(args.repo, run_id, skip_sca=skip_sca)
         if unreviewed:
             print("\n[GATE ERROR] /sec-review 미완료 — 아래 findings가 판정되지 않았습니다:")
             for path, fid in unreviewed:
@@ -299,7 +325,7 @@ def main() -> int:
 
     # 1. 오탐 반영
     print("\n[1/4] 오탐 판정 적용 중...")
-    stats = apply_review_results(args.repo, run_id)
+    stats = apply_review_results(args.repo, run_id, skip_sca=skip_sca)
     print(f"      전체 {stats['total_findings']}건  /  오탐→양호: {stats['updated']}건  /  유지: {stats['skipped']}건")
 
     # 2. final 1차 보고서 생성 + palantir-reports 커밋
@@ -332,7 +358,17 @@ def main() -> int:
     if args.publish:
         reportable = stats.get("reportable", 0)
         if reportable == 0:
-            print("\n[3/4] Confluence 게시 생략 — 보고서에 포함할 취약/정보 finding 없음 (전체 양호)")
+            # skip_sca 모드 + SCA findings 존재 → SCA 전용 케이스 누적 기록
+            if skip_sca:
+                sca_count = _count_sca_reportable(args.repo, run_id)
+                if sca_count > 0:
+                    print(f"\n[3/4] SAST 양호 (SCA 전용 {sca_count}건) — Jira 미발행, ocb_scan_plan 누적 기록 중...")
+                    _run([sys.executable, "tools/update_ocb_plan.py",
+                          "--sca-only", args.repo, str(sca_count)])
+                else:
+                    print("\n[3/4] Confluence 게시 생략 — 전체 양호 (SAST + SCA 모두 이상 없음)")
+            else:
+                print("\n[3/4] Confluence 게시 생략 — 보고서에 포함할 취약/정보 finding 없음 (전체 양호)")
         else:
             print(f"\n[3/4] 최종 보고서 생성 + Confluence 게시... (보고 대상 {reportable}건)")
             cmd = [
@@ -344,6 +380,8 @@ def main() -> int:
                 cmd += ["--run-id", run_id]
             if args.title:
                 cmd += ["--title", args.title]
+            if skip_sca:
+                cmd += ["--skip-sca"]
             r = _run(cmd)
             if r.returncode != 0:
                 print(f"[ERROR] generate_final_report.py 실패 (returncode={r.returncode})")
@@ -372,7 +410,7 @@ def main() -> int:
                     print(f"\n      [WARN] .confluence_pages.json에서 {report_key} 를 찾지 못해 체크리스트 갱신 생략")
             # Jira 티켓 게이트웨이 전송
             print(f"\n[4/4] Jira 티켓 게이트웨이 전송...")
-            _review_notes = _extract_review_notes(args.repo, run_id)
+            _review_notes = _extract_review_notes(args.repo, run_id, skip_sca=skip_sca)
             print(f"      review_notes 추출: {len(_review_notes)}건")
             _send_to_jira_gateway(args.repo, page_id or "", report_key, _review_notes)
     else:

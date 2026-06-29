@@ -54,14 +54,22 @@ SKILL_FINDINGS = {
 }
 
 # 체크리스트 테이블의 컬럼 인덱스 (split("|") 기준)
-# "| `repo` | ↔️ 대내외 | INJ | XSS | FILE | DATA | SCA | 보고서 |"
-# split 시: [0]='', [1]=repo, [2]=direction, [3]=INJ, [4]=XSS, [5]=FILE, [6]=DATA, [7]=SCA, [8]=보고서
+# "| `repo` | ↔️ 대내외 | INJ | XSS | FILE | DATA | SCA | 보고서 | Jira 티켓 |"
+# split 시: [0]='', [1]=repo, [2]=direction, [3]=INJ, [4]=XSS, [5]=FILE, [6]=DATA, [7]=SCA, [8]=보고서, [9]=Jira 티켓
 SKILL_COL_IDX  = {"injection": 3, "xss": 4, "file": 5, "data": 6, "sca": 7}
 REPORT_COL_IDX = 8
+JIRA_COL_IDX   = 9
 
 # Confluence 페이지 제목
 CF_TITLE     = "OCB 서비스 군 보안 진단 계획"
 CF_PARENT_ID = "722832415"
+
+
+SCA_ONLY_SECTION_HEADER = "## SCA 전용 진단 현황 (SAST 양호 레포)"
+SCA_ONLY_TABLE_HEADER   = (
+    "\n| 레포 | 기록일 | SCA 취약·정보 | 비고 |\n"
+    "|------|-------|-------------|------|\n"
+)
 
 
 # ── 상태 파일 ─────────────────────────────────────────────────────────────────
@@ -112,6 +120,35 @@ def mark_done(repo: str, skills: list[str], date: str | None = None) -> int:
 
     if changed > 0:
         PLAN_MD.write_text(text, encoding="utf-8")
+    return changed
+
+
+# ── Jira 티켓 컬럼 갱신 ──────────────────────────────────────────────────────
+
+def mark_jira_ticket(repo: str, jira_key: str) -> int:
+    """
+    ocb_scan_plan.md 내 해당 repo의 Jira 티켓 컬럼을 갱신한다.
+    jira_key: 'SECUFINDINGS-2118' 형식 또는 '—' (미발행/거절)
+    반환: 변경된 셀 수.
+    """
+    text = PLAN_MD.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    new_lines = []
+    changed = 0
+
+    for line in lines:
+        if f"`{repo}`" in line and "|" in line:
+            cells = line.split("|")
+            if len(cells) > JIRA_COL_IDX:
+                current = cells[JIRA_COL_IDX].strip()
+                if current != jira_key:
+                    cells[JIRA_COL_IDX] = f" {jira_key} "
+                    changed += 1
+            line = "|".join(cells)
+        new_lines.append(line)
+
+    if changed:
+        PLAN_MD.write_text("\n".join(new_lines), encoding="utf-8")
     return changed
 
 
@@ -243,6 +280,86 @@ def sync_from_state(no_sync: bool = False) -> int:
     return total
 
 
+# ── SCA 전용 케이스 누적 기록 ────────────────────────────────────────────────
+
+def mark_sca_only(repo: str, sca_count: int, date: str | None = None) -> None:
+    """
+    SAST 양호 + SCA 전용 케이스를 ocb_scan_plan.md에 누적 기록한다.
+    1. 보고서 컬럼 → 'SCA전용(SAST양호)' 표시
+    2. 파일 하단 누적 섹션에 행 추가 (중복 레포는 날짜 갱신)
+    3. Confluence 동기화
+    """
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    # 1. 보고서 컬럼 갱신
+    n = mark_report(repo, "SCA전용(SAST양호)")
+    if n > 0:
+        print(f"[OK] {repo} — 보고서 컬럼 → 'SCA전용(SAST양호)' ({date})")
+    else:
+        print(f"[WARN] {repo}: 보고서 컬럼 갱신할 항목을 찾지 못했습니다.")
+
+    # 2. 누적 섹션 추가/갱신
+    _append_sca_only_record(repo, sca_count, date)
+
+    # 3. Confluence 동기화
+    sync_confluence()
+
+
+def _append_sca_only_record(repo: str, sca_count: int, date: str) -> None:
+    """
+    ocb_scan_plan.md 하단의 'SCA 전용 진단 현황' 섹션에 레포 행을 추가한다.
+    섹션이 없으면 새로 생성, 이미 동일 레포 행이 있으면 날짜·건수 갱신.
+    """
+    text = PLAN_MD.read_text(encoding="utf-8")
+    new_row = f"| `{repo}` | {date} | {sca_count}건 | SAST 양호, Jira 미발행 |"
+
+    if SCA_ONLY_SECTION_HEADER in text:
+        # 섹션 존재 — 동일 레포 행 있으면 갱신, 없으면 테이블 끝에 추가
+        lines = text.splitlines()
+        new_lines = []
+        in_section  = False
+        repo_updated = False
+
+        for line in lines:
+            if line.strip() == SCA_ONLY_SECTION_HEADER:
+                in_section = True
+            if in_section and f"`{repo}`" in line and "|" in line:
+                new_lines.append(new_row)
+                repo_updated = True
+                continue
+            new_lines.append(line)
+
+        if not repo_updated:
+            # 테이블 마지막 행 뒤에 삽입
+            result = []
+            in_section = False
+            last_table_idx = -1
+            for i, line in enumerate(new_lines):
+                if line.strip() == SCA_ONLY_SECTION_HEADER:
+                    in_section = True
+                if in_section and line.startswith("|"):
+                    last_table_idx = i
+            if last_table_idx >= 0:
+                new_lines.insert(last_table_idx + 1, new_row)
+            else:
+                new_lines.append(new_row)
+
+        text = "\n".join(new_lines)
+    else:
+        # 섹션 없음 — 파일 끝에 섹션 + 테이블 생성
+        section = (
+            f"\n\n---\n\n{SCA_ONLY_SECTION_HEADER}\n\n"
+            f"> `--skip-sca` 사용 시 SAST finding 없어 Jira 미발행된 레포 누적 목록\n"
+            f"{SCA_ONLY_TABLE_HEADER}"
+            f"{new_row}"
+        )
+        text = text.rstrip() + section
+
+    PLAN_MD.write_text(text, encoding="utf-8")
+    print(f"[OK] ocb_scan_plan.md — SCA 전용 누적 기록: {repo} ({sca_count}건, {date})")
+
+
 # ── Confluence 동기화 ─────────────────────────────────────────────────────────
 
 def sync_confluence() -> bool:
@@ -319,6 +436,16 @@ def main():
         help="보고서 컬럼 갱신. VALUE: Confluence URL 또는 '전체양호'\n"
              "예: --report ocb-webview-api https://wiki.skplanet.com/pages/viewpage.action?pageId=750464899",
     )
+    parser.add_argument(
+        "--jira", nargs=2, metavar=("REPO", "JIRA_KEY"),
+        help="Jira 티켓 컬럼 갱신. JIRA_KEY: 'SECUFINDINGS-2118' 또는 '—'\n"
+             "예: --jira ocb-webview-api SECUFINDINGS-2118",
+    )
+    parser.add_argument(
+        "--sca-only", nargs=2, metavar=("REPO", "SCA_COUNT"),
+        help="SCA 전용 케이스 누적 기록. SAST 양호 + SCA 취약 존재 시 사용.\n"
+             "예: --sca-only ocb-iam 7",
+    )
     args = parser.parse_args()
 
     # ── --status ──────────────────────────────────────────────────────────────
@@ -388,6 +515,30 @@ def main():
 
         if not args.no_sync:
             sync_confluence()
+        return
+
+    # ── --jira ────────────────────────────────────────────────────────────────
+    if args.jira:
+        repo, jira_key = args.jira
+        n = mark_jira_ticket(repo, jira_key)
+        if n > 0:
+            print(f"[OK] {repo} — Jira 티켓 컬럼 갱신 완료: {jira_key} ({n}개 셀)")
+        else:
+            print(f"[WARN] {repo}: Jira 티켓 컬럼 갱신할 항목을 찾지 못했습니다.")
+
+        if not args.no_sync:
+            sync_confluence()
+        return
+
+    # ── --sca-only ────────────────────────────────────────────────────────────
+    if args.sca_only:
+        repo, sca_count_str = args.sca_only
+        try:
+            sca_count = int(sca_count_str)
+        except ValueError:
+            print(f"[ERROR] SCA_COUNT는 정수여야 합니다: {sca_count_str}", file=sys.stderr)
+            sys.exit(1)
+        mark_sca_only(repo, sca_count)
         return
 
     parser.print_help()

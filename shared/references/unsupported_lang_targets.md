@@ -1,6 +1,6 @@
 # 미지원 언어 진단 대상 목록
 
-> palantir 스캐너는 Java/Kotlin을 완전 지원하며, TypeScript/JavaScript 프론트엔드는 LLM 수동 진단으로 지원.
+> palantir 스캐너는 Java/Kotlin을 완전 지원하며, TypeScript/JavaScript 프론트엔드는 XSS/File/Data 스캔 자동 지원 + SCA(npm) 지원.
 > 이 파일은 **PHP 등 지원 언어 스캐너가 없어 자동 진단이 불가한 언어**와 향후 스캐너 구현 요구사항을 명세합니다.
 >
 > PHP 진단 보류 대상 repo 목록: `shared/references/project_ocb_php_targets.md` 참조.
@@ -58,11 +58,20 @@ system("ls " . $_GET['dir']);
 |---|---|---|---|
 | Java (Spring MVC / Spring Boot) | ✅ 완전 지원 | Injection / XSS / File / DataProtection / SCA | 2-1~2-5 |
 | Kotlin (Spring Boot) | ✅ 완전 지원 | Injection / XSS / File / DataProtection / SCA | 2-1~2-5 |
-| TypeScript (React / Next.js / Turborepo) | ✅ 지원 | FE-XSS / FE-SECRET / FE-STORAGE / FE-LOG / SCA(npm) | LLM 수동 진단 |
-| JavaScript (Node.js / React) | ✅ 지원 | FE-XSS / FE-SECRET / FE-STORAGE / FE-LOG / SCA(npm) | LLM 수동 진단 |
+| TypeScript (React / Next.js / Turborepo) | ✅ 자동 스캔 부분 지원 | FE-XSS(자동) / FE-File(자동) / FE-Data(자동) / SCA-npm(자동) | 자동 스캔 + LLM 검증 |
+| JavaScript (Node.js / React) | ✅ 자동 스캔 부분 지원 | FE-XSS(자동) / FE-File(자동) / FE-Data(자동) / SCA-npm(자동) | 자동 스캔 + LLM 검증 |
 | PHP | ❌ 미지원 | — | — |
 | Python | ❌ 미지원 | — | — |
 | Go | ❌ 미지원 | — | — |
 
-> **TypeScript/JavaScript 지원 범위**: LLM grep 기반 수동진단 (자동 스캔 스크립트 없음).
-> 워크플로 분기: `workflow.md` Phase 1 프론트엔드 판정 → Phase 2 프론트엔드 진단 실행
+**TypeScript/JavaScript 스킬별 자동 스캔 지원 현황** (v1.5 기준):
+
+| Skill | 자동 스캔 지원 | 탐지 항목 | 비고 |
+|-------|---------------|-----------|------|
+| `/sec-scan-injection` | ❌ skip | — | JS/TS Injection은 LLM 수동 진단 |
+| `/sec-scan-xss` | ✅ 지원 | DOM XSS / Redirect XSS | `frontend-llm` 모드 자동 전환 |
+| `/sec-scan-file` | ✅ 지원 | FormData 업로드 / FileReader 싱크 / Blob 다운로드 | `frontend` 모드 자동 전환 (v1.1) |
+| `/sec-scan-data` | ✅ 지원 | console PII / localStorage / 하드코딩 시크릿 / NEXT_PUBLIC_ | `frontend` 모드 자동 전환 (v1.5) |
+| `/sec-scan-sca` | ✅ 완전 지원 | npm CVE (package.json / package-lock.json) | Gradle/npm 자동 감지 |
+
+> **프론트엔드 모드 자동 전환 기준**: Java/Kotlin 파일 < 5개 + `package.json` 존재 → 스크립트가 `_is_frontend_repo()` 함수로 자동 판별, 별도 플래그 불필요.
