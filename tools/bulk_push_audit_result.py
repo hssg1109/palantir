@@ -13,6 +13,7 @@ bulk_push_audit_result.py — 여러 레포 진단이력 일괄 업로드
 """
 
 import argparse
+import os
 import re
 import shutil
 import subprocess
@@ -25,7 +26,7 @@ STATE_DIR    = PALANTIR_DIR / "state"
 LOGS_DIR     = PALANTIR_DIR / "logs"
 
 SKILL_ORDER   = ["injection", "xss", "file", "data", "sca"]
-BB_REMOTE_URL = "https://code.skplanet.com/scm/vulchk/palantir_result.git"
+BB_REMOTE_URL = os.environ.get("AUDIT_RESULT_REPO_URL", "")
 
 PSEXE        = "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"
 # git workspace (clone of audit_result)
@@ -265,7 +266,7 @@ def main() -> int:
         print(f"레포 수  : {len(copied_repos)}개")
         for r in copied_repos:
             print(f"  - {r}")
-        print(f"\nBitbucket: https://code.skplanet.com/projects/VULCHK/repos/audit_result/browse")
+        print(f"\nBitbucket: {os.environ.get("BITBUCKET_BASE_URL","")}/projects/VULCHK/repos/audit_result/browse")
     else:
         print(f"\n[WARN] git push 실패 (returncode={rc})")
         print(f"파일은 {WS_WIN}\\ 에 보존됨 — 수동 push (Windows PowerShell):")

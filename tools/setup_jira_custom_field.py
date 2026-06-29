@@ -7,7 +7,7 @@ setup_jira_custom_field.py — Jira 커스텀 필드 "조치기한" 생성 및 �
 
 동작:
   1. "조치기한" 날짜 커스텀 필드 존재 확인 → 없으면 생성 (관리자 권한 필요)
-  2. 지정한 스크린 조회 (기본: "SECUFINDINGS" 포함 스크린 자동 탐지)
+  2. 지정한 스크린 조회 (기본: 환경 설정 필요 포함 스크린 자동 탐지)
   3. 스크린 탭에 필드 추가
   4. .env 에 JIRA_REMEDIATION_DATE_FIELD_ID=customfield_XXXXX 저장
 
@@ -230,8 +230,8 @@ def add_field_to_screen(
 
 def main():
     parser = argparse.ArgumentParser(description=f"Jira 커스텀 필드 '{FIELD_NAME}' 생성 및 스크린 등록")
-    parser.add_argument("--screen-name", default="SECUFINDINGS",
-                        help="스크린 이름 검색 키워드 (기본: SECUFINDINGS)")
+    parser.add_argument("--screen-name", default="<YOUR_JIRA_PROJECT>",
+                        help="스크린 이름 검색 키워드 (기본: 환경 설정 필요)")
     parser.add_argument("--dry-run", action="store_true",
                         help="실제 변경 없이 payload 출력")
     args = parser.parse_args()

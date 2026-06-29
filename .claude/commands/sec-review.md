@@ -326,7 +326,7 @@ RUN_ID : <RUN_ID>
 ## API 및 검증 현황
 | API | 파일 | 라인 | 검증 방식 |
 |-----|------|------|----------|
-| POST /file/ocr/coupon | GptOcrCouponService.java | 41 | 확장자 whitelist만, MIME 없음 |"
+| POST /file/upload | FileUploadService.java | 41 | 확장자 whitelist만, MIME 없음 |"
 ```
 
 ```
@@ -335,7 +335,7 @@ RUN_ID : <RUN_ID>
 변환 후: "## 노출 파일 및 라인별 PII 상세 (debug 레벨)
 | 파일 | 라인 | 노출 파라미터 | 비고 |
 |------|------|--------------|------|
-| AuthService.java | 476 | mbrId, newPasswd | ⚠️ 비밀번호 평문 |
+| UserService.java | 123 | userId, email | ⚠️ PII 평문 노출 |
 ..."
 ```
 
@@ -540,23 +540,23 @@ review_note 원문:
 ```markdown
 ## 코드 직접 확인 결과
 
-`UserInfoService.java`의 `getUserInfo()` 메서드에서 `gender`(String)와 `ageGroup`(int) 파라미터가
+`ItemService.java`의 `getItemInfo()` 메서드에서 `category`(String)와 `sortOrder`(int) 파라미터가
 SQL 쿼리에 직접 삽입된다. 두 파라미터 모두 인증된 사용자의 프로필 정보(`userInfo`)에서 유입되므로
 일반적인 외부 직접 조작은 제한되나, UI를 통한 프로필 편집 경로에서 비정상 값이 주입될 경우
 SQL Injection이 발현될 수 있다.
 
 ## 위험 시나리오
 
-1. 공격자가 프로필 수정 API를 통해 `gender` 필드에 SQL 페이로드 삽입
+1. 공격자가 프로필 수정 API를 통해 `category` 필드에 SQL 페이로드 삽입
 2. 변경된 프로필 정보가 `userInfo` 캐시/DB에 저장
-3. 이후 `getUserInfo()` 호출 시 오염된 값이 SQL 쿼리에 반영되어 Injection 발현
+3. 이후 `getItemInfo()` 호출 시 오염된 값이 SQL 쿼리에 반영되어 Injection 발현
 
 ## 취약 위치
 
 | 파일 | 라인 | 취약 파라미터 | 타입 |
 |------|------|--------------|------|
-| UserInfoService.java | 해당라인 | gender | String — SQL 직접 삽입 |
-| UserInfoService.java | 해당라인 | ageGroup | int — 타입 제약으로 위험 낮음 |
+| ItemService.java | 해당라인 | category | String — SQL 직접 삽입 |
+| ItemService.java | 해당라인 | sortOrder | int — 타입 제약으로 위험 낮음 |
 ```
 
 ### 5c. Audit 세션 종료
@@ -607,7 +607,7 @@ find state/<repo>/ \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "
 - `testbed_deletion.confirmed == true` AND `state_snippet_audit.confirmed == true` → `cleansing_completed = true`, `cleansing_completed_at = <now ISO8601>`
 - 이외 → `cleansing_completed = false`, `notes`에 미완료 사유 기록
 
-**6. Confluence 레지스트리 행 추가** (pageId: `750095285`)
+**6. Confluence 레지스트리 행 추가** (pageId: `<YOUR_REGISTRY_PAGE_ID>`)
 
 `.env`의 `CONFLUENCE_TOKEN`(Bearer)을 사용하여 REST API로 테이블 행을 추가한다.
 
@@ -635,7 +635,7 @@ Confluence 페이지 업데이트 실패 시 → `notes`에 오류 기록 후 �
   testbed 삭제   : ✅  testbed/<repo>/ 삭제
   state 감사     : ✅  소스 파일 0건
   스캔 redact    : ✅
-  Confluence     : ✅  레지스트리 행 추가 (pageId: 750095285)
+  Confluence     : ✅  레지스트리 행 추가 (pageId: <YOUR_REGISTRY_PAGE_ID>)
   로그           : state/<repo>/llm_data_access_log.json
   ─────────────────────────────────────────
   [운영자] 이 Claude 세션을 종료하고 새 세션을 시작하세요.

@@ -61,7 +61,7 @@ rm -rf testbed/<repo>/
 각 skill Phase C-1 단계에서 `state/<repo>/llm_data_access_log.json` (레포당 1개 통합 파일)에 해당 skill의 LLM 접근 파일 목록을 기록하고, `/sec-review` Phase C-2 완료 시 클렌징 액션 결과와 Confluence 레지스트리 행 추가를 수행한다.
 
 - **로그 위치**: `state/<repo>/llm_data_access_log.json` (레포당 1파일, 5 skill 통합)
-- **Confluence 레지스트리**: pageId `750095285` — 레포당 1행 추가
+- **Confluence 레지스트리**: pageId `<YOUR_REGISTRY_PAGE_ID>` — 레포당 1행 추가
 - 스키마 정의: `shared/references/output_schemas.md` → `llm_data_access_log.json Schema` 섹션 참조.
 - 절차 상세: `shared/references/phase_c_cleansing.md` 참조.
 
@@ -88,6 +88,6 @@ rm -rf testbed/<repo>/
 - [ ] `testbed/<repo>/` 삭제 완료
 - [ ] state/ 내 소스코드 전체 파일 복사 없음 확인
 - [ ] `scan_data_protection.py` 스캔 redact 적용 확인 (data skill 실행 시 자동 ✅)
-- [ ] Confluence 레지스트리 (pageId: `750095285`) 행 추가 완료
+- [ ] Confluence 레지스트리 (pageId: `<YOUR_REGISTRY_PAGE_ID>`) 행 추가 완료
 - [ ] `llm_data_access_log.json` `cleansing_completed: true` 저장 완료
 - [ ] LLM 세션 종료 예정 (운영자 수행)

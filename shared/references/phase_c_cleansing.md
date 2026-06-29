@@ -134,7 +134,7 @@ Phase C는 두 단계로 나뉜다.
    - `testbed_deletion.confirmed == true` AND `state_snippet_audit.confirmed == true` → `cleansing_completed = true`, `cleansing_completed_at = <ISO8601>`
    - 이외 → `cleansing_completed = false`, `notes`에 미완료 사유 기록
 
-6. **Confluence 레지스트리 행 추가** (page ID: `750095285`)
+6. **Confluence 레지스트리 행 추가** (page ID: `<YOUR_REGISTRY_PAGE_ID>`)
 
    레지스트리 한 행 (레포당 1행):
 

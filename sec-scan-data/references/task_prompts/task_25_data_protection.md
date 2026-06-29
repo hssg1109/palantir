@@ -312,17 +312,55 @@ BFF 서버가 서버사이드 환경변수에서 토큰을 로드하여 외부 A
 | 내부 추적 식별자 | `userId`, `feedId`, `feedSeq`, `asumUid` | 애플리케이션 내부 동작 추적용. 고객 식별에 직결되지 않음 |
 | 비즈니스 상수/URL | `pushType`, `redirectUri` | 단순 상수값·URL 경로. 개인정보 미포함 |
 | 일반 예외 메시지 | `e.message`, `exception.message` | 오류 타입·메시지 텍스트. 단, **토큰 원문·Secret Key가 결합 출력되는 경우는 TP** |
+| mbrId 단독 업무 이벤트 로그 | `log.*(event=XXX mbrId={} result=XXX reason_code={} request_id={})` 형태 | **OCB 사내 정책 허용**: CS·장애 대응 목적의 업무 처리 결과 추적 로그. mbrId 외 민감정보 미결합 시 FP 처리. |
 
+> **[OCB 정책 주의]** mbrId 단독 업무 이벤트 로그라도 다음 조건 중 하나라도 충족하면 TP:
+> - 전화번호(mdn/phone) · CI(ciNo) · 생년월일(birthDate) · 카드번호(cardNo) · 주소(addr) 결합
+> - 세션ID(sessionId) · Access Token · Refresh Token 결합
+> - 요청/응답 전문(request body, response body) 결합
+>
 > 허용 목록 변수가 `mbrId`·`authToken` 등 보호 필수 변수와 **동일 로그 라인에 결합** 출력되는 경우 → 보호 필수 변수 기준으로 **TP 처리** (허용 목록 적용 불가).
 
 **[보호 필수 목록] — 로그 레벨 무관, 반드시 TP + 마스킹 필수**
 
 | 분류 | 변수/패턴 | 조치 방안 |
 |---|---|---|
-| 핵심 고객 식별자 | `mbrId`, `mbrno`, `mbr_id` | **절대 예외 불가** — MaskingUtils.mask() 필수 |
+| 핵심 고객 식별자 | `mbrId`, `mbrno`, `mbr_id` | CS 목적 단독 로깅은 허용 — 단, 민감정보 조합 시 금지. MaskingUtils.mask() 적용 또는 금지 조합 제거 |
 | 인증·세션 토큰 | `authToken`, `accessToken`, `refreshToken`, `httpSession.getId()` | 토큰 원문 마스킹 처리 필수 |
 | 개인정보 포함 객체 전체 | `webTokenInfo`, `kmcResult`, `response` (회원 API 응답 전체) | 로그 제외 또는 필드별 마스킹 |
 | 암호화 처리 전/후 데이터 | `encryptData`, `plainText` | 평문 결합 로깅 금지 |
+| 요청 전문 dump | `request`, `requestBody`, `HttpServletRequest` 통째로 로깅 | **OCB 정책 금지** — 업무 이벤트+결과코드 형태로 변환 필수 |
+| 세션 객체 dump | `session` 객체 전체 로깅 | **OCB 정책 금지** — 세션ID 단독 로깅 시 마스킹, 객체 dump 제거 |
+| 회원 객체 dump | `member`, `memberInfo` 객체 전체 로깅 | **OCB 정책 금지** — 필요한 필드만 개별 로깅, 마스킹 적용 |
+| 외부 연동 응답 전문 | `externalResponse`, 외부 API 응답 payload 전체 로깅 | **OCB 정책 금지** — 결과코드·트랜잭션ID 중심으로 로깅 |
+
+#### 6-0-1. mbrId 로그 처리 정책 (OCB 사내 정책 기준)
+
+> 출처: [사내 고객식별자(mbrId) 서버 로그 처리 정책](사내 개인정보 처리 정책 문서 (사내 Confluence 참조))
+
+**로그 레벨별 mbrId 허용 기준:**
+
+| 레벨 | mbrId 허용 여부 | 비고 |
+|---|---|---|
+| `DEBUG` | **원칙적 금지** | 로컬 개발·테스트 데이터에서만 허용. 운영 환경 탐지 시 → 정보/Medium |
+| `INFO` | **CS 목적 업무 이벤트만 허용** | 단순 메서드 진입·파라미터 확인·객체 dump 용도는 금지 |
+| `WARN` / `ERROR` | **CS 대응 실패 로그에 허용** | 단, 민감정보 조합·전문 로그는 금지 |
+
+**허용되는 로그 패턴 (FP 처리):**
+```
+INFO  event=POINT_USE     mbrId=123456 result=FAIL reason_code=INSUFFICIENT_POINT request_id=req-001
+WARN  event=COUPON_ISSUE  mbrId=123456 result=FAIL reason_code=ALREADY_ISSUED coupon_id=C202606
+ERROR event=AUTH_VERIFY   mbrId=123456 result=FAIL error_code=AUTH_PROVIDER_TIMEOUT
+```
+
+**금지되는 로그 패턴 (TP 처리, 취약/High):**
+```
+INFO  mbrId=123456 birthDate=19800101 phone=01012345678 ciNo=...       → mbrId+PII 조합
+INFO  requestBody={"mbrId":"123456","name":"홍길동","phone":"01012345678"}  → 요청 전문 dump
+WARN  session={mbrId=123456, sessionId=abcdef, birthDate=19800101}     → 세션 객체 dump
+ERROR member={...전체 회원 객체...}                                     → 회원 객체 dump
+ERROR externalResponse={...외부 연동 응답 전문...}                      → 외부 payload dump
+```
 
 **병합 규칙:**
 
@@ -349,8 +387,11 @@ BFF 서버가 서버사이드 환경변수에서 토큰을 로드하여 외부 A
   ```
 
 **대응 방안 필수 포함 항목:**
-1. [필수] `mbrId`, `authToken` 등 보호 필수 변수: `MaskingUtils.mask()` 적용 리팩토링 — **"해당 파라미터는 마스킹 처리 필수"** 명시
-2. 근본 조치: Logback `MessageConverter` 커스텀 구현으로 전역 자동 마스킹 아키텍처 도입
+1. [사내 정책] mbrId 단독 → CS 목적 업무 이벤트(event=XXX result=XXX reason_code=XXX) 형태로 변경.  
+   mbrId + PII 조합(전화번호/CI/생년월일/카드번호/세션ID/토큰) → 민감정보 제거 또는 분리.
+2. [전문 dump] request/response/session/member 객체 전체 로깅 → 업무 이벤트+결과코드 형태로 변환.
+3. [필수] `mbrId`, `authToken` 등 보호 필수 변수: `MaskingUtils.mask()` 적용 리팩토링 — **"해당 파라미터는 마스킹 처리 필수"** 명시
+4. 근본 조치: Logback `MessageConverter` 커스텀 구현으로 전역 자동 마스킹 아키텍처 도입
 
 ---
 

@@ -262,6 +262,9 @@ _LOG_FP_ALLOWLIST_RE = re.compile(
 )
 
 # 보호 필수 목록: 반드시 마스킹 — 고객 식별자·인증 토큰·개인정보 포함 객체
+# OCB 사내 정책(사내 개인정보 처리 정책 페이지) 기준:
+#   mbrId + 전화번호/CI/생년월일/카드번호/세션ID/토큰/요청·응답전문 조합 금지
+#   요청(request)/응답(response)/세션(session)/회원(member) 객체 전체 dump 금지
 _LOG_PROTECTED_PARAM_NAMES = (
     r'mbrId|mbrno|mbr_?id|memberid|memno'
     r'|authToken|accessToken|refreshToken|webTokenInfo|kmcResult'
@@ -270,7 +273,11 @@ _LOG_PROTECTED_PARAM_NAMES = (
     r'|password|passwd|pwd|secretKey|privateKey|rsaKey'
     r'|cardNo|card_?no|creditCard|pan|cvc|cvv'
     r'|email|phone|mobile|tel|mdn'
-    r'|response\b'  # 회원 정보 API 응답 전체 객체
+    r'|response\b'              # 회원 정보 API 응답 전체 객체
+    r'|request\b|requestBody'   # 요청 전문 dump (OCB 정책: 요청 전문 로그 금지)
+    r'|session\b'               # 세션 객체 dump (OCB 정책: Session 객체 dump 금지)
+    r'|member\b'                # 회원 객체 dump (OCB 정책: Member 객체 dump 금지)
+    r'|externalResponse'        # 외부 연동 응답 전문 (OCB 정책: payload 전체 로그 금지)
 )
 _LOG_PROTECTED_PARAM_RE = re.compile(
     rf'(?i)(?<!\w)(?:{_LOG_PROTECTED_PARAM_NAMES})'
@@ -1095,12 +1102,18 @@ def scan_sensitive_logging(source_dir: Path) -> list[DPFinding]:
 
     # ── 파일 단위 Finding 생성 ────────────────────────────────────
     _REC = (
-        "1. [필수 마스킹 대상] mbrId, authToken, kmcResult, webTokenInfo, encryptData 등 핵심 식별자·인증 토큰·개인정보 포함 객체는 "
+        "1. [사내 정책 - mbrId 로그 기준] mbrId 단독 로깅은 CS·장애 대응 목적의 업무 이벤트(event=XXX result=XXX reason_code=XXX)에서만 허용. "
+        "다음 조합은 절대 금지: mbrId+전화번호(mdn/phone), mbrId+CI(ciNo), mbrId+생년월일(birthDate), "
+        "mbrId+카드번호(cardNo), mbrId+세션ID(sessionId), mbrId+Access/Refresh Token.\n"
+        "2. [전문 dump 금지] 요청 전문(request/requestBody), 응답 전문(response/externalResponse), "
+        "세션 객체(session), 회원 객체(member)를 통째로 로그에 남기지 않는다. "
+        "업무 이벤트+결과코드(event=XXX result=XXX reason_code=XXX request_id=XXX) 형태로 변환.\n"
+        "3. [필수 마스킹 대상] mbrId, authToken, kmcResult, webTokenInfo, encryptData 등 핵심 식별자·인증 토큰·개인정보 포함 객체는 "
         "로그 레벨에 관계없이 반드시 MaskingUtils.mask() 또는 동등한 유틸로 마스킹 처리 필수.\n"
-        "2. [허용 목록] userId, feedId, feedSeq 등 내부 추적용 식별자는 단독 출력 시 허용 — mbrId 등 보호 필수 항목과 결합 출력 시에는 마스킹 필요.\n"
-        "3. 운영 환경 로그 레벨을 INFO 이상으로 설정하고 DEBUG 로그 비활성화.\n"
-        "4. Logback MessageConverter 커스텀 구현으로 전역 자동 마스킹 아키텍처 도입 권장.\n"
-        "5. 로그 집계 시스템(ELK 등)의 접근 제어 강화."
+        "4. [허용 목록] userId, feedId, feedSeq 등 내부 추적용 식별자는 단독 출력 시 허용 — mbrId 등 보호 필수 항목과 결합 출력 시에는 마스킹 필요.\n"
+        "5. 운영 환경 로그 레벨을 INFO 이상으로 설정하고 DEBUG 로그 비활성화.\n"
+        "6. Logback MessageConverter 커스텀 구현으로 전역 자동 마스킹 아키텍처 도입 권장.\n"
+        "7. 로그 집계 시스템(ELK 등)의 접근 제어 강화."
     )
 
     for rel, buckets in file_hits.items():

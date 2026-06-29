@@ -148,12 +148,12 @@ Audit 중 발생한 판정 기준이 자동으로 문서화된 예시:
 feedback_log_dto_severity_standard.md
   → 운영 로그 PII 노출: 취약/High
   → 디버그 로그 PII 노출: 정보/Medium
-  (2026-06-12 ocb-iam 리뷰에서 확정)
+  (2026-06-12 <your-repo> 리뷰에서 확정)
 
 feedback_conservative_security_policy.md
   → SQL ${} 직접 삽입: 입력 경로 무관하게 취약/High
   → SpEL StandardEvaluationContext: 항상 취약/High
-  (2026-06-23 ocb-community-api 리뷰에서 확정)
+  (2026-06-23 <your-repo> 리뷰에서 확정)
 ```
 
 ---
@@ -163,7 +163,7 @@ feedback_conservative_security_policy.md
 ```json
 {
   "event_type": "finding_reviewed",
-  "repo": "ocb-iam",
+  "repo": "<your-repo>",
   "finding_id": "DATA-003",
   "scan_result": { "severity": "Medium", "result": "정보" },
   "review_action": {

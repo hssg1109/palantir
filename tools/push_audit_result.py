@@ -24,6 +24,7 @@ push_audit_result.py — 진단이력을 VULCHK/audit_result 레포에 업로드
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -35,7 +36,7 @@ STATE_DIR    = PALANTIR_DIR / "state"
 LOGS_DIR     = PALANTIR_DIR / "logs"
 
 SKILL_ORDER   = ["injection", "xss", "file", "data", "sca"]
-BB_REMOTE_URL = "https://code.skplanet.com/scm/vulchk/palantir_result.git"
+BB_REMOTE_URL = os.environ.get("AUDIT_RESULT_REPO_URL", "")
 
 # PowerShell 실행 파일 (WSL에서 접근)
 PSEXE      = "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"

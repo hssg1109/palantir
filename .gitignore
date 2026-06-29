@@ -50,3 +50,14 @@ tools/build_resume_docx.py
 ### OS ###
 .DS_Store
 Thumbs.db
+
+### 고객사 특정 운영 스크립트 ###
+tools/clone_p1a_ocbwebview.ps1
+tools/build_confluence_payload.py
+tools/classify_exposure.py
+tools/compare_ocb_audit.py
+docs/batch_plan_20260609.md
+tools/gen_data_findings_sugar.py
+tools/report_token_usage.py
+docs/workflow_nightly_scan.md
+tools/upload_ocb_audit_to_confluence.ps1

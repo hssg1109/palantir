@@ -528,7 +528,7 @@ python3 tools/create_jira_ticket.py --repo <repo> --finding-id <ID>
 JIRA_URL=https://jira.company.com
 JIRA_EMAIL=                          # Cloud: 이메일, Server/DC: 빈값
 JIRA_TOKEN=<PAT>
-JIRA_PROJECT_KEY=SECUFINDINGS
+JIRA_PROJECT_KEY=<YOUR_JIRA_PROJECT>
 JIRA_REMEDIATION_DATE_FIELD_ID=customfield_21500
 ```
 
@@ -729,7 +729,7 @@ CUSTOMER_BB_TOKEN=<PAT>
 JIRA_URL=https://jira.company.com
 JIRA_EMAIL=                          # Server/DC: 빈값, Cloud: 이메일
 JIRA_TOKEN=<PAT>
-JIRA_PROJECT_KEY=SECUFINDINGS
+JIRA_PROJECT_KEY=<YOUR_JIRA_PROJECT>
 JIRA_REMEDIATION_DATE_FIELD_ID=customfield_XXXXX
 
 # ── NVD (SCA CVE 조회) ────────────────────────────────────

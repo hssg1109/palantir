@@ -1087,8 +1087,8 @@ def main() -> int:
     parser.add_argument("--repo",    required=True, help="진단 대상 레포 슬러그")
     parser.add_argument("--publish", action="store_true",
                         help="완료 후 Confluence에 자동 게시")
-    parser.add_argument("--parent",  type=int, default=750459063, metavar="PAGE_ID",
-                        help="Confluence 부모 페이지 ID (기본: 750459063 — SKP 보안진단 루트)")
+    parser.add_argument("--parent",  type=int, default=0, metavar="PAGE_ID",
+                        help="Confluence 부모 페이지 ID (--publish 사용 시 필수)")
     parser.add_argument("--title",    default=None,
                         help="Confluence 페이지 제목 (기본: '<repo>-진단결과')")
     parser.add_argument("--skip-sca", action="store_true",

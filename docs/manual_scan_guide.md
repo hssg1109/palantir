@@ -180,7 +180,7 @@ python3 tools/approve_report.py \
 4. Confluence 페이지 자동 생성 (`--publish` 시)
 
 **Confluence 게시 설정 (기본값)**:
-- 부모 페이지: `https://wiki.skplanet.com/pages/viewpage.action?pageId=750459063`
+- 부모 페이지: `https://wiki.skplanet.com/pages/viewpage.action?pageId=<YOUR_PARENT_PAGE_ID>`
 - 페이지 제목: `ocb-webview-api-진단결과`
 
 제목을 변경하려면:

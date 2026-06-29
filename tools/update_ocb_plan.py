@@ -128,7 +128,7 @@ def mark_done(repo: str, skills: list[str], date: str | None = None) -> int:
 def mark_jira_ticket(repo: str, jira_key: str) -> int:
     """
     ocb_scan_plan.md 내 해당 repo의 Jira 티켓 컬럼을 갱신한다.
-    jira_key: 'SECUFINDINGS-2118' 형식 또는 '—' (미발행/거절)
+    jira_key: 'PROJ-1234' 형식 또는 '—' (미발행/거절)
     반환: 변경된 셀 수.
     """
     text = PLAN_MD.read_text(encoding="utf-8")
@@ -434,12 +434,12 @@ def main():
     parser.add_argument(
         "--report", nargs=2, metavar=("REPO", "VALUE"),
         help="보고서 컬럼 갱신. VALUE: Confluence URL 또는 '전체양호'\n"
-             "예: --report ocb-webview-api https://wiki.skplanet.com/pages/viewpage.action?pageId=750464899",
+             "예: --report ocb-webview-api https://wiki.your-company.com/pages/viewpage.action?pageId=<YOUR_PAGE_ID>",
     )
     parser.add_argument(
         "--jira", nargs=2, metavar=("REPO", "JIRA_KEY"),
-        help="Jira 티켓 컬럼 갱신. JIRA_KEY: 'SECUFINDINGS-2118' 또는 '—'\n"
-             "예: --jira ocb-webview-api SECUFINDINGS-2118",
+        help="Jira 티켓 컬럼 갱신. JIRA_KEY: 'PROJ-1234' 또는 '—'\n"
+             "예: --jira ocb-webview-api PROJ-1234",
     )
     parser.add_argument(
         "--sca-only", nargs=2, metavar=("REPO", "SCA_COUNT"),

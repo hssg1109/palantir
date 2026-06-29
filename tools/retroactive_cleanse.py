@@ -27,7 +27,7 @@ BASE_DIR = Path(__file__).parent.parent
 STATE_DIR = BASE_DIR / "state"
 TESTBED_DIR = BASE_DIR / "testbed"
 
-CONFLUENCE_PAGE_ID = "750095285"
+CONFLUENCE_PAGE_ID = os.environ.get("CONFLUENCE_REGISTRY_PAGE_ID", "")
 SKILLS = ["injection", "xss", "file", "data", "sca"]
 
 KST = timezone(timedelta(hours=9))

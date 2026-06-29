@@ -53,7 +53,7 @@ Phase C-2: 클렌징 완료 처리 ⚠️ 필수 — /sec-review 완료 직후
   ├─ testbed/<repo>/ 삭제
   ├─ state/<repo>/ 내 원본 소스코드 파일 복사 없음 확인
   ├─ scan_data_protection.py _redact_snippet() 자동 적용 확인 (data skill 실행 시 ✅)
-  ├─ Confluence 레지스트리(pageId: 750095285) 행 추가 (레포당 1행)
+  ├─ Confluence 레지스트리(pageId: <YOUR_REGISTRY_PAGE_ID>) 행 추가 (레포당 1행)
   ├─ llm_data_access_log.json cleansing_completed = true 저장
   └─ [운영자] Claude 세션 종료 → 새 세션 시작 (컨텍스트 만료)
 ```
