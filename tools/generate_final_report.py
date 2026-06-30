@@ -1091,8 +1091,10 @@ def main() -> int:
                         help="Confluence 부모 페이지 ID (--publish 사용 시 필수)")
     parser.add_argument("--title",    default=None,
                         help="Confluence 페이지 제목 (기본: '<repo>-진단결과')")
-    parser.add_argument("--skip-sca", action="store_true",
-                        help="SCA(오픈소스 CVE) findings를 보고서에서 제외")
+    parser.add_argument("--skip-sca", action="store_true", default=True,
+                        help="SCA(오픈소스 CVE) findings를 보고서에서 제외 (기본: 제외)")
+    parser.add_argument("--include-sca", action="store_true",
+                        help="SCA findings를 보고서에 포함 (--skip-sca 기본값 override)")
     args = parser.parse_args()
 
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1101,11 +1103,12 @@ def main() -> int:
 
     print(f"[최종보고서] RUN_ID={run_id_label}  repo={args.repo}")
     print(f"[최종보고서] findings 수집 중 (llm_checked: true 파일만)...")
-    if args.skip_sca:
-        print(f"[최종보고서] --skip-sca: SCA findings 제외")
+    skip_sca = args.skip_sca and not args.include_sca
+    if skip_sca:
+        print(f"[최종보고서] SCA findings 제외 (포함하려면 --include-sca)")
 
     clone_info = load_clone_info(args.repo)
-    data       = collect_findings(args.run_id, args.repo, skip_sca=args.skip_sca)
+    data       = collect_findings(args.run_id, args.repo, skip_sca=skip_sca)
 
     total = sum(len(v) for v in data.values())
     print(f"[최종보고서] {len(data)}개 스킬  {total}건 findings")
@@ -1124,14 +1127,15 @@ def main() -> int:
             return 0
         title = args.title or f"{args.repo}-진단결과"
         print(f"\n[Confluence] 게시 중: {title}  (parent: {args.parent})")
-        # 레지스트리에서 기존 page_id 조회 (prefix 매칭) — 없으면 CREATE, 있으면 UPDATE
+        # 레지스트리에서 기존 page_id 조회 (exact key 매칭) — 없으면 CREATE, 있으면 UPDATE
+        # prefix 매칭은 다른 RUN_ID의 기존 페이지를 덮어쓰므로 exact key만 사용한다
         reg_path = PALANTIR_DIR / "docs" / ".confluence_pages.json"
         existing_page_id = None
         if reg_path.exists():
             import json as _json
             reg = _json.loads(reg_path.read_text(encoding="utf-8"))
-            prefix = f"logs/final_{args.repo}_"
-            existing_page_id = next((v for k, v in reg.items() if k.startswith(prefix)), None)
+            exact_key = f"logs/final_{args.repo}_{run_id_label}.md"
+            existing_page_id = reg.get(exact_key)
         cmd = [sys.executable, str(publish_script), str(out_path), "--title", title,
                "--parent", str(args.parent)]
         if existing_page_id:
