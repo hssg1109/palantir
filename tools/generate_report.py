@@ -184,6 +184,8 @@ def _location(finding: dict) -> str:
     evidence = finding.get("evidence") or {}
     if isinstance(evidence, list):
         evidence = evidence[0] if evidence else {}
+    elif isinstance(evidence, str):
+        evidence = {}
     af    = scope.get("affected_file") or evidence.get("file", "")
     line  = scope.get("affected_line") or evidence.get("lines", "")
     pkg   = scope.get("package") or ""
