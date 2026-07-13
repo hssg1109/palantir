@@ -29,25 +29,48 @@ SKILL_ORDER   = ["injection", "xss", "file", "data", "sca"]
 BB_REMOTE_URL = os.environ.get("AUDIT_RESULT_REPO_URL", "")
 
 PSEXE        = "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"
+
+
+def _resolve_win_temp() -> tuple[Path, str]:
+    """사용자 소유 %TEMP%를 동적 조회.
+    C:\\Windows\\Temp는 도메인 PC 정책상 일반 계정에 삭제 권한이 없는 경우가 있어
+    (BUILTIN\\Users: CreateFiles/AppendData만 허용) git workspace로 부적합하다."""
+    try:
+        result = subprocess.run(
+            [PSEXE, "-NoProfile", "-NonInteractive", "-Command", "$env:TEMP"],
+            capture_output=True, text=True, timeout=15,
+        )
+        win_temp = result.stdout.strip()
+        if win_temp and ":\\" in win_temp:
+            drive, rest = win_temp.split(":\\", 1)
+            return Path(f"/mnt/{drive.lower()}/{rest.replace(chr(92), '/')}"), win_temp
+    except Exception:
+        pass
+    return Path("/mnt/c/Windows/Temp"), "C:\\Windows\\Temp"
+
+
+_TEMP_WSL, _TEMP_WIN = _resolve_win_temp()
 # git workspace (clone of audit_result)
-WS_WSL       = Path("/mnt/c/Windows/Temp/audit_result_ws")
-WS_WIN       = "C:\\Windows\\Temp\\audit_result_ws"
+WS_WSL       = _TEMP_WSL / "audit_result_ws"
+WS_WIN       = f"{_TEMP_WIN}\\audit_result_ws"
 # staging area (Python copies files here, then PowerShell copies into workspace)
-STAGE_WSL    = Path("/mnt/c/Windows/Temp/audit_result_stage")
-STAGE_WIN    = "C:\\Windows\\Temp\\audit_result_stage"
-PS_TMP_WSL   = Path("/mnt/c/Windows/Temp/bulk_push.ps1")
-PS_TMP_WIN   = "C:\\Windows\\Temp\\bulk_push.ps1"
+STAGE_WSL    = _TEMP_WSL / "audit_result_stage"
+STAGE_WIN    = f"{_TEMP_WIN}\\audit_result_stage"
+PS_TMP_WSL   = _TEMP_WSL / "bulk_push.ps1"
+PS_TMP_WIN   = f"{_TEMP_WIN}\\bulk_push.ps1"
 
 
-def _load_token() -> str:
+def _load_env() -> dict:
+    env = {}
     env_path = PALANTIR_DIR / ".env"
     if not env_path.exists():
-        return ""
+        return env
     for line in env_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
-        if line.startswith("BITBUCKET_TOKEN="):
-            return line.split("=", 1)[1].strip().split("#")[0].strip()
-    return ""
+        if "=" in line and not line.startswith("#"):
+            k, _, v = line.partition("=")
+            env[k.strip()] = v.strip().split("#")[0].strip()
+    return env
 
 
 def _latest_final_report(repo: str) -> Path | None:
@@ -142,10 +165,16 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="파일 복사만, git push 생략")
     args = parser.parse_args()
 
-    token = _load_token()
-    if not token and not args.dry_run:
-        print("[ERROR] .env에 BITBUCKET_TOKEN 미설정")
-        return 1
+    env   = _load_env()
+    token = env.get("BITBUCKET_TOKEN", "")
+    remote_url = env.get("AUDIT_RESULT_REPO_URL", "") or BB_REMOTE_URL
+    if not args.dry_run:
+        if not token:
+            print("[ERROR] .env에 BITBUCKET_TOKEN 미설정")
+            return 1
+        if not remote_url:
+            print("[ERROR] .env에 AUDIT_RESULT_REPO_URL 미설정")
+            return 1
 
     # 대상 레포 목록 구성
     if args.repos:
@@ -217,7 +246,7 @@ def main() -> int:
         "$OutputEncoding = [System.Text.Encoding]::UTF8",
         "$ErrorActionPreference = 'Continue'",
         "$env:PATH = 'C:\\Program Files\\Git\\bin;C:\\Program Files\\Git\\cmd;' + $env:PATH",
-        f"$remote = '{BB_REMOTE_URL}'",
+        f"$remote = '{remote_url}'",
         f"$ws     = '{WS_WIN}'",
         f"$stage  = '{STAGE_WIN}'",
         f"$auth   = '{git_auth}'",
@@ -227,7 +256,12 @@ def main() -> int:
         f"    git {git_auth} clone $remote $ws",
         "    if ($LASTEXITCODE -ne 0) { Write-Error 'clone 실패'; exit $LASTEXITCODE }",
         "} elseif (Test-Path \"$ws\\.git\") {",
-        f"    git -C $ws {git_auth} pull $remote 2>&1 | Out-Null",
+        f"    git -C $ws {git_auth} fetch $remote main:refs/remotes/origin/main --force 2>&1 | Out-Null",
+        "    if ($LASTEXITCODE -ne 0) {",
+        "        Remove-Item -Recurse -Force $ws",
+        f"        git {git_auth} clone $remote $ws",
+        "        if ($LASTEXITCODE -ne 0) { Write-Error 'clone 실패'; exit $LASTEXITCODE }",
+        "    }",
         "} else {",
         "    # 파일 있으나 .git 없음 — 임시 clone 후 .git 이식",
         "    $tmp = \"${ws}_tmp\"",
@@ -238,6 +272,13 @@ def main() -> int:
         "    Remove-Item -Recurse -Force $tmp",
         "    git -C $ws reset origin/main --mixed 2>&1 | Out-Null",
         "}",
+        "# 원격 HEAD symref가 존재하지 않는 브랜치(예: master)를 가리키는 경우가 있어",
+        "# 로컬 브랜치를 origin/main 기준으로 강제 정렬 (root-commit/non-fast-forward push 방지)",
+        "# checkout -B만으로는 더러워진 워킹트리(이전 run의 미커밋 잔여물)가 유지될 수 있어",
+        "# reset --hard + clean -fd로 origin/main과 완전히 동일한 상태로 강제 초기화",
+        "git -C $ws checkout -B main origin/main 2>&1 | Out-Null",
+        "git -C $ws reset --hard origin/main 2>&1 | Out-Null",
+        "git -C $ws clean -fd 2>&1 | Out-Null",
         "",
         "# stage → workspace 복사",
         "if (Test-Path $stage) {",
@@ -266,7 +307,7 @@ def main() -> int:
         print(f"레포 수  : {len(copied_repos)}개")
         for r in copied_repos:
             print(f"  - {r}")
-        print(f"\nBitbucket: {os.environ.get("BITBUCKET_BASE_URL","")}/projects/VULCHK/repos/audit_result/browse")
+        print(f"\nBitbucket: https://code.skplanet.com/projects/VULCHK/repos/palantir_result/browse")
     else:
         print(f"\n[WARN] git push 실패 (returncode={rc})")
         print(f"파일은 {WS_WIN}\\ 에 보존됨 — 수동 push (Windows PowerShell):")
