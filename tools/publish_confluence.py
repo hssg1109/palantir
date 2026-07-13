@@ -32,9 +32,14 @@ import json
 import re
 import subprocess
 import sys
-import tempfile
 import uuid
 from pathlib import Path
+
+try:
+    import requests as _requests
+    _HAS_REQUESTS = True
+except ImportError:
+    _HAS_REQUESTS = False
 
 PALANTIR_DIR = Path(__file__).parent.parent
 REGISTRY_PATH = PALANTIR_DIR / "docs" / ".confluence_pages.json"
@@ -143,6 +148,14 @@ def md_to_confluence(md: str) -> str:
             text = text.replace(f'\x00CODE{idx}\x00', span)
         return text
 
+    def _td_cell(cell: str) -> str:
+        """테이블 셀 변환. {bg:#RRGGBB}content 패턴이면 배경색 적용."""
+        m = re.match(r'\{bg:([^}]+)\}(.*)', cell.strip(), re.DOTALL)
+        if m:
+            color, content = m.group(1).strip(), m.group(2).strip()
+            return f'<td style="background-color: {color};">{_inline(content)}</td>'
+        return f'<td>{_inline(cell)}</td>'
+
     while i < len(lines):
         line = lines[i]
 
@@ -237,7 +250,7 @@ def md_to_confluence(md: str) -> str:
             html.append('<tr>' + ''.join(f'<th>{_inline(c)}</th>' for c in cells) + '</tr>')
             for row in rows:
                 rcells = [c.strip() for c in row.strip().strip('|').split('|')]
-                html.append('<tr>' + ''.join(f'<td>{_inline(c)}</td>' for c in rcells) + '</tr>')
+                html.append('<tr>' + ''.join(_td_cell(c) for c in rcells) + '</tr>')
             html.append('</tbody></table>')
             out.append('\n'.join(html))
             continue
@@ -310,62 +323,30 @@ def _save_registry(reg: dict) -> None:
     REGISTRY_PATH.write_text(json.dumps(reg, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-# ── PowerShell 경유 API 호출 ──────────────────────────────────────────────────
-
-def _run_ps(script: str) -> tuple[int, str]:
-    """PowerShell 스크립트를 실행하고 (returncode, stdout) 반환."""
-    result = subprocess.run(
-        ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-    return result.returncode, (result.stdout + result.stderr).strip()
-
+# ── Confluence REST API 호출 (Python requests 직접 호출) ──────────────────────
 
 def _confluence_request(method: str, url: str, token: str, body_json: str | None = None) -> tuple[int, dict]:
     """
-    Confluence REST API 호출 (PowerShell Invoke-RestMethod 경유).
-    body_json은 임시 파일로 전달해 이스케이프 문제를 회피한다.
+    Confluence REST API 호출.
+    Python requests → cron/WSL 환경 모두 동작 (powershell.exe 불필요).
     """
-    if body_json:
-        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json",
-                                          mode="w", encoding="utf-8")
-        tmp.write(body_json)
-        tmp.close()
-        # Windows 경로로 변환
-        win_path = subprocess.check_output(
-            ["wslpath", "-w", tmp.name], text=True).strip()
-        ps_body = f"(Get-Content -Raw -Path '{win_path}' -Encoding UTF8)"
-    else:
-        ps_body = "$null"
+    if not _HAS_REQUESTS:
+        raise RuntimeError("requests 패키지가 없습니다. pip install requests")
 
-    body_part = ""
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+    }
+    kwargs: dict = {"headers": headers, "timeout": 30}
     if body_json:
-        body_part = f"""
-$bodyStr = {ps_body}
-$bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyStr)"""
+        kwargs["data"] = body_json.encode("utf-8")
+        headers["Content-Type"] = "application/json; charset=utf-8"
 
-    ps = f"""
-$token = '{token}'
-$headers = @{{ Authorization = "Bearer $token"; Accept = "application/json" }}{body_part}
-try {{
-    $r = Invoke-RestMethod -Method {method} -Uri '{url}' -Headers $headers {'-Body $bodyBytes -ContentType "application/json; charset=utf-8"' if body_json else ''} -TimeoutSec 30
-    $r | ConvertTo-Json -Depth 10 -Compress
-}} catch {{
-    Write-Output "ERROR:$($_.Exception.Response.StatusCode.value__):$($_.Exception.Message)"
-}}
-"""
-    rc, out = _run_ps(ps)
-    if body_json:
-        Path(tmp.name).unlink(missing_ok=True)
-
-    if out.startswith("ERROR:"):
-        parts = out.split(":", 2)
-        status = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 500
-        return status, {"error": out}
+    resp = _requests.request(method, url, **kwargs)
     try:
-        return 200, json.loads(out)
+        return resp.status_code, resp.json()
     except Exception:
-        return 200, {"raw": out}
+        return resp.status_code, {"raw": resp.text}
 
 
 # ── 메인 로직 ─────────────────────────────────────────────────────────────────

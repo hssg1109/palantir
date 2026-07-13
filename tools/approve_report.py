@@ -286,17 +286,21 @@ def main() -> int:
     parser.add_argument("--repo",    required=True, help="레포 슬러그")
     parser.add_argument("--publish", action="store_true",
                         help="Confluence 자동 게시")
+    parser.add_argument("--parent", type=int, default=0, metavar="PAGE_ID",
+                        help="Confluence 부모 페이지 ID (생략 시 기본 OCB 진단 페이지 하위)")
     parser.add_argument("--title",   default=None,
                         help="Confluence 페이지 제목 (생략 시 {repo}-진단결과)")
     parser.add_argument("--force",    action="store_true",
                         help="/sec-review 완료 여부 게이트 강제 통과 (긴급 시에만 사용)")
-    parser.add_argument("--skip-sca", action="store_true",
-                        help="SCA(오픈소스 CVE) findings를 보고서·Jira 티켓에서 제외")
+    parser.add_argument("--skip-sca", action="store_true", default=True,
+                        help="SCA(오픈소스 CVE) findings를 보고서·Jira 티켓에서 제외 (기본: 제외)")
+    parser.add_argument("--include-sca", action="store_true",
+                        help="SCA findings를 보고서에 포함 (--skip-sca 기본값 override)")
     args = parser.parse_args()
 
     run_id   = args.run_id
     run_label = run_id if run_id else "(레포 단위)"
-    skip_sca  = args.skip_sca
+    skip_sca  = args.skip_sca and not args.include_sca
     _confluence_url = ""   # 게시 완료 후 채워짐 (audit 기록용)
     print(f"\n[approve] RUN_ID={run_label}  repo={args.repo}")
     if skip_sca:
@@ -380,6 +384,8 @@ def main() -> int:
                 cmd += ["--run-id", run_id]
             if args.title:
                 cmd += ["--title", args.title]
+            if args.parent:
+                cmd += ["--parent", str(args.parent)]
             if skip_sca:
                 cmd += ["--skip-sca"]
             r = _run(cmd)

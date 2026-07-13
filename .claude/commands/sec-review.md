@@ -50,7 +50,7 @@ SESSION_ID=$(python3 tools/audit_utils.py init-session \
 아래 4개 파일을 Read 도구로 순서대로 읽는다:
 
 1. `~/.claude/projects/-home-geunsolo-palantir/memory/feedback_conservative_security_policy.md`  
-   → Proxy XSS / SQL `${}` / SpEL StandardEvaluationContext → 입력 경로 무관 취약/High
+   → Proxy XSS / SQL `${}` / SpEL StandardEvaluationContext / 전역 XSS 필터 부재 → 입력 경로(또는 개별 XSS 확인 여부) 무관 취약/High
 2. `~/.claude/projects/-home-geunsolo-palantir/memory/feedback_hardcoded_credential_severity.md`  
    → 운영 동일 자격증명=취약/High, 별도 자격증명=취약/Medium
 3. `~/.claude/projects/-home-geunsolo-palantir/memory/feedback_log_dto_severity_standard.md`  
@@ -470,7 +470,7 @@ Phase 2는 `reviewed: true` + `review_status: "정탐"` 인 모든 finding에 �
 > 이 시점에 기준 파일을 재로드하지 않으면 report_expand 서술이 판정 기준과 달라질 수 있다.
 
 0c의 4개 파일을 **다시 Read**한다:
-1. `feedback_conservative_security_policy.md` — Proxy XSS/SQL ${}/SpEL 기준
+1. `feedback_conservative_security_policy.md` — Proxy XSS/SQL ${}/SpEL/전역 XSS 필터 부재 기준
 2. `feedback_hardcoded_credential_severity.md` — prod/dev 크레덴셜 기준
 3. `feedback_log_dto_severity_standard.md` — 운영LOG=High/debugLOG=Medium
 4. `feedback_severity_reporting_policy.md` — Informational → 최소 Medium
@@ -642,6 +642,33 @@ Confluence 페이지 업데이트 실패 시 → `notes`에 오류 기록 후 �
   (고객사 소스코드가 포함된 대화 컨텍스트를 만료시키기 위한 필수 절차입니다)
 ```
 
+### 5e. 전체양호 자동 처리 (레포 단위 모드 전용)
+
+> **적용 조건 (모두 충족 시에만 실행)**:
+> - **레포 단위 모드** (`run_id=None`, §0 인수 파싱 기준) — RUN_ID 모드에서는 실행하지 않는다.
+>   체크리스트(`docs/ocb_scan_plan.md`)는 레포 전체 현황을 추적하므로, skill 일부만 리뷰한 RUN_ID 모드 결과로
+>   전체양호를 단정하면 다른 skill의 미판정/정탐 건과 충돌할 수 있다.
+> - 이번 리뷰 세션 종료 시점 기준 **정탐 건수 == 0**
+> - **미판정(스킵) 건수 == 0** (전체 finding이 정탐 또는 오탐으로 판정 완료된 상태)
+
+Phase C-2 완료 직후, 위 조건을 모두 충족하면 자동 실행한다:
+
+```bash
+python3 tools/update_ocb_plan.py --all-clear <repo>
+```
+
+- `docs/ocb_scan_plan.md` 의 해당 레포 행 갱신: 보고서 컬럼 → `전체양호`, Jira 티켓 컬럼 → `{bg:#D4EDDA}전체양호`
+- 스크립트 내부에서 Confluence 페이지(pageId: `746439687`, "OCB 서비스 군 보안 진단 계획")까지 자동 동기화
+- 레포 행을 찾지 못하는 등 갱신 실패 시 `[WARN]` 출력 후 계속 진행 (사람 개입 불필요 — blocking 아님)
+- 조건 미충족(정탐 > 0 이거나 미판정 > 0 이거나 RUN_ID 모드) 시 이 단계 전체를 건너뛰고 Step 6으로 진행
+
+**완료 출력**:
+```
+[전체양호 처리] docs/ocb_scan_plan.md 갱신 + Confluence 동기화 완료
+  보고서    : 전체양호
+  Jira 티켓 : 전체양호
+```
+
 ### 6. 완료 요약
 
 RUN_ID 모드:
@@ -657,7 +684,7 @@ Confluence 게시 포함:
   python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
 ```
 
-레포 단위 모드:
+레포 단위 모드 (정탐 > 0 이거나 미판정 > 0 — 일반 케이스):
 
 ```
 === 리뷰 완료 ===
@@ -669,6 +696,16 @@ report_expand 생성: {N}건
 
 Confluence 게시 포함:
   python3 tools/approve_report.py --repo <repo> --publish
+```
+
+레포 단위 모드 (정탐 0건 + 미판정 0건 — §5e 전체양호 자동 처리 실행됨):
+
+```
+=== 리뷰 완료 ===
+정탐: 0건  /  오탐: {N}건  /  미판정: 0건
+
+전체양호 처리 완료 — docs/ocb_scan_plan.md 및 Confluence(pageId: 746439687) 갱신됨
+approve_report.py 실행 불필요 (정탐 finding 없음)
 ```
 
 ### 주의 사항

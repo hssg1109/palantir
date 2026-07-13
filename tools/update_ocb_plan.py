@@ -128,9 +128,15 @@ def mark_done(repo: str, skills: list[str], date: str | None = None) -> int:
 def mark_jira_ticket(repo: str, jira_key: str) -> int:
     """
     ocb_scan_plan.md 내 해당 repo의 Jira 티켓 컬럼을 갱신한다.
-    jira_key: 'PROJ-1234' 형식 또는 '—' (미발행/거절)
+    jira_key: 'PROJ-1234' 형식 → [JIRA:PROJ-1234] 로 저장 (Confluence Jira 매크로 변환용)
+              '—' → 미발행/거절 표시
     반환: 변경된 셀 수.
     """
+    # Confluence Jira 매크로로 변환되는 형식: [JIRA:KEY]
+    # '—' 등 특수값은 그대로 유지
+    import re as _re
+    cell_value = f"[JIRA:{jira_key}]" if _re.match(r'^[A-Z]+-\d+$', jira_key) else jira_key
+
     text = PLAN_MD.read_text(encoding="utf-8")
     lines = text.splitlines()
     new_lines = []
@@ -141,8 +147,8 @@ def mark_jira_ticket(repo: str, jira_key: str) -> int:
             cells = line.split("|")
             if len(cells) > JIRA_COL_IDX:
                 current = cells[JIRA_COL_IDX].strip()
-                if current != jira_key:
-                    cells[JIRA_COL_IDX] = f" {jira_key} "
+                if current != cell_value:
+                    cells[JIRA_COL_IDX] = f" {cell_value} "
                     changed += 1
             line = "|".join(cells)
         new_lines.append(line)
@@ -360,6 +366,29 @@ def _append_sca_only_record(repo: str, sca_count: int, date: str) -> None:
     print(f"[OK] ocb_scan_plan.md — SCA 전용 누적 기록: {repo} ({sca_count}건, {date})")
 
 
+# ── 전체양호 처리 ─────────────────────────────────────────────────────────────
+
+def mark_all_clear(repo: str, date: str | None = None) -> None:
+    """
+    정탐 0건(전체양호) 케이스를 ocb_scan_plan.md에 반영한다.
+    1. 보고서 컬럼 → '전체양호'
+    2. Jira 티켓 컬럼 → '{bg:#D4EDDA}전체양호'
+    3. Confluence 동기화
+    """
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+
+    n1 = mark_report(repo, "전체양호")
+    n2 = mark_jira_ticket(repo, "{bg:#D4EDDA}전체양호")
+
+    if n1 or n2:
+        print(f"[OK] {repo} — 보고서/Jira 티켓 컬럼 → '전체양호' ({date})")
+    else:
+        print(f"[WARN] {repo}: 갱신할 항목을 찾지 못했습니다 (레포 미발견이거나 이미 '전체양호').")
+
+    sync_confluence()
+
+
 # ── Confluence 동기화 ─────────────────────────────────────────────────────────
 
 def sync_confluence() -> bool:
@@ -445,6 +474,12 @@ def main():
         "--sca-only", nargs=2, metavar=("REPO", "SCA_COUNT"),
         help="SCA 전용 케이스 누적 기록. SAST 양호 + SCA 취약 존재 시 사용.\n"
              "예: --sca-only ocb-iam 7",
+    )
+    parser.add_argument(
+        "--all-clear", metavar="REPO",
+        help="전체양호 처리. 정탐 0건(레포 단위 모드)인 경우 사용.\n"
+             "보고서/Jira 티켓 컬럼을 모두 '전체양호'로 갱신 + Confluence 동기화.\n"
+             "예: --all-clear ocb-gpb",
     )
     args = parser.parse_args()
 
@@ -539,6 +574,11 @@ def main():
             print(f"[ERROR] SCA_COUNT는 정수여야 합니다: {sca_count_str}", file=sys.stderr)
             sys.exit(1)
         mark_sca_only(repo, sca_count)
+        return
+
+    # ── --all-clear ───────────────────────────────────────────────────────────
+    if args.all_clear:
+        mark_all_clear(args.all_clear, date=args.date)
         return
 
     parser.print_help()

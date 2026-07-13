@@ -19,6 +19,10 @@
 | 진단일 | 고객사/프로젝트 | 레포 | Skill | LLM 접근 파일 수 | testbed 삭제 | state 감사 | gitleaks redact | 세션 종료 | 완료 | 로그 위치 |
 |:---:|---|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|---|
 | (예시) 2026-04-30 | OCB / OCBWEBVIEW | ocb-community-api | injection | 5 | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-community-api_20260430_1400/llm_data_access_log.json |
+| 2026-06-23 | OCB / OCBSUGAR | ocb-gpb | all (injection/xss/file/data) | 0 | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-gpb/llm_data_access_log.json |
+| 2026-06-17 | OCB / bms_admin | bms_admin | all (injection/xss/file/data) | 6 | ✅ | ✅ | ✅ | ☐ | ☐ | state/bms_admin/llm_data_access_log.json |
+| 2026-06-23 | OCBSUGAR / fail-info | fail-info | all (injection/xss/file/data) | 0 | ✅ | ✅ | ✅ | ☐ | ☐ | state/fail-info/llm_data_access_log.json |
+| 2026-06-03 | OCB / ocb_passbook_enc | ocb_passbook_enc | all (injection/xss/file/data) | 5 | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb_passbook_enc/llm_data_access_log.json |
 
 <!-- 실제 이력은 위 예시 행 아래에 추가 -->
 
