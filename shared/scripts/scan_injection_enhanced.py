@@ -1597,15 +1597,20 @@ def _resolve_impl_class(class_name: str, class_index: dict,
             return class_index[bare_name]
 
     # 3. implements / Kotlin ':' 검색 (비용이 높으므로 최후 수단)
+    # NOTE: [^{]*:\s*[^{]* 패턴은 catastrophic backtracking 유발 — class 헤더만 추출 후 검색
     for cls_name, file_path in class_index.items():
         if cls_name == class_name:
             continue
         try:
             content = file_path.read_text(encoding="utf-8", errors="replace")
+            # 빠른 선검증: 파일에 인터페이스명 자체가 없으면 스킵
+            if class_name not in content:
+                continue
             if re.search(rf'\bimplements\s+[^{{]*\b{re.escape(class_name)}\b', content):
                 return file_path
-            if re.search(
-                    rf'\bclass\s+\w+[^{{]*:\s*[^{{]*\b{re.escape(class_name)}\b', content):
+            # Kotlin ':' 패턴 — class 헤더(첫 '{' 이전)만 슬라이스해서 검색 (백트래킹 방지)
+            hdr_m = re.search(r'\bclass\s+\w+[^{]*\{', content, re.DOTALL)
+            if hdr_m and re.search(rf'\b{re.escape(class_name)}\b', hdr_m.group(0)):
                 return file_path
         except (IOError, UnicodeDecodeError):
             continue

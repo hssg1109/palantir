@@ -163,7 +163,7 @@ Auto-Scan Step 3 또는 LLM-Check 완료 후 `xss_filter_assessment.filter_level
 | 필드 | 값 |
 |------|-----|
 | `finding_type` | `"structural"` |
-| `severity` | `"Medium"` (기본) — 동반 Persistent/Reflected XSS 취약점 존재 시 `"High"` 상향 |
+| `severity` | `"High"` (보수적 기준 고정 — `feedback_conservative_security_policy.md` #4. 개별 Persistent/Reflected XSS 정탐 여부와 무관하게 전역 방어 계층 부재 자체를 High로 판정) |
 | `category` | `"XSS 필터 미구현"` |
 | `cwe_id` | `"CWE-693"` (Protection Mechanism Failure) |
 | `owasp_category` | `"A05:2021 Security Misconfiguration"` |
@@ -183,7 +183,11 @@ Auto-Scan Step 3 또는 LLM-Check 완료 후 `xss_filter_assessment.filter_level
 **recommendation (표준)**:
 ```
 Lucy XSS Servlet Filter(naver/lucy-xss-servlet) 또는 OWASP AntiSamy를 Spring Security Filter Chain에 전역 등록하십시오. 전역 필터 적용 시 <동반_XSS_ID_목록> 등 개별 엔드포인트 취약점에 대한 방어 심도가 추가됩니다.
+
+단, 전역 필터를 무조건적으로 전체 URL 패턴에 일괄 적용할 경우 정상 요청까지 이스케이프/차단되어 서비스 장애로 이어질 수 있습니다. 서비스 영향도를 사전에 분석(rich text/HTML 입력 허용 API 존재 여부, 기존 정상 요청 파라미터에 `<`, `>`, `&` 등 특수문자가 포함되는 케이스 존재 여부 등)한 뒤, 장애 없는 범위 내에서 단계적으로 적용(예: 스테이징 환경 우선 적용 → 예외 URL 화이트리스트 구성 → 운영 반영)하거나, 즉시 전역 적용이 어려운 경우 우선 담당 개발팀의 영향도 확인이 필요합니다.
 ```
+
+> **필수 워딩**: 위 recommendation 문구는 severity가 High로 고정되어 즉각 조치가 요구되는 것으로 오인되지 않도록, **"서비스 영향도 고려", "장애 없는 범위 내 조치 권고" 또는 "(서비스 담당팀) 확인 필요"** 중 하나 이상의 표현을 반드시 포함한다. 자유 서술로 대체 작성하더라도 이 문구의 취지(전역 필터 일괄 적용 시 정상 요청 차단·서비스 장애 가능성)는 생략하지 않는다.
 
 **report_expand (표준)**:
 ```markdown
@@ -203,6 +207,10 @@ Lucy XSS Servlet Filter(naver/lucy-xss-servlet) 또는 OWASP AntiSamy를 Spring 
 | OWASP AntiSamy | 미적용 | 소스코드 전체 미사용 |
 | ESAPI | 미적용 | 소스코드 전체 미사용 |
 | 커스텀 XSS Filter | 미적용 | WebSecurityConfiguration 내 미등록 |
+
+## 조치 시 고려사항
+
+전역 필터를 URL 패턴 `/*`로 일괄 적용할 경우 정상 요청까지 이스케이프·차단되어 서비스 장애가 발생할 수 있다. 적용 전 서비스 영향도(HTML/rich text 입력 허용 API 존재 여부 등)를 확인하고, 장애 없는 범위 내에서 단계적으로 적용할 것을 권고한다.
 ```
 
 ---
