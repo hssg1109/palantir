@@ -40,14 +40,35 @@ BB_REMOTE_URL = os.environ.get("AUDIT_RESULT_REPO_URL", "")
 
 # PowerShell 실행 파일 (WSL에서 접근)
 PSEXE      = "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe"
+
+
+def _resolve_win_temp() -> tuple[Path, str]:
+    """사용자 소유 %TEMP%를 동적 조회.
+    C:\\Windows\\Temp는 도메인 PC 정책상 일반 계정에 삭제 권한이 없는 경우가 있어
+    (BUILTIN\\Users: CreateFiles/AppendData만 허용) git workspace로 부적합하다."""
+    try:
+        result = subprocess.run(
+            [PSEXE, "-NoProfile", "-NonInteractive", "-Command", "$env:TEMP"],
+            capture_output=True, text=True, timeout=15,
+        )
+        win_temp = result.stdout.strip()
+        if win_temp and ":\\" in win_temp:
+            drive, rest = win_temp.split(":\\", 1)
+            return Path(f"/mnt/{drive.lower()}/{rest.replace(chr(92), '/')}"), win_temp
+    except Exception:
+        pass
+    return Path("/mnt/c/Windows/Temp"), "C:\\Windows\\Temp"
+
+
+_TEMP_WSL, _TEMP_WIN = _resolve_win_temp()
 # git workspace (clone of audit_result, git 전용)
-WS_WSL     = Path("/mnt/c/Windows/Temp/audit_result_ws")
-WS_WIN     = "C:\\Windows\\Temp\\audit_result_ws"
+WS_WSL     = _TEMP_WSL / "audit_result_ws"
+WS_WIN     = f"{_TEMP_WIN}\\audit_result_ws"
 # staging area (Python이 state/ 파일을 여기에 복사, PowerShell이 workspace로 이동)
-STAGE_WSL  = Path("/mnt/c/Windows/Temp/audit_result_stage")
-STAGE_WIN  = "C:\\Windows\\Temp\\audit_result_stage"
-PS_TMP_WSL = Path("/mnt/c/Windows/Temp/push_audit_result.ps1")
-PS_TMP_WIN = "C:\\Windows\\Temp\\push_audit_result.ps1"
+STAGE_WSL  = _TEMP_WSL / "audit_result_stage"
+STAGE_WIN  = f"{_TEMP_WIN}\\audit_result_stage"
+PS_TMP_WSL = _TEMP_WSL / "push_audit_result.ps1"
+PS_TMP_WIN = f"{_TEMP_WIN}\\push_audit_result.ps1"
 
 
 def _load_env() -> dict:
@@ -158,7 +179,10 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
         print("  [ERROR] .env에 BITBUCKET_TOKEN 미설정")
         return 1
 
-    authed_url = BB_REMOTE_URL.replace("https://", f"https://x-token-auth:{token}@")
+    remote_url = env.get("AUDIT_RESULT_REPO_URL", "") or BB_REMOTE_URL
+    if not remote_url:
+        print("  [ERROR] .env에 AUDIT_RESULT_REPO_URL 미설정")
+        return 1
 
     # 파일 수집
     findings     = _collect_findings(repo, run_id)
@@ -212,7 +236,7 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
         "$OutputEncoding = [System.Text.Encoding]::UTF8",
         "$ErrorActionPreference = 'Continue'",
         "$env:PATH = 'C:\\Program Files\\Git\\bin;C:\\Program Files\\Git\\cmd;' + $env:PATH",
-        f"$remote = '{BB_REMOTE_URL}'",
+        f"$remote = '{remote_url}'",
         f"$ws     = '{WS_WIN}'",
         "",
         "# workspace 초기화 (3-case: 없음/git있음/파일만있음)",
@@ -220,7 +244,12 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
         f"    git {git_auth} clone $remote $ws",
         "    if ($LASTEXITCODE -ne 0) { Write-Error 'clone 실패'; exit $LASTEXITCODE }",
         "} elseif (Test-Path \"$ws\\.git\") {",
-        f"    git -C $ws {git_auth} pull $remote 2>&1 | Out-Null",
+        f"    git -C $ws {git_auth} fetch $remote main:refs/remotes/origin/main --force 2>&1 | Out-Null",
+        "    if ($LASTEXITCODE -ne 0) {",
+        "        Remove-Item -Recurse -Force $ws",
+        f"        git {git_auth} clone $remote $ws",
+        "        if ($LASTEXITCODE -ne 0) { Write-Error 'clone 실패'; exit $LASTEXITCODE }",
+        "    }",
         "} else {",
         "    $tmp = \"${ws}_tmp\"",
         "    if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }",
@@ -230,6 +259,13 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
         "    Remove-Item -Recurse -Force $tmp",
         "    git -C $ws reset origin/main --mixed 2>&1 | Out-Null",
         "}",
+        "# 원격 HEAD symref가 존재하지 않는 브랜치(예: master)를 가리키는 경우가 있어",
+        "# 로컬 브랜치를 origin/main 기준으로 강제 정렬 (root-commit/non-fast-forward push 방지)",
+        "# checkout -B만으로는 더러워진 워킹트리(이전 run의 미커밋 잔여물)가 유지될 수 있어",
+        "# reset --hard + clean -fd로 origin/main과 완전히 동일한 상태로 강제 초기화",
+        "git -C $ws checkout -B main origin/main 2>&1 | Out-Null",
+        "git -C $ws reset --hard origin/main 2>&1 | Out-Null",
+        "git -C $ws clean -fd 2>&1 | Out-Null",
         "git -C $ws config core.autocrlf false",
         "",
         "# stage → workspace 복사",
