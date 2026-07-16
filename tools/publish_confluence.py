@@ -360,6 +360,7 @@ def publish(
     base_url: str,
     token: str,
     dry_run: bool = False,
+    force: bool = False,
 ) -> str | None:
     """마크다운을 Confluence에 게시/갱신. page_id 반환."""
 
@@ -374,14 +375,31 @@ def publish(
     if page_id:
         # ── 기존 페이지 갱신 ────────────────────────────────────────────
         print(f"[UPDATE] 페이지 갱신 중 (id={page_id}) ...")
-        # 현재 버전 조회
+        # 현재 버전 + 본문 조회 (덮어쓰기 전 데이터 유실 감지용)
         _, curr = _confluence_request("GET",
-            f"{base_url}/rest/api/content/{page_id}?expand=version",
+            f"{base_url}/rest/api/content/{page_id}?expand=version,body.storage",
             token)
         if "error" in curr:
             print(f"[ERROR] 현재 버전 조회 실패: {curr}", file=sys.stderr)
             return None
         version = curr.get("version", {}).get("number", 1) + 1
+
+        # ── 데이터 유실(row 축소) 감지 가드 ──────────────────────────────
+        # 로컬 파일(cf_body)이 라이브 페이지보다 표 row 수가 크게 적으면
+        # 그대로 PUT 시 라이브에만 존재하던 데이터가 통째로 사라질 수 있음.
+        # (2026-07-15 클렌징 레지스트리 데이터 유실 사고 재발 방지)
+        live_body  = curr.get("body", {}).get("storage", {}).get("value", "")
+        live_rows  = live_body.count("<tr>") + live_body.count("<tr ")
+        new_rows   = cf_body.count("<tr>") + cf_body.count("<tr ")
+        if not force and live_rows > 0 and new_rows < live_rows * 0.8:
+            print(
+                f"[BLOCKED] 라이브 페이지 표 row 수({live_rows}) 대비 "
+                f"로컬 변환 결과 row 수({new_rows})가 크게 축소됨 — 덮어쓰기 시 "
+                f"라이브에만 존재하는 데이터가 유실될 위험. "
+                f"의도된 축소라면 --force 로 재실행하세요.",
+                file=sys.stderr,
+            )
+            return None
 
         payload = json.dumps({
             "version": {"number": version},
@@ -433,6 +451,8 @@ def main():
     parser.add_argument("--page-id", default=None, help="기존 페이지 ID (갱신 시)")
     parser.add_argument("--space",   default=None, help="Confluence Space Key (기본: .env CONFLUENCE_SPACE_KEY)")
     parser.add_argument("--dry-run", action="store_true", help="API 호출 없이 변환 결과만 출력")
+    parser.add_argument("--force", action="store_true",
+                        help="라이브 페이지 대비 row 축소 감지 가드를 무시하고 강제 덮어쓰기")
     args = parser.parse_args()
 
     env = _load_env()
@@ -463,6 +483,7 @@ def main():
         base_url = base_url,
         token    = token,
         dry_run  = args.dry_run,
+        force    = args.force,
     )
 
     if new_id and not args.dry_run:
