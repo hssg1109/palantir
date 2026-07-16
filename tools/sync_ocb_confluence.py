@@ -47,6 +47,8 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="API 호출 없이 변환 결과만 출력")
     parser.add_argument("--only", choices=["scan_plan", "cleansing"],
                         default=None, help="특정 페이지만 동기화")
+    parser.add_argument("--force", action="store_true",
+                        help="라이브 페이지 대비 row 축소 감지 가드를 무시하고 강제 덮어쓰기")
     args = parser.parse_args()
 
     env = _load_env()
@@ -80,6 +82,7 @@ def main() -> int:
             base_url  = base_url,
             token     = token,
             dry_run   = args.dry_run,
+            force     = args.force,
         )
 
         if result and not args.dry_run:
