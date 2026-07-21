@@ -10,7 +10,8 @@ generate_final_report.py — Confluence 게시용 최종 보안 진단 보고서
 
 입력:
     state/<repo>/<skill>/<RUN_ID>/findings_*.json  (llm_checked: true 파일만)
-    testbed/<repo>/.clone_info.json                (레포 메타데이터)
+    state/<repo>/repo_meta.json                    (레포 메타데이터 — clone_repo.py가 clone 시 기록, testbed 삭제 후에도 유지)
+    testbed/<repo>/.clone_info.json                (레포 메타데이터 — repo_meta.json 없을 때 fallback)
 
 출력:
     logs/final_<repo>_<RUN_ID>.md  (마크다운 — Confluence :::expand 매크로 포함)
@@ -36,6 +37,20 @@ STATE_DIR      = PALANTIR_DIR / "state"
 LOGS_DIR       = PALANTIR_DIR / "logs"
 TESTBED_DIR    = PALANTIR_DIR / "testbed"
 DOCS_DIR       = PALANTIR_DIR / "docs"
+
+
+def _load_env() -> dict:
+    """.env 파싱 (CONFLUENCE_PARENT_ID 기본값 조회용)."""
+    env: dict = {}
+    env_path = PALANTIR_DIR / ".env"
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            env[k.strip()] = v.strip()
+    return env
 
 SEVERITY_ORDER = ["Critical", "High", "Medium", "Low", "Informational"]
 SEVERITY_KR    = {
@@ -202,6 +217,22 @@ def _clean_title(title: str) -> str:
 # ── 데이터 수집 ───────────────────────────────────────────────────────────────
 
 def load_clone_info(repo: str) -> dict:
+    """레포 메타데이터(Bitbucket 프로젝트/저장소/브랜치/커밋/담당자) 로드.
+
+    우선순위:
+      1) state/<repo>/repo_meta.json   — clone_repo.py가 clone 시점에 남기는 영속 저장소.
+         testbed 삭제(클렌징) 이후에도 살아남는 유일한 1차 소스.
+      2) testbed/<repo>/.clone_info.json — testbed가 아직 살아있는 세션 중간 상태.
+      3) state/<repo>/*/scan_meta.json — 레거시 new_scan.py 파이프라인 산출물 (구버전 레포 fallback).
+      4) {} — 완전 누락. 호출부(main)에서 경고 처리.
+    """
+    p = STATE_DIR / repo / "repo_meta.json"
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
     p = TESTBED_DIR / repo / ".clone_info.json"
     if p.exists():
         try:
@@ -931,7 +962,16 @@ def render_markdown(
     clone_url     = clone_info.get("clone_url", "—")
     cloned_at     = (clone_info.get("cloned_at") or "")[:10] or "—"
     project       = clone_info.get("project", "—")
-    maintainer    = clone_info.get("last_commit_author") or "—"
+    maintainer    = clone_info.get("maintainer") or clone_info.get("last_commit_author") or "—"
+    _m_count      = clone_info.get("maintainer_commit_count")
+    _m_window     = clone_info.get("maintainer_window_months")
+    _m_anchor     = clone_info.get("maintainer_window_anchor")
+    _maintainer_display = (
+        f"{maintainer} (최근 커밋 {_m_anchor} 기준 {_m_window}개월 내 커밋 {_m_count}건)"
+        if _m_count else maintainer
+    )
+    _reviewers_hint = clone_info.get("reviewers_hint")
+    _reviewers_hint_display = ", ".join(_reviewers_hint) if _reviewers_hint else ""
     exposure_type = load_service_exposure(repo)
     review_meta   = load_review_meta(repo)
 
@@ -952,7 +992,8 @@ def render_markdown(
         f"| 소스코드 저장소 | {clone_url} |" if clone_url != "—" else "| 소스코드 저장소 | — |",
         f"| 진단 브랜치 | {branch} |",
         f"| 커밋 해시 | `{commit[:12]}` |" if commit != "—" else f"| 커밋 해시 | — |",
-        f"| *담당자 | {maintainer} |",
+        f"| *담당자 | {_maintainer_display} |",
+    ] + ([f"| 참고: 지정 리뷰어 | {_reviewers_hint_display} |"] if _reviewers_hint_display else []) + [
         f"| 보고서 생성일 | {now} |",
         f"| RUN_ID | `{run_id}` |",
         f"| 진단 유형 | SAST (정적 분석) + LLM 교차검증 |",
@@ -1095,6 +1136,9 @@ def main() -> int:
                         help="SCA(오픈소스 CVE) findings를 보고서에서 제외 (기본: 제외)")
     parser.add_argument("--include-sca", action="store_true",
                         help="SCA findings를 보고서에 포함 (--skip-sca 기본값 override)")
+    parser.add_argument("--allow-missing-meta", action="store_true",
+                        help="레포 메타데이터(Bitbucket 프로젝트/브랜치/커밋/담당자) 누락 상태로도 "
+                             "--publish 강행 (기본: 누락 시 게시 차단)")
     args = parser.parse_args()
 
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1108,7 +1152,20 @@ def main() -> int:
         print(f"[최종보고서] SCA findings 제외 (포함하려면 --include-sca)")
 
     clone_info = load_clone_info(args.repo)
-    data       = collect_findings(args.run_id, args.repo, skip_sca=skip_sca)
+
+    meta_missing = not clone_info or not (clone_info.get("branch") or clone_info.get("commit_hash"))
+    if meta_missing:
+        print(f"\n[WARN] 레포 메타데이터 누락 — Bitbucket 프로젝트/저장소/브랜치/커밋/담당자가 "
+              f"보고서에 '—'로 표시됩니다.")
+        print(f"       state/{args.repo}/repo_meta.json, testbed/{args.repo}/.clone_info.json 모두 없음.")
+        print(f"       조치: python3 tools/clone_repo.py <PROJECT> {args.repo}  (재실행 후 재생성)")
+        if args.publish and not args.allow_missing_meta:
+            print(f"\n[GATE ERROR] 메타데이터 누락 상태에서 --publish 차단됨.")
+            print(f"  → 위 clone_repo.py 명령으로 메타데이터를 먼저 채운 뒤 재실행하세요.")
+            print(f"  → 부득이하게 메타데이터 없이 게시하려면 --allow-missing-meta 플래그를 추가하세요.")
+            return 1
+
+    data = collect_findings(args.run_id, args.repo, skip_sca=skip_sca)
 
     total = sum(len(v) for v in data.values())
     print(f"[최종보고서] {len(data)}개 스킬  {total}건 findings")
@@ -1125,8 +1182,7 @@ def main() -> int:
         if not publish_script.exists():
             print(f"[WARN] publish_confluence.py 없음 — --publish 건너뜀")
             return 0
-        title = args.title or f"{args.repo}-진단결과"
-        print(f"\n[Confluence] 게시 중: {title}  (parent: {args.parent})")
+
         # 레지스트리에서 기존 page_id 조회 (exact key 매칭) — 없으면 CREATE, 있으면 UPDATE
         # prefix 매칭은 다른 RUN_ID의 기존 페이지를 덮어쓰므로 exact key만 사용한다
         reg_path = PALANTIR_DIR / "docs" / ".confluence_pages.json"
@@ -1136,8 +1192,24 @@ def main() -> int:
             reg = _json.loads(reg_path.read_text(encoding="utf-8"))
             exact_key = f"logs/final_{args.repo}_{run_id_label}.md"
             existing_page_id = reg.get(exact_key)
-        cmd = [sys.executable, str(publish_script), str(out_path), "--title", title,
-               "--parent", str(args.parent)]
+
+        # --parent 미지정(0) 시 .env CONFLUENCE_PARENT_ID로 fallback.
+        # UPDATE(기존 page_id 존재)는 위치 이동이 아니므로 parent 없이도 허용하되,
+        # CREATE(신규 페이지)는 parent 없이 게시하면 최상위(ancestors=[]) 고아 페이지가 되므로 차단한다.
+        parent = args.parent
+        if not parent:
+            parent = int(_load_env().get("CONFLUENCE_PARENT_ID", 0) or 0)
+        if not parent and not existing_page_id:
+            print(f"\n[GATE ERROR] 신규 페이지 게시인데 부모 페이지 ID가 없습니다.")
+            print(f"  → --parent <PAGE_ID> 를 직접 지정하거나, .env에 CONFLUENCE_PARENT_ID를 설정하세요.")
+            print(f"  → 부모 없이 게시하면 Confluence 최상위(고아 페이지)로 생성됩니다.")
+            return 1
+
+        title = args.title or f"{args.repo}-진단결과"
+        print(f"\n[Confluence] 게시 중: {title}  (parent: {parent or '(기존 페이지 위치 유지)'})")
+        cmd = [sys.executable, str(publish_script), str(out_path), "--title", title]
+        if parent:
+            cmd += ["--parent", str(parent)]
         if existing_page_id:
             cmd += ["--page-id", str(existing_page_id)]
         subprocess.run(cmd, cwd=str(PALANTIR_DIR))

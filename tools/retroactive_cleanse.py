@@ -27,7 +27,7 @@ BASE_DIR = Path(__file__).parent.parent
 STATE_DIR = BASE_DIR / "state"
 TESTBED_DIR = BASE_DIR / "testbed"
 
-CONFLUENCE_PAGE_ID = os.environ.get("CONFLUENCE_REGISTRY_PAGE_ID", "")
+CONFLUENCE_PAGE_ID = ""  # main()에서 load_dotenv() 이후 실제 값으로 설정됨
 SKILLS = ["injection", "xss", "file", "data", "sca"]
 
 KST = timezone(timedelta(hours=9))
@@ -41,7 +41,18 @@ def get_project(repo: str) -> str:
     """레포의 Bitbucket project 키 추출."""
     repo_dir = STATE_DIR / repo
 
-    # 1) vuln_registry.json의 service_meta.bb_project
+    # 1) repo_meta.json의 project (clone_repo.py가 clone 시점에 기록하는 정식 소스)
+    rm = repo_dir / "repo_meta.json"
+    if rm.exists():
+        try:
+            d = json.loads(rm.read_text())
+            p = d.get("project", "")
+            if p:
+                return p
+        except Exception:
+            pass
+
+    # 2) vuln_registry.json의 service_meta.bb_project
     vr = repo_dir / "vuln_registry.json"
     if vr.exists():
         try:
@@ -52,7 +63,7 @@ def get_project(repo: str) -> str:
         except Exception:
             pass
 
-    # 2) scan_meta.json의 bb_project
+    # 3) scan_meta.json의 bb_project
     for sm in sorted(repo_dir.glob("20*/scan_meta.json")):
         try:
             d = json.loads(sm.read_text())
@@ -133,11 +144,27 @@ def check_scan_redact(repo: str) -> tuple[bool, str]:
     return False, "data skill 미실행"
 
 
+def backfill_repo_meta(repo: str, dry_run: bool) -> None:
+    """testbed/<repo>/.clone_info.json → state/<repo>/repo_meta.json 백업.
+    testbed 삭제 전 마지막 기회 — 없으면 삭제 후 레포 메타데이터가 영구 유실된다."""
+    clone_info = TESTBED_DIR / repo / ".clone_info.json"
+    repo_meta = STATE_DIR / repo / "repo_meta.json"
+    if not clone_info.exists() or repo_meta.exists():
+        return
+    if dry_run:
+        print(f"  [DRY-RUN] repo_meta.json 백업 예정: {clone_info} → {repo_meta}")
+        return
+    repo_meta.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(clone_info, repo_meta)
+    print(f"  [+] repo_meta.json 백업: {repo_meta}")
+
+
 def delete_testbed(repo: str, dry_run: bool) -> tuple[bool, str]:
     """testbed/<repo>/ 삭제."""
     tb_path = TESTBED_DIR / repo
     if not tb_path.exists():
         return True, "이미 삭제됨"
+    backfill_repo_meta(repo, dry_run)
     if dry_run:
         return True, f"[DRY-RUN] 삭제 예정: {tb_path}"
     try:
@@ -360,6 +387,8 @@ def main():
     load_dotenv(BASE_DIR / ".env")
     confluence_token = os.environ.get("CONFLUENCE_TOKEN", "")
     confluence_base = os.environ.get("CONFLUENCE_BASE_URL", "https://wiki.skplanet.com")
+    global CONFLUENCE_PAGE_ID
+    CONFLUENCE_PAGE_ID = os.environ.get("CONFLUENCE_REGISTRY_PAGE_ID", "")
 
     if args.dry_run:
         print("[DRY-RUN 모드] 실제 변경 없이 시뮬레이션합니다.\n")

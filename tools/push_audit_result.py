@@ -111,6 +111,12 @@ def _collect_findings(repo: str, run_id: str | None) -> list[Path]:
     return paths
 
 
+def _collect_repo_meta(repo: str) -> Path | None:
+    """repo 레벨(run_id 무관) 메타데이터 — clone_repo.py가 clone 시점에 기록."""
+    meta = STATE_DIR / repo / "repo_meta.json"
+    return meta if meta.exists() else None
+
+
 def _collect_scan_meta(repo: str, run_id: str | None) -> Path | None:
     repo_dir = STATE_DIR / repo
     if not repo_dir.is_dir():
@@ -188,6 +194,7 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
     findings     = _collect_findings(repo, run_id)
     scan_meta    = _collect_scan_meta(repo, run_id)
     final_report = _collect_final_report(repo, run_id)
+    repo_meta    = _collect_repo_meta(repo)
 
     if not findings:
         print(f"  [ERROR] findings 파일 없음 — state/{repo}/*/")
@@ -221,12 +228,20 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
     else:
         print("  [-] final_*.md — 없음, 생략")
 
+    if repo_meta:
+        # repo_meta.json은 run_id와 무관한 repo 레벨 파일 — 날짜 폴더가 아닌 <repo>/ 루트에 저장
+        shutil.copy2(repo_meta, STAGE_WSL / repo / "repo_meta.json")
+        print(f"  [+] repo_meta.json (repo 레벨)")
+        copied.append("repo_meta.json")
+    else:
+        print("  [-] repo_meta.json — 없음, 생략")
+
     print(f"\n  파일 복사 완료 ({len(copied)}개), PowerShell git push 실행 중...")
 
     subfolder  = f"{repo}\\{folder_name}"
     commit_msg = f"feat: {repo} 진단이력 업로드 ({folder_name})"
 
-    stage_subfolder = f"{STAGE_WIN}\\{subfolder}"
+    stage_repo_dir = f"{STAGE_WIN}\\{repo}"
     git_auth = f"-c credential.helper= -c \"http.extraHeader=Authorization: Bearer {token}\""
 
     # PowerShell 스크립트: workspace 자동 관리 + stage 복사 + commit + push
@@ -268,15 +283,15 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
         "git -C $ws clean -fd 2>&1 | Out-Null",
         "git -C $ws config core.autocrlf false",
         "",
-        "# stage → workspace 복사",
-        f"$stageDir = '{stage_subfolder}'",
-        f"$destDir  = \"$ws\\{subfolder}\"",
-        "if (Test-Path $stageDir) {",
-        "    New-Item -ItemType Directory -Force $destDir | Out-Null",
-        "    Copy-Item -Recurse -Force \"$stageDir\\*\" \"$destDir\\\" -ErrorAction SilentlyContinue",
+        "# stage → workspace 복사 (레포 루트 전체: 날짜 폴더 + repo_meta.json)",
+        f"$stageRepoDir = '{stage_repo_dir}'",
+        f"$destRepoDir  = \"$ws\\{repo}\"",
+        "if (Test-Path $stageRepoDir) {",
+        "    New-Item -ItemType Directory -Force $destRepoDir | Out-Null",
+        "    Copy-Item -Recurse -Force \"$stageRepoDir\\*\" \"$destRepoDir\\\" -ErrorAction SilentlyContinue",
         "}",
         "",
-        f"git -C $ws add '{subfolder}\\'",
+        f"git -C $ws add '{repo}\\'",
         f"git -C $ws commit -m '{commit_msg}'",
         "$commitExit = $LASTEXITCODE",
         "if ($commitExit -eq 0) {",
@@ -302,7 +317,7 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
     else:
         print(f"  [WARN] git push 실패 (returncode={rc}) — 파일은 {WS_WIN}\\{repo}\\{folder_name}\\ 에 보존됨")
         print("  수동 push (Windows PowerShell):")
-        print(f"    git -C \"{WS_WIN}\" add \"{subfolder}\\\"")
+        print(f"    git -C \"{WS_WIN}\" add \"{repo}\\\"")
         print(f"    git -C \"{WS_WIN}\" commit -m \"{commit_msg}\"")
         print(f"    git -C \"{WS_WIN}\" push")
         return 2

@@ -131,6 +131,7 @@ skill별로 RUN_ID 내림차순(최신) 파일 하나씩 선택:
 === 서비스 특징 (기존 데이터) ===
 {service_characteristics 값}
 추가 진단 필요 여부: 필요 / 불필요
+추가 진단 유형     : {additional_diagnosis_types 값, 없으면 "—"}
 ============================
 업데이트하시겠습니까?
   y  →  서비스 특징 LLM 재분석 + 추가 진단 여부 재입력
@@ -172,6 +173,35 @@ n  또는 Enter  →  불필요
 판정 [y/n/Enter]:
 ```
 
+**추가 진단 유형 입력** (`y` 입력 시에만 진행, `n`/Enter 면 이 단계 스킵):
+
+> **BLOCKING INPUT** — y/n 판정과 동일하게 자율 완주 규칙의 예외다.
+> Claude는 직전 서비스 특징 분석(주요 기능/민감 데이터/리스크 프로파일)을 근거로 **권고 유형을 제시**할 수 있으나,
+> 최종적으로 database(`review_meta.json`)에 남는 유형 목록은 **auditor 입력값**이다.
+
+먼저 서비스 특징 분석 결과를 근거로 권고안을 한 줄로 제시한 뒤 입력을 받는다:
+
+```
+[권고] 이 서비스는 {근거 — 예: 자체 로그인/세션 발급 로직 보유, PG 연동 결제 API 존재 등}로 보아
+       {인증, 결제} 진단을 권고합니다.
+
+=== 추가 진단 유형 선택 ===
+복수 선택 가능, 쉼표로 구분. 목록에 없는 유형은 자유 텍스트로 입력.
+
+  1. 인증   (로그인/세션/토큰/권한 체계)
+  2. 결제   (PG 연동, 정산, 포인트/캐시 차감)
+  3. 인프라 (네트워크 구성, 방화벽, 클라우드 설정)
+  4. 개인정보 (PII 대량 처리, 외부 전송)
+  5. 기타   (자유 텍스트로 명시)
+
+입력 (예: 1,2  또는  인증,결제 / Enter=권고안 그대로 적용 / n=선택 안 함):
+```
+
+- 번호(`1,2`) 또는 유형명 자유 텍스트(`인증,결제`) 모두 허용, 콤마로 다중 선택 파싱
+- Enter(빈 입력) → 직전 [권고] 줄의 유형을 그대로 채택
+- `n` → 유형 미지정 (`additional_diagnosis_types: []`)로 저장, 필요 시 이후 재실행(§경로 B `d`)으로 보완 가능
+- `5.기타` 또는 목록에 없는 자유 텍스트 입력 시 해당 문자열 그대로 배열에 포함
+
 **저장**: `state/<repo>/review_meta.json` 에 아래 형식으로 저장한다 (경로 B-Enter 제외):
 
 ```json
@@ -179,13 +209,17 @@ n  또는 Enter  →  불필요
   "repo": "<repo>",
   "service_characteristics": "기술 스택: Spring Boot / Java 11 | 서비스 도메인: 포인트 API | 민감 데이터: 회원 ID, 거래 금액",
   "additional_diagnosis_needed": true,
+  "additional_diagnosis_types": ["인증", "결제"],
+  "additional_diagnosis_basis": "자체 로그인/세션 발급 로직 보유, PG 연동 결제 API 존재",
   "updated_at": "2026-06-17T10:30:00"
 }
 ```
 
 - `additional_diagnosis_needed`: `y` 입력 시 `true`, `n` 또는 Enter 시 `false`
+- `additional_diagnosis_types`: `additional_diagnosis_needed == true` 일 때만 입력받아 저장 (문자열 배열). `false`인 경우 `[]`
+- `additional_diagnosis_basis`: 유형 선택의 근거가 된 서비스 특징 요약 1문장 ([권고] 줄 근거를 그대로 기록, auditor가 자유 텍스트로 교체 입력한 경우 해당 텍스트 사용)
 - Claude가 리스크 프로파일을 참고해 권고 의견을 제시할 수 있으나, **최종 판정 입력은 auditor만 한다**
-- `testbed/<repo>/` 가 없으면 LLM 분석 생략, `service_characteristics: "—"` 로 저장
+- `testbed/<repo>/` 가 없으면 LLM 분석 생략, `service_characteristics: "—"` 로 저장, 추가 진단 유형 입력도 생략(`additional_diagnosis_types: []`)
 
 ### 2. 전체 취약점 개요 출력
 
@@ -584,6 +618,16 @@ Audit 세션 종료 직후 자동 수행한다.
 - 파일 없는 경우 → 빈 `skills[]`로 신규 생성 후 진행
 
 **2. testbed 삭제**
+
+⚠️ 삭제 전, `state/<repo>/repo_meta.json`이 없으면 `testbed/<repo>/.clone_info.json`에서 백업한다
+(정상 clone 레포는 `clone_repo.py`가 clone 시점에 이미 기록해두므로 보통 생략됨):
+```bash
+test -f state/<repo>/repo_meta.json || \
+  ( mkdir -p state/<repo>/ && cp testbed/<repo>/.clone_info.json state/<repo>/repo_meta.json )
+```
+이 파일이 없으면 이후 `generate_final_report.py`가 Bitbucket 프로젝트/저장소/브랜치/커밋 해시/담당자를
+전부 `—`로 표시한다 (`--publish` 시 `[GATE ERROR]`로 차단됨 — 상세: `shared/references/phase_c_cleansing.md`).
+
 ```bash
 rm -rf testbed/<repo>/
 ```

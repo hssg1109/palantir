@@ -119,6 +119,12 @@ def _collect_findings(repo: str) -> list[Path]:
     return paths
 
 
+def _collect_repo_meta(repo: str) -> Path | None:
+    """repo 레벨(run_id 무관) 메타데이터 — clone_repo.py가 clone 시점에 기록."""
+    meta = STATE_DIR / repo / "repo_meta.json"
+    return meta if meta.exists() else None
+
+
 def _collect_scan_meta(repo: str) -> Path | None:
     repo_dir = STATE_DIR / repo
     if not repo_dir.is_dir():
@@ -198,6 +204,7 @@ def main() -> int:
     for repo, final_report in repo_entries:
         findings  = _collect_findings(repo)
         scan_meta = _collect_scan_meta(repo)
+        repo_meta = _collect_repo_meta(repo)
 
         if not findings:
             print(f"  [-] {repo:<40} findings 없음, 건너뜀")
@@ -217,6 +224,10 @@ def main() -> int:
             n += 1
         if final_report:
             shutil.copy2(final_report, dest_wsl / final_report.name)
+            n += 1
+        if repo_meta:
+            # repo_meta.json은 run_id와 무관한 repo 레벨 파일 — 날짜 폴더가 아닌 <repo>/ 루트에 저장
+            shutil.copy2(repo_meta, STAGE_WSL / repo / "repo_meta.json")
             n += 1
 
         print(f"  [+] {repo:<40} → stage/{repo}/{folder_name}/  ({n}개)")

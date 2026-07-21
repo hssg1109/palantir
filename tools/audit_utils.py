@@ -20,12 +20,16 @@ audit_utils.py — 진단 이력 누적 · Audit Log 관리 유틸리티
   python3 tools/audit_utils.py log-ihaeng   --repo <repo> --base-run-id <base> --new-run-id <new>
                                              --fixed <n> --persistent <n> --new <n> --재발 <n>
                                              [--operator <name>]
+  python3 tools/audit_utils.py log-remediation --repo <repo> --ticket <TICKET-KEY>
+                                             --verdicts <json_object> [--operator <name>]
 
 라이브러리 import 사용:
   from tools.audit_utils import (
       append_audit_log, load_audit_log,
       uid_for_finding,
-      load_vuln_registry, save_vuln_registry
+      load_vuln_registry, save_vuln_registry,
+      log_remediation_check, update_registry_remediation_status,
+      latest_ticket_verdict,
   )
 """
 
@@ -232,6 +236,26 @@ def log_ihaeng(
     append_audit_log(entry)
 
 
+def log_remediation_check(
+    *,
+    repo:      str,
+    ticket:    str,
+    verdicts:  dict,      # {"조치완료": n, "미조치": n, "부분조치": n, "확인불가": n, "검증생략": n}
+    operator:  str = "auditor",
+) -> None:
+    """/sec-remediation-check 실행 결과를 state/audit_log.json에 기록."""
+    entry = {
+        "entry_id":   _entry_id("LOG"),
+        "timestamp":  _now_iso(),
+        "event_type": "remediation_checked",
+        "repo":       repo,
+        "ticket":     ticket,
+        "operator":   operator,
+        "verdicts":   verdicts,
+    }
+    append_audit_log(entry)
+
+
 # ──────────────────────────────────────────────
 # Vuln Registry helpers
 # ──────────────────────────────────────────────
@@ -375,7 +399,11 @@ def uid_for_finding(repo: str, skill: str, finding: dict) -> str:
         return f"{repo}:INJ:{af_stem}:{category}"
     if skill_upper == "XSS":
         xss_type = category.split("/")[-1] if "/" in category else category
-        return f"{repo}:XSS:{ep_slug}:{xss_type}"
+        # 프론트엔드 컴포넌트 finding은 scope.endpoint가 없어 ep_slug가 전부 "unknown"으로
+        # 수렴 — 같은 category(예: DOM XSS)의 서로 다른 finding이 uid 충돌하는 것을 방지하기
+        # 위해 endpoint 없으면 파일명(af_stem)으로 대체
+        disambiguator = ep_slug if ep_slug != "unknown" else af_stem
+        return f"{repo}:XSS:{disambiguator}:{xss_type}"
     if skill_upper == "FILE":
         return f"{repo}:FILE:{category}:{ep_slug}"
     # DATA / fallback
@@ -497,6 +525,73 @@ def update_registry_from_findings(
     return stats
 
 
+# 이행점검(/sec-remediation-check) 판정 → vuln_registry.status 매핑
+# "확인불가"는 status를 바꾸지 않는다 — 근거 부족 상태에서 임의로 fixed/open 단정 금지
+REMEDIATION_VERDICT_TO_STATUS = {
+    "조치완료": "verified_fixed",
+    "미조치":   "still_open",
+    "부분조치": "partially_fixed",
+}
+
+
+def latest_ticket_verdict(repo: str, uid: str, ticket: str) -> dict | None:
+    """
+    /sec-remediation-check 2차 이상 실행 시 carry-forward 판정에 사용.
+
+    vuln_registry.json에서 uid의 remediation_checks 중 ticket이 일치하는 항목만 골라
+    가장 최근 1건을 반환한다 (다른 티켓의 이력은 보지 않음 — 브랜치/시점이 다를 수 있어
+    이번 티켓 판단에 섞지 않는다). 이력이 없으면 None.
+
+    remediation_checks는 append-only 배열이라 리스트 마지막 항목이 항상 최신이다 —
+    checked_at은 날짜 단위(YYYY-MM-DD)라 같은 날 재판정(예: 초회 미조치 → 당일 부분조치로
+    정정)이 있으면 문자열 최댓값 비교로는 어느 쪽이 최신인지 구분되지 않으므로 절대
+    checked_at으로 정렬/비교하지 않는다.
+    """
+    registry = load_vuln_registry(repo)
+    rec = next((f for f in registry["findings"] if f.get("uid") == uid), None)
+    if rec is None:
+        return None
+    checks = [c for c in rec.get("remediation_checks", []) if c.get("ticket") == ticket]
+    if not checks:
+        return None
+    return checks[-1]
+
+
+def update_registry_remediation_status(
+    repo:    str,
+    uid:     str,
+    verdict: str,
+    *,
+    ticket:  str,
+    note:    str = "",
+) -> bool:
+    """
+    /sec-remediation-check 결과로 vuln_registry.json의 finding 상태를 갱신한다.
+    verdict: "조치완료" | "미조치" | "부분조치" | "확인불가"
+    반환: uid가 registry에 존재해 갱신했으면 True, 없으면 False.
+    """
+    registry = load_vuln_registry(repo)
+    existing = {f["uid"]: f for f in registry["findings"]}
+    rec = existing.get(uid)
+    if rec is None:
+        return False
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    new_status = REMEDIATION_VERDICT_TO_STATUS.get(verdict)
+    if new_status:
+        rec["status"] = new_status
+    rec.setdefault("remediation_checks", []).append({
+        "ticket":  ticket,
+        "verdict": verdict,
+        "note":    note,
+        "checked_at": today,
+    })
+
+    registry["findings"] = list(existing.values())
+    save_vuln_registry(repo, registry)
+    return True
+
+
 # ──────────────────────────────────────────────
 # CLI
 # ──────────────────────────────────────────────
@@ -558,6 +653,17 @@ def _cli_log_ihaeng(args: argparse.Namespace) -> None:
     print(f"[audit] ihaeng logged: {args.repo}  fixed={args.fixed} persistent={args.persistent} new={args.new}")
 
 
+def _cli_log_remediation(args: argparse.Namespace) -> None:
+    verdicts = json.loads(args.verdicts)
+    log_remediation_check(
+        repo=args.repo,
+        ticket=args.ticket,
+        verdicts=verdicts,
+        operator=args.operator,
+    )
+    print(f"[audit] remediation_checked logged: {args.repo}  ticket={args.ticket}  {verdicts}")
+
+
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="audit_utils.py")
     sub = p.add_subparsers(dest="command", required=True)
@@ -616,6 +722,14 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--재발",        type=int, default=0)
     s.add_argument("--operator",    default="auditor")
     s.set_defaults(func=_cli_log_ihaeng)
+
+    # log-remediation
+    s = sub.add_parser("log-remediation")
+    s.add_argument("--repo",     required=True)
+    s.add_argument("--ticket",   required=True)
+    s.add_argument("--verdicts", required=True, help='JSON object, e.g. \'{"조치완료":2,"미조치":1}\'')
+    s.add_argument("--operator", default="auditor")
+    s.set_defaults(func=_cli_log_remediation)
 
     return p
 

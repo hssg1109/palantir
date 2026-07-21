@@ -66,11 +66,13 @@ def _load_env() -> dict:
 # ── 마크다운 → Confluence Storage Format (XHTML) ─────────────────────────────
 
 # Confluence code macro가 인식하는 언어 값 목록 (InvalidValueException 방지)
+# 2026-07-16: 사내 Confluence 인스턴스에서 "go"/"json"/"latex"/"tex"가 실제로는
+# InvalidValueException을 유발함을 확인 (rest/api/contentbody/convert/view로 검증) — 제외.
 _CF_VALID_LANGS = {
     "none", "java", "javascript", "sql", "xml", "bash", "python", "ruby",
-    "php", "html", "css", "groovy", "scala", "yaml", "json", "powershell",
-    "perl", "go", "c", "cpp", "vb", "actionscript", "applescript",
-    "delphi", "erlang", "latex", "tex",
+    "php", "html", "css", "groovy", "scala", "yaml", "powershell",
+    "perl", "c", "cpp", "vb", "actionscript", "applescript",
+    "delphi", "erlang",
 }
 _CF_LANG_MAP = {
     "js":         "javascript",
@@ -85,6 +87,7 @@ _CF_LANG_MAP = {
     "shell":      "bash",
     "zsh":        "bash",
     "yml":        "yaml",
+    "json":       "javascript",  # 이 인스턴스는 "json" 값 자체를 거부함 — js 하이라이터로 대체
     "text":       "none",
     "plain":      "none",
     "plaintext":  "none",

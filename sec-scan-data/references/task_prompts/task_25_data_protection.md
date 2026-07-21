@@ -312,9 +312,17 @@ BFF 서버가 서버사이드 환경변수에서 토큰을 로드하여 외부 A
 | 내부 추적 식별자 | `userId`, `feedId`, `feedSeq`, `asumUid` | 애플리케이션 내부 동작 추적용. 고객 식별에 직결되지 않음 |
 | 비즈니스 상수/URL | `pushType`, `redirectUri` | 단순 상수값·URL 경로. 개인정보 미포함 |
 | 일반 예외 메시지 | `e.message`, `exception.message` | 오류 타입·메시지 텍스트. 단, **토큰 원문·Secret Key가 결합 출력되는 경우는 TP** |
-| mbrId 단독 업무 이벤트 로그 | `log.*(event=XXX mbrId={} result=XXX reason_code={} request_id={})` 형태 | **OCB 사내 정책 허용**: CS·장애 대응 목적의 업무 처리 결과 추적 로그. mbrId 외 민감정보 미결합 시 FP 처리. |
+| mbrId 단독 업무 이벤트 로그 | 아래 3조건 AND 판정 (리터럴 포맷 무관) | **OCB 사내 정책 허용**: CS·장애 대응 목적의 업무 처리 결과 추적 로그. mbrId 외 민감정보 미결합 시 FP 처리. |
 
-> **[OCB 정책 주의]** mbrId 단독 업무 이벤트 로그라도 다음 조건 중 하나라도 충족하면 TP:
+> **[판정 방식 — AND 조건, 포맷이 아니라 내용 기준]**
+> `event=XXX mbrId={} result=XXX reason_code={}` 같은 리터럴 key=value 포맷 일치를 요구하지 않는다. 실제 코드는 자유서술형 메시지(`"drawLotto final [{}] seq:{}, {}P received!"` 등)가 대부분이므로, 다음 3가지 조건을 **모두(AND)** 만족하면 포맷과 무관하게 FP(업무 추적성 로그)로 처리한다:
+> 1. **식별자 존재**: `mbrId`(또는 암호화된 식별자)가 로그 파라미터로 포함됨
+> 2. **클린 데이터**: 아래 금지조합(전화번호/CI/생년월일/카드번호/주소/세션ID/토큰/요청·응답 전문)이 없음
+> 3. **업무 맥락 포함**: 단순 진입(enter)/파라미터 확인이 아니라, 상태 변화를 나타내는 결과값·실패사유가 함께 로깅됨 (예: null 체크 실패, 포인트 지급 결과, 중복/한도초과 사유, insert 실패 등)
+>
+> 3조건 중 하나라도 미충족 시 TP. 특히 **"단순 진입 로그"**(`log.info("XXX - [{}], {}", mbrId, version)`처럼 mbrId+API 버전/파라미터만 있고 결과·사유가 없는 패턴)는 조건 3 미충족으로 TP — 정책 §8.2 "INFO 지양 예시"에 해당.
+>
+> mbrId 단독 업무 이벤트 로그라도 다음 조건 중 하나라도 충족하면 TP:
 > - 전화번호(mdn/phone) · CI(ciNo) · 생년월일(birthDate) · 카드번호(cardNo) · 주소(addr) 결합
 > - 세션ID(sessionId) · Access Token · Refresh Token 결합
 > - 요청/응답 전문(request body, response body) 결합
@@ -346,11 +354,18 @@ BFF 서버가 서버사이드 환경변수에서 토큰을 로드하여 외부 A
 | `INFO` | **CS 목적 업무 이벤트만 허용** | 단순 메서드 진입·파라미터 확인·객체 dump 용도는 금지 |
 | `WARN` / `ERROR` | **CS 대응 실패 로그에 허용** | 단, 민감정보 조합·전문 로그는 금지 |
 
-**허용되는 로그 패턴 (FP 처리):**
+**허용되는 로그 패턴 (FP 처리) — 구조화 포맷 예시:**
 ```
 INFO  event=POINT_USE     mbrId=123456 result=FAIL reason_code=INSUFFICIENT_POINT request_id=req-001
 WARN  event=COUPON_ISSUE  mbrId=123456 result=FAIL reason_code=ALREADY_ISSUED coupon_id=C202606
 ERROR event=AUTH_VERIFY   mbrId=123456 result=FAIL error_code=AUTH_PROVIDER_TIMEOUT
+```
+
+**허용되는 로그 패턴 (FP 처리) — 자유서술형 예시 (AND 3조건 충족, 실무 코드에서 가장 흔한 형태):**
+```kotlin
+log.warn("drawLotto[{}] lottoMeta[{}] is null", mbrId, lottoMeta)                       // 식별자+실패사유 ✓, 금지조합 없음 ✓
+log.info("drawLotto final [{}] seq:{}, {}P received!", mbrId, seq, winPoint)            // 식별자+처리결과 ✓, 금지조합 없음 ✓
+log.warn("[{}] INVITE_CODE {} already received lotto.", mbrId, inviteCode)              // 식별자+실패사유 ✓, inviteCode는 target_id 성격
 ```
 
 **금지되는 로그 패턴 (TP 처리, 취약/High):**
