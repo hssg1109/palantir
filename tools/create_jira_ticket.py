@@ -28,7 +28,6 @@ Jira 이슈 구성:
 """
 
 import argparse
-import base64
 import io
 import json
 import re
@@ -38,6 +37,9 @@ from pathlib import Path
 
 import requests
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from tools.jira_utils import load_env, jira_headers, cf_headers
+
 # ──────────────────────────────────────────────────────────────────────────────
 # 경로 설정
 # ──────────────────────────────────────────────────────────────────────────────
@@ -46,7 +48,6 @@ PALANTIR_DIR = Path(__file__).resolve().parent.parent
 LOGS_DIR     = PALANTIR_DIR / "logs"
 DOCS_DIR     = PALANTIR_DIR / "docs"
 
-_ENV_PATH    = PALANTIR_DIR / ".env"
 _CF_REGISTRY = DOCS_DIR / ".confluence_pages.json"
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -65,43 +66,6 @@ _TICKET_GUIDE = """\
 | (5) | 조치 완료 시 {color:green}*"이행 점검 요청"*{color} 상태로 변경 처리 바랍니다. |
 {panel}\
 """
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# .env 로더
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _load_env() -> dict:
-    env: dict = {}
-    if _ENV_PATH.exists():
-        for line in _ENV_PATH.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, _, v = line.partition("=")
-            # 인라인 주석 제거를 strip() 전에 수행 — "   # comment" 패턴도 처리
-            v = re.sub(r"\s+#.*$", "", v)
-            env[k.strip()] = v.strip()
-    return env
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# 인증 헤더
-# ──────────────────────────────────────────────────────────────────────────────
-
-def _jira_headers(env: dict) -> dict:
-    """Cloud(email+token Basic Auth) 또는 Server/DC(PAT Bearer) 자동 선택."""
-    token = env.get("JIRA_TOKEN", "")
-    email = env.get("JIRA_EMAIL", "").strip()
-    if email:
-        creds = base64.b64encode(f"{email}:{token}".encode()).decode()
-        return {"Authorization": f"Basic {creds}", "Content-Type": "application/json"}
-    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-
-def _cf_headers(env: dict) -> dict:
-    token = env.get("CONFLUENCE_TOKEN", "")
-    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -274,7 +238,7 @@ def _check_existing(env: dict, jira_url: str, project: str, repo: str) -> str | 
     try:
         resp = requests.get(
             f"{jira_url}/rest/api/2/search",
-            headers=_jira_headers(env),
+            headers=jira_headers(env),
             params={"jql": jql, "maxResults": 1, "fields": "summary,key"},
             timeout=15,
         )
@@ -322,7 +286,7 @@ def _create_issue(
 
     resp = requests.post(
         f"{jira_url}/rest/api/2/issue",
-        headers=_jira_headers(env),
+        headers=jira_headers(env),
         json=payload,
         timeout=30,
     )
@@ -351,7 +315,7 @@ def _export_confluence_pdf(env: dict, page_id: str) -> bytes | None:
     2단계: HTML 내 /download/temp/ 경로 파싱 → 실제 PDF 다운로드
     """
     cf_base = env.get("CONFLUENCE_BASE_URL", "").rstrip("/")
-    hdrs = {**_cf_headers(env), "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8"}
+    hdrs = {**cf_headers(env), "Accept": "application/pdf,text/html;q=0.9,*/*;q=0.8"}
 
     for endpoint in [
         f"{cf_base}/spaces/flyingpdf/pdfpageexport.action?pageId={page_id}",
@@ -403,7 +367,7 @@ def _export_confluence_pdf(env: dict, page_id: str) -> bytes | None:
 
 def _attach_pdf(env: dict, jira_url: str, issue_key: str, pdf_bytes: bytes, filename: str) -> bool:
     # Content-Type 헤더 제외 (multipart가 자동 설정)
-    headers = {k: v for k, v in _jira_headers(env).items() if k.lower() != "content-type"}
+    headers = {k: v for k, v in jira_headers(env).items() if k.lower() != "content-type"}
     headers["X-Atlassian-Token"] = "no-check"
     resp = requests.post(
         f"{jira_url}/rest/api/2/issue/{issue_key}/attachments",
@@ -435,7 +399,7 @@ def main():
     parser.add_argument("--force",     action="store_true", help="중복 티켓 있어도 새로 생성")
     args = parser.parse_args()
 
-    env      = _load_env()
+    env      = load_env()
     jira_url = env.get("JIRA_URL", "").rstrip("/")
     project  = args.project or env.get("JIRA_PROJECT_KEY", "")
 

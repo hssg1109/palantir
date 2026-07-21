@@ -43,9 +43,19 @@ docs/2026_유성근_*
 docs/유성근_*
 docs/generate_resume_sds.py
 tools/build_resume_docx.py
+docs/ai_usecase_ppt/
+
+### 임직원 PII 캐시 (maintainer 표기 정규화용, clone_repo.py 사용) ###
+shared/references/maintainer_directory_cache.json
+shared/references/maintainer_manual_overrides.json
+
+### 고객사 특정 PoC / exfil 도구 (palantir-poc-archive 레포로 분리 관리) ###
+tools/poc_*
+tools/exfil_server.py
 
 ### 임시 파일 ###
 .claude/scheduled_tasks.lock
+tmp/
 
 ### OS ###
 .DS_Store

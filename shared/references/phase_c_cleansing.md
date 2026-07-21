@@ -116,6 +116,12 @@ Phase C는 두 단계로 나뉜다.
    ```
    - 삭제 성공 → `cleansing_actions[testbed_deletion].confirmed = true`, `confirmed_at = <ISO8601>`
    - 이미 삭제됨 → `confirmed = true`, `note = "이미 삭제됨"`
+   - ⚠️ **주의**: `testbed/<repo>/.clone_info.json`(Bitbucket 프로젝트/브랜치/커밋/담당자)은 이 삭제로 함께 사라진다.
+     `clone_repo.py`가 clone 시점에 `state/<repo>/repo_meta.json`에 동일 내용을 영속 저장하므로,
+     이 파일이 이미 존재하는 정상 clone 레포는 testbed 삭제 후에도 `generate_final_report.py`가
+     메타데이터를 정상 로드한다. `state/<repo>/repo_meta.json`이 없는 상태로 testbed부터 삭제하면
+     보고서의 "Bitbucket 프로젝트/저장소/브랜치/커밋 해시/담당자" 5개 필드가 전부 `—`로 누락되니,
+     삭제 전 `state/<repo>/repo_meta.json` 존재 여부를 확인한다 (없으면 `clone_repo.py`를 먼저 재실행).
 
 3. **state/ 소스코드 감사**
    ```bash
@@ -144,7 +150,6 @@ Phase C는 두 단계로 나뉜다.
    | 고객사/프로젝트 | `<project>` |
    | 레포 | `<repo>` |
    | Skill | `all (injection/xss/file/data/sca)` |
-   | LLM 접근 파일 수 | skills[] 전체 llm_accessed_files 파일 합산 |
    | testbed 삭제 | ✅ 또는 ⚠️ |
    | state 감사 | ✅ 또는 ⚠️ |
    | 스캔 redact | ✅ 또는 ⚠️ |
@@ -154,6 +159,8 @@ Phase C는 두 단계로 나뉜다.
 
    Confluence REST API 호출은 `tools/publish_confluence.py` 또는 curl을 사용한다.  
    `.env`의 `CONFLUENCE_TOKEN`(Bearer) 사용 필수.
+
+   **⚠️ 삽입 위치 anchor 주의**: 레지스트리 페이지에는 `</tbody></table>`가 2개 이상 존재한다 ("클렌징 이력" 표 + "열 설명" 표). 문서 내 **마지막** `</tbody></table>` 앞에 무조건 삽입하는 방식(rfind 등)은 금지 — "클렌징 이력" 표가 "열 설명" 표보다 앞에 있어 새 행이 엉뚱한 표("열 설명")에 삽입되는 사고가 실제 발생했다(2026-07-13, v75/v76). 반드시 **표 제목(`<h2>클렌징 이력</h2>`) 또는 헤더 행(`<tr><th>진단일</th>...`)을 anchor로 표를 특정**한 뒤, 그 표의 마지막 `<tr>...</tr>` 직후에 새 행을 삽입할 것. 삽입 후에는 새 행이 올바른 표 안에 들어갔는지 (헤더 열 개수 일치 등으로) 반드시 확인한다.
 
 7. **`llm_data_access_log.json` 최종 저장**
 
