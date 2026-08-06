@@ -64,6 +64,10 @@ JIRA_COL_IDX   = 9
 CF_TITLE     = "OCB 서비스 군 보안 진단 계획"
 CF_PARENT_ID = "722832415"
 
+# 신청이력 현황 하위 페이지 (750459063의 child, build_service_history_table.py 결과물 게시 대상)
+SERVICE_HISTORY_PAGE_ID    = "767338901"
+SERVICE_HISTORY_PAGE_TITLE = "OCB 서비스 군 palantir 진단결과 — 신청이력 현황"
+
 
 SCA_ONLY_SECTION_HEADER = "## SCA 전용 진단 현황 (SAST 양호 레포)"
 SCA_ONLY_TABLE_HEADER   = (
@@ -398,6 +402,35 @@ def sync_confluence() -> bool:
     return result.returncode == 0
 
 
+def sync_service_history() -> bool:
+    """
+    신청이력 현황 하위 페이지(767338901) 재생성 + 재게시.
+    sec-review 보고서 게시(--report) 및 Jira 티켓팅(--jira) 직후 호출된다.
+    750459063 체크리스트 동기화(sync_confluence)의 --no-sync 여부와는 무관하게 항상 실행한다
+    (--no-sync는 palantir-jira-gateway 람다가 750459063을 이미 직접 패치했을 때 중복 sync만 생략하려는
+    용도이며, 767338901은 그 경로로 갱신되지 않으므로 별도로 항상 재게시해야 함).
+    """
+    build_cmd = [sys.executable, str(PALANTIR_DIR / "tools" / "build_service_history_table.py")]
+    print("[SYNC] 신청이력 표 재생성 중 (build_service_history_table.py) ...")
+    r1 = subprocess.run(build_cmd, cwd=PALANTIR_DIR)
+    if r1.returncode != 0:
+        print("[WARN] 신청이력 표 재생성 실패 — 767338901 갱신 생략", file=sys.stderr)
+        return False
+
+    publish_cmd = [
+        sys.executable, str(PALANTIR_DIR / "tools" / "publish_confluence.py"),
+        "docs/ocb_service_history_confluence.md",
+        "--page-id", SERVICE_HISTORY_PAGE_ID,
+        "--title", SERVICE_HISTORY_PAGE_TITLE,
+    ]
+    print(f"[SYNC] 신청이력 페이지 갱신 중 ({SERVICE_HISTORY_PAGE_ID}) ...")
+    r2 = subprocess.run(publish_cmd, cwd=PALANTIR_DIR)
+    if r2.returncode != 0:
+        print(f"[WARN] {SERVICE_HISTORY_PAGE_ID} 게시 실패", file=sys.stderr)
+        return False
+    return True
+
+
 # ── 현황 출력 ─────────────────────────────────────────────────────────────────
 
 def print_status() -> None:
@@ -463,11 +496,13 @@ def main():
     parser.add_argument(
         "--report", nargs=2, metavar=("REPO", "VALUE"),
         help="보고서 컬럼 갱신. VALUE: Confluence URL 또는 '전체양호'\n"
-             "예: --report ocb-webview-api https://wiki.your-company.com/pages/viewpage.action?pageId=<YOUR_PAGE_ID>",
+             "예: --report ocb-webview-api https://wiki.your-company.com/pages/viewpage.action?pageId=<YOUR_PAGE_ID>\n"
+             "완료 후 신청이력 하위 페이지(767338901)도 항상 재게시됨 (--no-sync 무관).",
     )
     parser.add_argument(
         "--jira", nargs=2, metavar=("REPO", "JIRA_KEY"),
         help="Jira 티켓 컬럼 갱신. JIRA_KEY: 'PROJ-1234' 또는 '—'\n"
+             "완료 후 신청이력 하위 페이지(767338901)도 항상 재게시됨 (--no-sync 무관).\n"
              "예: --jira ocb-webview-api PROJ-1234",
     )
     parser.add_argument(
@@ -550,6 +585,7 @@ def main():
 
         if not args.no_sync:
             sync_confluence()
+        sync_service_history()
         return
 
     # ── --jira ────────────────────────────────────────────────────────────────
@@ -563,6 +599,7 @@ def main():
 
         if not args.no_sync:
             sync_confluence()
+        sync_service_history()
         return
 
     # ── --sca-only ────────────────────────────────────────────────────────────

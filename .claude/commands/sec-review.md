@@ -93,9 +93,25 @@ skill별로 RUN_ID 내림차순(최신) 파일 하나씩 선택:
 - `state/<repo>/<skill>/*/findings_*.json` — skill별 최신 파일
 - 수집 후 어떤 RUN_ID를 사용했는지 skill별로 출력
 
-**SCA 스킬 제외**: `state/<repo>/sca/` 디렉터리는 수집 대상에서 제외한다 (SCA 진단은 별도 검증 후 진행 예정).
+**SCA 스킬 제외**: `state/<repo>/sca/` 디렉터리는 수집 대상에서 제외한다 (SCA 진단은 별도 검증 후 진행 예정 — `feedback_sca_review_policy.md`에 따라 LLM-Check 완료 SCA는 `/sec-review` 건별 판정 없이 일괄 처리되는 유일한 승인된 예외).
 
-각 파일에서 `reviewed` 가 `true` 가 아닌 finding 중 `result` 가 아래 **제외 목록에 없는** 항목을 리뷰 대상으로 추린다.
+#### 1a. Audit 정합성 검증 ⚠️ 필수 — `reviewed: true` 항목의 사람 판정 여부 확인
+
+> **목적**: `reviewed`/`review_status`는 오직 본 skill(`/sec-review`) §4의 사람 판정에서만 부여되는 필드다.
+> 그런데 스캔/LLM-Check 단계(예: 이전 세션의 수동 편집, 스킬 지시사항 오해 등)에서 이 필드가 audit 기록 없이 직접 기록되는 사고가 실제로 발생한 바 있다(2026-08-03 displayadmin_server XSS-001 사례 — 사람 판정 없이 `reviewed:true`가 설정돼 인터랙티브 리뷰를 거치지 않고 `approve_report.py`로 그대로 보고서에 반영됨).
+> 이 필드를 맹목적으로 신뢰하면 사람이 실제로 판정하지 않은 finding이 조용히 보고서에 포함될 수 있다.
+
+수집된 finding 중 `reviewed: true` 인 항목 각각에 대해:
+
+1. `state/audit_log.json`을 로드하여 `event_type == "finding_reviewed"` AND `repo == <repo>` AND `finding_id == <해당 finding_id>` 인 항목이 존재하는지 확인
+2. **존재하지 않으면** → 이 finding은 사람 판정을 거친 적이 없는 것으로 간주하고, `reviewed: false` 인 것처럼 취급하여 리뷰 대상 목록에 **포함**시킨다 (JSON 파일 자체는 아직 수정하지 않음 — §4 판정 시 정상적으로 재확정 후 저장)
+3. 아래와 같이 콘솔에 경고를 출력한다:
+   ```
+   [AUDIT GAP] {finding_id} — reviewed=true 이나 audit_log에 사람 판정 기록 없음 → 리뷰 대상에 재포함
+   ```
+4. `event_type == "finding_reviewed"` 항목이 존재하면 정상적으로 §0d 재개 로직에 따라 건너뜀
+
+각 파일에서 (위 1a 검증을 통과한) `reviewed` 가 `true` 가 아닌 finding 중 `result` 가 아래 **제외 목록에 없는** 항목을 리뷰 대상으로 추린다.
 
 **제외 목록** (evidence_trail 전용 또는 정상): `"양호"`, `"양호(FP)"`, `"해당없음"`, `"safe"`
 

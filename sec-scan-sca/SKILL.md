@@ -150,8 +150,17 @@ Phase 3-SCA 완료 후 `state/<prefix>/summary_sca.md` 를 생성한다.
 
 ### Step 4-2: SCA Tier 분류 기준 — findings_SCA.json 생성 시 적용
 
+> **⚠️ 유일한 승인된 예외**: 아래 Tier 분류는 이 skill(LLM-Check) 단계에서 `review_status`를 직접 설정하는
+> **SCA 전용의 유일한 예외**다 (`~/.claude/.../memory/feedback_sca_review_policy.md` 참조).
+> `/sec-review`는 `state/<repo>/sca/` 디렉터리를 애초에 수집 대상에서 제외하므로(§1 참조) SCA findings는
+> `/sec-review`의 사람 판정을 거치지 않는다 — 대신 `approve_report.py`/`generate_final_report.py`의
+> `--include-sca` 플래그를 **사람이 명시적으로 지정**하는 것이 SCA에 한정된 유효한 승인 게이트다
+> (미지정 시 기본적으로 보고서에서 제외됨 — `feedback_sca_default_exclude.md`).
+> 이 예외 패턴을 다른 skill(injection/xss/file/data)에 복제하지 말 것 — 그 4개 skill은
+> `reviewed`/`review_status`를 직접 설정하지 않고 반드시 `/sec-review`를 거쳐야 한다(각 skill SKILL.md Step 4-2 HARD RULE 참조).
+
 LLM-Check의 `relevance_status`와 CVSS를 조합하여 **3-Tier**로 분류한다.  
-이 기준은 `/sec-review` 시 SCA 일괄 처리(§4b)와 보고서 포함 여부에 직접 영향을 미친다.
+이 기준은 `--include-sca` 지정 시 보고서 포함 여부에 직접 영향을 미친다.
 
 | Tier | 조건 | result | 처리 |
 |------|------|--------|------|

@@ -38,7 +38,10 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from tools.jira_utils import load_env, jira_headers, cf_headers
+from tools.jira_utils import (
+    load_env, jira_headers, cf_headers, load_repo_project_map,
+    find_fortify_ticket, create_issue_link,
+)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 경로 설정
@@ -260,13 +263,15 @@ def _create_issue(
     dry_run: bool,
     assignee: str | None = None,
     remediation_date: str | None = None,
+    extra_labels: list[str] | None = None,
 ) -> str | None:
+    labels = [repo] + [l for l in (extra_labels or []) if l and l not in (repo,)]
     fields: dict = {
         "project":     {"key": project},
         "summary":     summary,
         "issuetype":   {"name": "Task"},
         "priority":    {"name": "Major"},
-        "labels":      [repo],
+        "labels":      labels,
         "description": description,
     }
     # 커스텀 필드 "조치기한" — .env JIRA_REMEDIATION_DATE_FIELD_ID 가 있을 때만 사용
@@ -471,12 +476,30 @@ def main():
 
     # ── 8. 이슈 생성 ──────────────────────────────────────────────────────────
     print(f"[INFO] 담당자: {args.assignee}")
+    repo_project_map = load_repo_project_map()
+    project_key_label = repo_project_map.get(args.repo)
+    if project_key_label:
+        print(f"[INFO] 프로젝트 키 라벨: {project_key_label}")
+    else:
+        print(f"[WARN] docs/ocb_scan_plan.md §2 에서 프로젝트 키 매핑을 찾지 못함 — repo 라벨만 부여")
     issue_key = _create_issue(
         env, jira_url, project, title, description, args.repo, args.dry_run,
         assignee=args.assignee, remediation_date=remediation_date,
+        extra_labels=[project_key_label] if project_key_label else None,
     )
     if not issue_key or args.dry_run:
         return
+
+    # ── 8-1. Fortify 정기진단 이력 연동 (issue link) ─────────────────────────
+    if project_key_label:
+        fortify_key = find_fortify_ticket(env, jira_url, project_key_label, args.repo)
+        if fortify_key:
+            if create_issue_link(env, jira_url, issue_key, fortify_key):
+                print(f"[OK] Fortify 이력 연동: {issue_key} <-> {fortify_key}")
+            else:
+                print(f"[WARN] Fortify 이력 연동 실패 — {issue_key} <-> {fortify_key} issue link 생성 안됨")
+        else:
+            print(f"[INFO] Fortify 정기진단 이력 없음 — {project_key_label}/{args.repo}")
 
     # ── 9. PDF 첨부 ───────────────────────────────────────────────────────────
     if page_id:

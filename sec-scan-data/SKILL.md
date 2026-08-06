@@ -197,6 +197,13 @@ print('[OK] LLM-Check 완료 확인')
 
 통과 조건 충족 후 Phase C-1을 수행한다.
 
+### Step 4-2: 사람 판정 필드 침범 금지 (HARD RULE)
+
+> **HARD RULE**: 이 skill(Auto-Scan/LLM-Check 어느 단계도)은 `reviewed`/`review_status` 필드를 직접 설정하지 않는다.
+> 이 두 필드는 `/sec-review` §4의 사람 판정에서만 부여되며, `tools/audit_utils.py log-review` 호출로 `state/audit_log.json`에 기록되는 것만이 유효한 판정 경로다.
+> LLM-Check가 TP로 확정한 finding이라도 `llm_verdict: "TP"` / `manual_review_note` 까지만 기록하고 `reviewed`/`review_status`는 미기재 상태로 남겨, 예외 없이 `/sec-review`를 거치도록 한다.
+> (2026-08-03 displayadmin_server XSS-001 — LLM-Check 판정이 사람 판정 필드에 유출되어 `/sec-review`를 우회한 채 보고서에 반영된 사고 재발 방지. `/sec-review` §1a가 audit_log 대조로 이런 유출을 탐지·재편입하지만, 애초에 이 skill 단계에서 설정하지 않는 것이 원칙이다.)
+
 ---
 
 ### Step C: Phase C-1 — LLM 데이터 접근 로그 업데이트

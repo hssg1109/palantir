@@ -418,6 +418,7 @@ LLM-Check Phase 완료 후:
 
 1. **`state/<prefix>/findings_XSS.json` 저장** (`llm_checked: true`) — `shared/references/output_schemas.md` 스키마 준수.
    - `findings[]`: TP / needs_review 항목만 포함. 각 finding에 `llm_verdict`, `manual_review_note`, `evidence.taint_flow` 필수.
+   - **`reviewed`/`review_status` 필드는 절대 여기서 설정하지 않는다** — TP로 확정된 항목도 `llm_verdict: "TP"`까지만 기록. 이 두 필드는 `/sec-review` §4의 사람 판정에서만 부여되며 `tools/audit_utils.py log-review`로 `state/audit_log.json`에 기록되는 것만이 유효한 판정 경로다. 예외 없이 `/sec-review`를 거쳐야 한다. (2026-08-03 displayadmin_server XSS-001 — 이 필드가 LLM-Check 단계에서 유출돼 `/sec-review`를 우회한 채 보고서에 반영된 사고 재발 방지)
    - `evidence_trail[]`: FP 재분류 항목 및 전체 양호 항목 보존 (업로드 제외, 로컬 증적).
    - `llm_checked: false` 파일은 업로드 스크립트가 자동 차단함.
 

@@ -217,6 +217,7 @@ SCA LLM 검토는 전체 repo 공유 결과 기준으로 1회만 수행:
 - 원칙1(DB Write 없음) 또는 원칙2(숫자/Enum/UUID/Hash 타입) 충족이 확인되면 **그 즉시 FP(양호)** 처리 — evidence_trail로 이동.
 - 자유 텍스트(String) 필드 저장 + 필터 없음이 실제로 확인된 case만 최종 취약으로 카운트한다.
 - `instance` finding 중 **동일 파일/동일 코드 패턴**(같은 JSP/Thymeleaf 템플릿, 여러 endpoint가 매핑되는 동일 Controller 메서드 등)을 공유하는 건은 `affected_files[]`로 묶어 1건으로 리포팅 — 대표 파일 1회만 코드 추적한다.
+- **2단계 병합(필수)**: 파일 단위로 묶은 그룹(1차 그룹핑)이 수십~수백 개로 나올 경우, 거기서 멈추지 말고 **동일 근본원인(root cause) 패턴 기준으로 2차 병합**한다 — 예: "naked EL `${value}` 미이스케이프", "`escapeXml=\"false\"` 명시적 비활성화" 등 패턴이 같으면 파일이 몇 개든 **하나의 finding**으로 합치고 `affected_files[]`에 전체 파일 목록(경로+건수)만 나열한다. "파일별로 그룹핑했으니 끝"이 아니라 "그룹 개수 자체가 최종 finding 개수"라는 점을 명심할 것 — 대형 CMS/View 모듈에서 파일-그룹 수백 개를 그대로 수백 개의 개별 finding으로 리포팅하는 것은 Step 5의 취지(리포팅 압축)에 반한다. 최종 finding 개수는 "발견된 근본원인 패턴 수" 규모(한 자릿수~두 자릿수)를 넘지 않아야 한다.
 - Kafka/MQ 경유는 원칙3(Async Taint Break, 보수적 카운팅) 그대로 유지 — Consumer 미확인 시에도 취약 카운트에 포함(FP 금지).
 
 ### 5-3. Data / HARDCODED_SECRET — 파일 단위 최소화 + 테스트·더미 값 선별

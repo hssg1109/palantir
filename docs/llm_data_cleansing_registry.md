@@ -70,6 +70,26 @@
 | 2026-06-22 | OCB / LIVECM | livecm-common-kt | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/livecm-common-kt/llm_data_access_log.json |
 | 2026-06-22 | OCB / LIVECM | prewarmer | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/prewarmer/llm_data_access_log.json |
 | 2026-06-29 | OCB / LIVECM | system-check | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/system-check/llm_data_access_log.json |
+| 2026-07-15 | OCB / OCBRWD | rwd_front | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/rwd_front/llm_data_access_log.json |
+| 2026-07-15 | OCB / OCBRWD | rwd_adm | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/rwd_adm/llm_data_access_log.json |
+| 2026-06-30 | OCB / OB | unse-backend | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/unse-backend/llm_data_access_log.json |
+| 2026-07-14 | OCB / OB | unse-frontend | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/unse-frontend/llm_data_access_log.json |
+| 2026-07-14 | OCB / OB | cashbagmall | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/cashbagmall/llm_data_access_log.json |
+| 2026-07-14 | OEP | business | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/business/llm_data_access_log.json |
+| 2026-07-15 | OEP | tax_business | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/tax_business/llm_data_access_log.json |
+| 2026-07-01 | OEP | cms_resource | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/cms_resource/llm_data_access_log.json |
+| 2026-07-01 | OEP | yetax_resource | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/yetax_resource/llm_data_access_log.json |
+| 2026-07-24 | OCBX | ocbx-api | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocbx-api/llm_data_access_log.json |
+| 2026-07-24 | OCBX | ocbx-admin-api | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocbx-admin-api/llm_data_access_log.json |
+| 2026-07-23 | OCBX | ocbx-transactor | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocbx-transactor/llm_data_access_log.json |
+| 2026-07-23 | OCBX | ocbx-admin-transactor | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocbx-admin-transactor/llm_data_access_log.json |
+| 2026-07-23 | OCBX | ocbx-synchronizer | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocbx-synchronizer/llm_data_access_log.json |
+| 2026-07-23 | OCBX | ocbx-recon | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocbx-recon/llm_data_access_log.json |
+| 2026-07-28 | OCBX | ocbx-admin-fe | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocbx-admin-fe/llm_data_access_log.json |
+| 2026-07-28 | OCBX | uptn-admin-fe | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/uptn-admin-fe/llm_data_access_log.json |
+| 2026-07-28 | OCBX | ocbx-nonce-observer | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocbx-nonce-observer/llm_data_access_log.json |
+| 2026-07-27 | OSA | displayadmin_server | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/displayadmin_server/llm_data_access_log.json |
+| 2026-07-29 | OSA | displayadmin_ui | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/displayadmin_ui/llm_data_access_log.json |
 
 <!-- 실제 이력은 위 예시 행 아래에 추가 -->
 :::

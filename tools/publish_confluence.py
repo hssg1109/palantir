@@ -356,7 +356,7 @@ def _confluence_request(method: str, url: str, token: str, body_json: str | None
 
 def publish(
     md_path: Path,
-    title: str,
+    title: str | None,
     parent_id: str | None,
     page_id: str | None,
     space_key: str,
@@ -386,6 +386,8 @@ def publish(
             print(f"[ERROR] 현재 버전 조회 실패: {curr}", file=sys.stderr)
             return None
         version = curr.get("version", {}).get("number", 1) + 1
+        # title=None → 기존 페이지 제목 유지 (사람이 직접 지정한 제목을 덮어쓰지 않음)
+        title_to_use = title if title is not None else curr.get("title", "")
 
         # ── 데이터 유실(row 축소) 감지 가드 ──────────────────────────────
         # 로컬 파일(cf_body)이 라이브 페이지보다 표 row 수가 크게 적으면
@@ -406,7 +408,7 @@ def publish(
 
         payload = json.dumps({
             "version": {"number": version},
-            "title":   title,
+            "title":   title_to_use,
             "type":    "page",
             "body":    {"storage": {"value": cf_body, "representation": "storage"}},
         }, ensure_ascii=False)
@@ -424,6 +426,9 @@ def publish(
         # ── 신규 생성 ────────────────────────────────────────────────────
         if not parent_id:
             print("[ERROR] 신규 생성 시 --parent 필수.", file=sys.stderr)
+            return None
+        if not title:
+            print("[ERROR] 신규 생성 시 title 필수 (title=None으로는 신규 페이지를 만들 수 없음).", file=sys.stderr)
             return None
 
         print(f"[CREATE] 신규 페이지 생성 (parent={parent_id}, title={title}) ...")
