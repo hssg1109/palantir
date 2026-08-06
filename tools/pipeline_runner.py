@@ -79,7 +79,7 @@ _load_env()
 # ─── 상수 ─────────────────────────────────────────────────────────────────────
 
 BACKEND_SKILLS  = ["injection", "xss", "file", "data"]
-FRONTEND_SKILLS = ["xss", "file", "data"]
+FRONTEND_SKILLS = ["injection", "xss", "file", "data"]
 PHP_SKILLS      = ["sca"]
 ALL_SKILLS      = ["injection", "xss", "file", "data", "sca"]
 
