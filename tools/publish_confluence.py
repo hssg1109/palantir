@@ -136,14 +136,18 @@ def md_to_confluence(md: str) -> str:
         # 2. XML 특수문자 이스케이프 (코드 스팬 제외한 나머지)
         text = text.replace('&', '&amp;')
         text = text.replace('<', '&lt;').replace('>', '&gt;')
-        # 3. 굵기
+        # 3. 굵기+기울임 (*** 3중 asterisk) — 반드시 ** / * 보다 먼저 처리해야 함
+        # ***text*** → <strong><em>text</em></strong> 올바른 중첩 보장
+        # ** 먼저 처리하면 ***X***가 <strong>*X</strong>* 로 분리되어 태그 역전 발생
+        text = re.sub(r'\*{3}(.+?)\*{3}', r'<strong><em>\1</em></strong>', text)
+        # 4. 굵기
         text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
-        # 4. 기울임
+        # 5. 기울임
         text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
-        # 5. 링크 [text](url)
+        # 6. 링크 [text](url)
         text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)',
                       r'<a href="\2">\1</a>', text)
-        # 6. 색상 태그 {color:X}text{/color} → <span style="color:X">
+        # 7. 색상 태그 {color:X}text{/color} → <span style="color:X">
         text = re.sub(r'\{color:([^}]+)\}(.*?)\{/color\}',
                       r'<span style="color:\1">\2</span>', text, flags=re.DOTALL)
         # 7. 플레이스홀더 복원
