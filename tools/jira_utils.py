@@ -123,7 +123,8 @@ def load_ticket_repo_pairs(scan_plan_path: Path = _SCAN_PLAN_PATH) -> list[tuple
         if not cells or not cells[0].startswith("`"):
             continue
         repo = cells[0].strip("`")
-        m = re.search(r"SECUFINDINGS-(\d+)", cells[-1])
+        # 열 순서 변경(예: Fortify 열 추가)에 안전하도록 마지막 셀이 아닌 행 전체에서 검색
+        m = re.search(r"SECUFINDINGS-(\d+)", line)
         if m:
             pairs.append((repo, f"SECUFINDINGS-{m.group(1)}"))
 

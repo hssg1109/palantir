@@ -38,6 +38,8 @@
 | 2026-06-25 | OCB / OCBSUGAR | ocb-nrn | all (injection / xss / file / data / sca) | ✅ | ✅ | ✅ | ✅ | ✅ | state/ocb-nrn/llm_data_access_log.json |
 | 2026-06-16 | OCB / OCBWEBVIEW | ocb-nxmile-mq-worker | all (injection / xss / file / data / sca) | ✅ | ✅ | ✅ | ✅ | ✅ | state/ocb-nxmile-mq-worker/llm_data_access_log.json |
 | 2026-06-30 | OCB / OCBWEBVIEW | ocb-ogeul-admin-frontend | all (injection / xss / file / data / sca) | ✅ | ✅ | ✅ | ✅ | ✅ | state/ocb-ogeul-admin-frontend/llm_data_access_log.json |
+| 2026-07-24 | OCB / OCBNFT | ocb-nft-batch | all (injection / xss / file / data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-nft-batch/llm_data_access_log.json |
+| 2026-08-03 | OCB / OCBNFT | ocb-nft-backend | all (injection / xss / file / data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-nft-backend/llm_data_access_log.json |
 | 2026-06-15 | OCB / OCBSUGAR | ocb-soi-appweb | all (injection / xss / file / data / sca) | ✅ | ✅ | ✅ | ✅ | ✅ | state/ocb-soi-appweb/llm_data_access_log.json |
 | 2026-06-30 | OCB / OCBWEBVIEW | ocb-webview-admin-api | all (injection / xss / file / data / sca) | ✅ | ✅ | ✅ | ✅ | ✅ | state/ocb-webview-admin-api/llm_data_access_log.json |
 | 2026-06-23 | OCB / OCBWEBVIEW | ocb-webview-api | all (injection / xss / file / data / sca) | ✅ | ✅ | ✅ | ✅ | ✅ | state/ocb-webview-api/llm_data_access_log.json |

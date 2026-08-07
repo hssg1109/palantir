@@ -720,6 +720,10 @@ _REDACT_JDBC_RE = re.compile(
     # JDBC URL: jdbc:mysql://host:port/db 등 (host 부분이 IP일 수 있음)
     r'(?i)(jdbc:[a-z0-9+:]+://)[^\s"\'?;]+',
 )
+# 키 이름(AWS_ACCESS_KEY_ID 등 _ID 접미사)이 위 _REDACT_SECRET_VALUE_RE의
+# key 후보군과 어긋나 값이 그대로 남는 사례(2026-08-07 ocb-nft-batch 노출 사고)를
+# 막기 위해 키 이름과 무관하게 값 자체의 알려진 시크릿 포맷을 별도로 잡는다.
+_REDACT_AWS_KEY_RE = re.compile(r'\b(?:AKIA|ASIA)[0-9A-Z]{16}\b')
 
 
 def _masked_snippet(content: str, pos: int, window: int = 120) -> str:
@@ -736,7 +740,9 @@ def _masked_snippet(content: str, pos: int, window: int = 120) -> str:
     raw = _REDACT_SECRET_VALUE_RE.sub(
         lambda m: m.group("key") + "=[REDACTED]", raw
     )
-    # 3) 잔여 IPv4 주소 마스킹 (JDBC 치환 후 남은 IP)
+    # 3) AWS Access Key ID (키 이름 매칭 실패와 무관하게 값 포맷으로 탐지)
+    raw = _REDACT_AWS_KEY_RE.sub("[REDACTED_AWS_ACCESS_KEY_ID]", raw)
+    # 4) 잔여 IPv4 주소 마스킹 (JDBC 치환 후 남은 IP)
     raw = _REDACT_IPV4_RE.sub("[REDACTED_IP]", raw)
     return raw
 

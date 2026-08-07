@@ -21,6 +21,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import secret_scan_gate
+
 PALANTIR_DIR = Path(__file__).resolve().parent.parent
 STATE_DIR    = PALANTIR_DIR / "state"
 LOGS_DIR     = PALANTIR_DIR / "logs"
@@ -199,6 +202,7 @@ def main() -> int:
 
     # ── 1. 파일 복사 ─────────────────────────────────────────
     copied_repos: list[str] = []
+    copied_paths: list[Path] = []
     skipped_repos: list[str] = []
 
     for repo, final_report in repo_entries:
@@ -217,17 +221,25 @@ def main() -> int:
 
         n = 0
         for f in findings:
-            shutil.copy2(f, dest_wsl / f.name)
+            dst = dest_wsl / f.name
+            shutil.copy2(f, dst)
+            copied_paths.append(dst)
             n += 1
         if scan_meta:
-            shutil.copy2(scan_meta, dest_wsl / "scan_meta.json")
+            dst = dest_wsl / "scan_meta.json"
+            shutil.copy2(scan_meta, dst)
+            copied_paths.append(dst)
             n += 1
         if final_report:
-            shutil.copy2(final_report, dest_wsl / final_report.name)
+            dst = dest_wsl / final_report.name
+            shutil.copy2(final_report, dst)
+            copied_paths.append(dst)
             n += 1
         if repo_meta:
             # repo_meta.json은 run_id와 무관한 repo 레벨 파일 — 날짜 폴더가 아닌 <repo>/ 루트에 저장
-            shutil.copy2(repo_meta, STAGE_WSL / repo / "repo_meta.json")
+            dst = STAGE_WSL / repo / "repo_meta.json"
+            shutil.copy2(repo_meta, dst)
+            copied_paths.append(dst)
             n += 1
 
         print(f"  [+] {repo:<40} → stage/{repo}/{folder_name}/  ({n}개)")
@@ -238,6 +250,15 @@ def main() -> int:
         return 1
 
     print(f"\n  복사 완료: {len(copied_repos)}개 레포 / 건너뜀: {len(skipped_repos)}개")
+
+    # 업로드 직전 최후 방어선: 마스킹 누락 시크릿 원문 검사 (2026-08-07 ocb-nft-batch 사고 재발방지)
+    gate_violations = secret_scan_gate.scan_paths(copied_paths)
+    if gate_violations:
+        print("\n[BLOCKED] 시크릿 원문 패턴이 감지되어 업로드를 중단합니다:")
+        for msg in gate_violations:
+            print(msg)
+        print("  → 상류 마스킹 로직(scan_data_protection.py / generate_final_report.py) 확인 후 재시도하세요.")
+        return 1
 
     if args.dry_run:
         print("\n[dry-run] git push 생략")

@@ -59,6 +59,7 @@ SKILL_FINDINGS = {
 SKILL_COL_IDX  = {"injection": 3, "xss": 4, "file": 5, "data": 6, "sca": 7}
 REPORT_COL_IDX = 8
 JIRA_COL_IDX   = 9
+FORTIFY_COL_IDX = 10
 
 # Confluence 페이지 제목
 CF_TITLE     = "OCB 서비스 군 보안 진단 계획"
@@ -153,6 +154,42 @@ def mark_jira_ticket(repo: str, jira_key: str) -> int:
                 current = cells[JIRA_COL_IDX].strip()
                 if current != cell_value:
                     cells[JIRA_COL_IDX] = f" {cell_value} "
+                    changed += 1
+            line = "|".join(cells)
+        new_lines.append(line)
+
+    if changed:
+        PLAN_MD.write_text("\n".join(new_lines), encoding="utf-8")
+    return changed
+
+
+# ── Fortify 진단 여부 컬럼 갱신 ──────────────────────────────────────────────
+
+def mark_fortify_ticket(repo: str, fortify_key: str | None) -> int:
+    """
+    ocb_scan_plan.md 내 해당 repo의 Fortify 진단 여부 컬럼을 갱신한다.
+    fortify_key: 'FORTIFY-1234' 형식 → [JIRA:FORTIFY-1234] 로 저장 (Confluence Jira 매크로 변환용)
+                 None 또는 그 외 값 → '—' (미확인/미진단) 표시
+    반환: 변경된 셀 수.
+    """
+    import re as _re
+    if fortify_key and _re.match(r'^[A-Z]+-\d+$', fortify_key):
+        cell_value = f"[JIRA:{fortify_key}]"
+    else:
+        cell_value = fortify_key or "—"
+
+    text = PLAN_MD.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    new_lines = []
+    changed = 0
+
+    for line in lines:
+        if f"`{repo}`" in line and "|" in line:
+            cells = line.split("|")
+            if len(cells) > FORTIFY_COL_IDX:
+                current = cells[FORTIFY_COL_IDX].strip()
+                if current != cell_value:
+                    cells[FORTIFY_COL_IDX] = f" {cell_value} "
                     changed += 1
             line = "|".join(cells)
         new_lines.append(line)
@@ -506,6 +543,11 @@ def main():
              "예: --jira ocb-webview-api PROJ-1234",
     )
     parser.add_argument(
+        "--fortify", nargs=2, metavar=("REPO", "FORTIFY_KEY"),
+        help="Fortify 진단 여부 컬럼 갱신. FORTIFY_KEY: 'FORTIFY-1234' 또는 '—'\n"
+             "예: --fortify ocb-webview-api FORTIFY-1234",
+    )
+    parser.add_argument(
         "--sca-only", nargs=2, metavar=("REPO", "SCA_COUNT"),
         help="SCA 전용 케이스 누적 기록. SAST 양호 + SCA 취약 존재 시 사용.\n"
              "예: --sca-only ocb-iam 7",
@@ -596,6 +638,20 @@ def main():
             print(f"[OK] {repo} — Jira 티켓 컬럼 갱신 완료: {jira_key} ({n}개 셀)")
         else:
             print(f"[WARN] {repo}: Jira 티켓 컬럼 갱신할 항목을 찾지 못했습니다.")
+
+        if not args.no_sync:
+            sync_confluence()
+        sync_service_history()
+        return
+
+    # ── --fortify ─────────────────────────────────────────────────────────────
+    if args.fortify:
+        repo, fortify_key = args.fortify
+        n = mark_fortify_ticket(repo, fortify_key)
+        if n > 0:
+            print(f"[OK] {repo} — Fortify 진단 여부 컬럼 갱신 완료: {fortify_key} ({n}개 셀)")
+        else:
+            print(f"[WARN] {repo}: Fortify 진단 여부 컬럼 갱신할 항목을 찾지 못했습니다.")
 
         if not args.no_sync:
             sync_confluence()

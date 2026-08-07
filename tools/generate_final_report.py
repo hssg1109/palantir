@@ -737,10 +737,14 @@ _RE_API_TOKEN = re.compile(r"\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b")
 _RE_UUID = re.compile(
     r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"
 )
+# pattern 6: AWS Access Key ID — 키 이름(AWS_ACCESS_KEY_ID)이 _RE_KV의 키워드
+# 후보군과 어긋나 값이 그대로 남는 사례(2026-08-07 ocb-nft-batch 노출 사고)가 있어
+# 키 이름과 무관하게 값 자체의 알려진 포맷으로 탐지한다.
+_RE_AWS_KEY = re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
 
 
 def _sanitize_secret_expand(text: str, category: str) -> str:
-    """HARDCODED_SECRET / SECRET_EXPOSURE 카테고리 expand 텍스트에서 실제 credential 값을 마스킹.
+    """HARDCODED_SECRET / SECRET_EXPOSURE 카테고리 텍스트에서 실제 credential 값을 마스킹.
 
     정책:
     - 설정 key 이름(spring.datasource.hikari.password 등)은 그대로 유지
@@ -749,6 +753,9 @@ def _sanitize_secret_expand(text: str, category: str) -> str:
     - 32자+ hex 문자열 (AES key, 해시값 등) → [REDACTED-KEY]
     - UUID 형식 토큰 → [REDACTED-TOKEN]
     - OpenAI sk-proj- 등 알려진 토큰 접두사 → [REDACTED-TOKEN]
+    - AWS Access Key ID(AKIA/ASIA...) → [REDACTED-AWS-KEY]
+    증거 코드 스니펫(_render_finding의 메인 코드블록)에도 동일하게 적용해야
+    한다 — expand 섹션에만 적용하면 메인 스니펫으로 시크릿이 새는 것을 막지 못한다.
     """
     cat = (category or "").upper()
     if cat not in _SECRET_CATEGORIES:
@@ -758,6 +765,7 @@ def _sanitize_secret_expand(text: str, category: str) -> str:
     text = _RE_HEX32.sub("[REDACTED-KEY]", text)
     text = _RE_API_TOKEN.sub("[REDACTED-TOKEN]", text)
     text = _RE_UUID.sub("[REDACTED-TOKEN]", text)
+    text = _RE_AWS_KEY.sub("[REDACTED-AWS-KEY]", text)
     return text
 
 
@@ -865,6 +873,10 @@ def _render_finding(sub_no: str, skill: str, f: dict) -> list[str]:
         evidence = {}
     snippet  = (evidence.get("code_snippet") or evidence.get("snippet")
                 or f.get("code_snippet") or "")
+    # HARDCODED_SECRET / SECRET_EXPOSURE: 메인 증거 스니펫도 expand 섹션과
+    # 동일하게 마스킹 (2026-08-07 ocb-nft-batch AWS Key 노출 사고 재발방지 —
+    # 기존에는 :::expand 섹션만 마스킹되고 이 메인 코드블록은 무가공 렌더링됐음)
+    snippet  = _sanitize_secret_expand(snippet, category)
 
     ep, af_str, handler = _location_cells(f)
 

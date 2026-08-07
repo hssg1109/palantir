@@ -19,19 +19,32 @@ tools: Read, Glob, Grep, Bash, Edit, Write
 
 ## Workflow
 
-인수: `$ARGUMENTS` = `<TICKET-KEY> [--full]` (예: `SECUFINDINGS-1234`, `SECUFINDINGS-1234 --full`)
+인수: `$ARGUMENTS` = `<TICKET-KEY> [--full] [--branch <BRANCH>]`
+(예: `SECUFINDINGS-1234`, `SECUFINDINGS-1234 --full`, `SECUFINDINGS-1234 --branch feature/OCBWEBVIEW-7268`)
 
 인수가 없으면 사용법을 안내하고 대기한다:
 ```
-사용법: /sec-scan-remediation <TICKET-KEY> [--full]
+사용법: /sec-scan-remediation <TICKET-KEY> [--full] [--branch <BRANCH>]
 예시:   /sec-scan-remediation SECUFINDINGS-1234
-        /sec-scan-remediation SECUFINDINGS-1234 --full   (carry-forward 없이 전량 재검증)
+        /sec-scan-remediation SECUFINDINGS-1234 --full              (carry-forward 없이 전량 재검증)
+        /sec-scan-remediation SECUFINDINGS-1234 --branch develop    (기본 브랜치 대신 develop에서 검증)
 ```
 
 - **2차 이상 실행 시 기본 동작(carry-forward)**: 동일 티켓으로 이미 이행점검을 돌린 적이 있으면,
   직전 회차에서 `조치완료`로 확정된 항목은 재검증을 건너뛰고 이전 판정을 그대로 이어받는다 —
   1차에서 미조치/부분조치/확인불가로 남은 항목만 최신 코드로 다시 검증한다. 절차는 Phase 1 참고.
 - `--full`을 붙이면 이 carry-forward를 끄고 기존처럼 전체 대상을 처음부터 재검증한다
+- **`--branch <BRANCH>`**: `clone_repo.py`의 브랜치 자동 감지(가장 최근 커밋된 안정 브랜치)를 끄고
+  지정한 브랜치를 강제로 clone한다. 개발자가 "아직 안 머지된 feature/hotfix 브랜치에서 먼저
+  확인해달라"고 요청한 경우 등에 사용 — Phase 2 참고.
+  - `--branch` 미지정 시 동작은 기존과 동일(자동 감지)하며, 이 옵션은 순수 추가(opt-in)라 기존
+    호출부(`/sec-remediation-check <TICKET-KEY>`)의 동작을 바꾸지 않는다.
+  - **carry-forward와의 상호작용 주의**: carry-forward는 브랜치가 아니라 (repo, uid, ticket) 기준으로
+    이전 판정을 재사용한다 — 직전 회차가 다른 브랜치(예: master)에서 검증한 `조치완료`라도 이번 회차가
+    `--branch`로 아직 병합 전인 feature 브랜치를 지정했다면 그 브랜치엔 해당 수정이 없을 수 있다.
+    feature/hotfix 브랜치를 지정하는 경우는 통상 "그 브랜치에서 실제로 고쳐졌는지"를 확인하려는
+    목적이므로 **`--full`을 함께 지정**해 carry-forward를 끄는 것을 권장한다(자동 강제는 하지 않음 —
+    사용자가 명시적으로 판단해 조합).
   (개발자가 관련 코드를 광범위하게 리팩터링했다고 알려온 경우 등에 사용).
 
 ### 실행 원칙 (CRITICAL — 반드시 준수)
@@ -94,11 +107,16 @@ targets 자체가 0건이거나 전건이 carry-forward인 경우 — Phase 2(cl
 > Phase 1에서 재검증 대상이 0건으로 확정된 경우(전량 carry-forward) 이 Phase는 생략한다.
 
 ```bash
+# $ARGUMENTS에 --branch가 없으면 (기본, 자동 감지):
 python3 tools/clone_repo.py <PROJECT> <REPO> --force
+
+# $ARGUMENTS에 --branch <BRANCH>가 있으면 그대로 전달:
+python3 tools/clone_repo.py <PROJECT> <REPO> --force --branch <BRANCH>
 ```
 
 - `<PROJECT>`는 `state/<repo>/*/scan_meta.json`의 `bb_project` 필드에서 확인 (없으면 `tools/list_ocb_repos.py` 등 기존 인벤토리로 조회)
-- clone 직후 커밋 해시/일시를 확보해 `targets.json`에 병기 (개발자가 답한 "조치 일자" 이후 커밋인지 1차 정황 판단용 — `git -C testbed/<repo> log -1 --format='%H %cI'`)
+- clone 직후 커밋 해시/일시/브랜치명을 확보해 `targets.json`에 병기 (개발자가 답한 "조치 일자" 이후 커밋인지 1차 정황 판단용 — `git -C testbed/<repo> log -1 --format='%H %cI'`, 브랜치는 `git -C testbed/<repo> branch --show-current`) — Phase 4 결과 파일의 `base_branch`/"검증 브랜치" 표기에 그대로 사용한다
+- `--branch` 지정 시 해당 브랜치가 원격에 없으면 `clone_repo.py`가 non-zero exit로 실패한다 — clone 실패와 동일하게 blocking 오류로 처리(자격증명/네트워크 문제와 구분해 "지정한 브랜치명 확인 필요"로 보고 후 대기)
 - clone 실패는 blocking 오류 — 자격증명/네트워크 문제이므로 보고 후 대기
 
 ### Phase 3 — Finding별 조치 검증 (LLM-Check, in-context 수행)
@@ -141,7 +159,7 @@ python3 tools/clone_repo.py <PROJECT> <REPO> --force
 - **전량 short-circuit인 경우**: 위 표 대신 "전 대상(N건)이 직전 회차(<날짜>)에 조치완료로 확인됨 — 이번 회차는 신규 clone/재검증 없이 이전 결과를 그대로 확인만 함"으로 출력하고 아래 파일 저장은 그대로 수행한다(감사 추적 목적).
 
 **파일 저장**:
-- `state/<repo>/remediation/<TICKET-KEY>/result_<YYYYMMDD>.json` — finding_id별 판정/근거/note. 각 항목에 `"carried_forward": true|false`, carry-forward인 경우 `"carried_forward_from": "<이전 checked_at>"` 필드를 추가한다.
+- `state/<repo>/remediation/<TICKET-KEY>/result_<YYYYMMDD>.json` — finding_id별 판정/근거/note. 각 항목에 `"carried_forward": true|false`, carry-forward인 경우 `"carried_forward_from": "<이전 checked_at>"` 필드를 추가한다. 최상위에 `"base_branch"`(Phase 2에서 확보한 실제 clone 브랜치명)를 반드시 기록한다 — `--branch` 지정 없이 자동 감지된 경우도 마찬가지(어떤 브랜치를 기준으로 판정했는지는 항상 감사 대상).
 - `state/<repo>/remediation/<TICKET-KEY>/result_<YYYYMMDD>.md` — 사람이 읽는 결과 요약
 - `state/<repo>/remediation/<TICKET-KEY>/jira_comment_<YYYYMMDD>.txt` — Jira 위키마크업 코멘트 draft (아래 템플릿)
 
