@@ -224,32 +224,39 @@ LLM 보조 분석 (이 프롬프트)
 
 | 우선순위 | 그룹 기준 | 심각도 상한 |
 |---|---|---|
-| 1 | 운영 코드(Java/Kotlin 소스) 내 리터럴 → 파일별 1건 | Critical |
+| 1 | 운영 코드(Java/Kotlin 소스) 내 리터럴 → 파일별 1건 | **High** |
 | 2 | `src/main/resources/` (공통 설정) → 파일별 1건 | High |
 | 3 | `src/main/resources-ccalp/` (ALP/운영 유사) → 파일별 1건 | High |
 | 4 | `src/main/resources-cc*/` (개발/스테이지) → 환경별 파일 유형 그룹 | Medium |
 | 5 | `src/main/resources-local-*/` (로컬 개발) → 1건 | Low |
 
+> **Critical 상한 규정**: 하드코딩 자격증명/암호화 키는 자격증명 종류·개수(DB PW+AES 키+FTP PW 등 복수 결합 포함)와 무관하게 **Critical을 부여하지 않는다 — 상한은 High**. Critical은 저장소 접근 같은 선행 조건 없이 실제 즉시 노출되었거나(공개 저장소, 로그 노출, 응답 평문 반환 등) 유출 가능성이 구체적으로 확인된 경우에만 예외적으로 부여한다. "운영 코드 경로"·"매우 민감한 데이터 유형"이라는 사실만으로는 Critical 근거가 되지 않는다.
+
 **병합 규칙:**
 1. 동일 파일 내 여러 라인 → 1개 finding, `lines` 배열에 전체 라인 번호 나열
 2. 동일 환경의 동일 유형 파일 (예: ccdev/*.properties 3파일) → 1개 finding, `file` 필드에 쉼표 구분 나열
-3. 병합 시 가장 높은 severity 유지
+3. 병합 시 가장 높은 severity 유지 (단, Critical 상한 규정을 넘지 않음)
 4. `evidence.code_snippet`에 대표 1건만 기재, 나머지는 "외 N건" 표기
 5. **운영 자격증명 확정 근거** (`newocbpushreal` 'real' 접미사, `IS_DEBUG=false` 분기 등)는 `manual_review_note`에 명시
 
-**LLM 심각도 상향 조건 (케이스 A):**
-- 소스 경로가 `src/main/java/` 또는 `src/main/kotlin/` (운영 코드) → **케이스 A 자동 확정**: `severity: Critical`, `needs_review: false` 강제. 별도 확인 불필요.
+**LLM 심각도 확정 조건 (케이스 A):**
+- 소스 경로가 `src/main/java/` 또는 `src/main/kotlin/` (운영 코드) → **케이스 A 자동 확정**: `severity: High`, `needs_review: false` 강제. 별도 확인 불필요.
 - 설정 파일명에 `real`, `prod`, `운영` 포함 → **운영 자격증명 확정**: `needs_review: false` 강제.
 
-> ⚠️ **주의**: `src/main/java/` 경로 findings에 `needs_review: true`를 절대 남기지 않는다. 운영 코드 내 리터럴은 코드 경로만으로 운영 키 확정 근거가 된다.
+> ⚠️ **주의**: `src/main/java/` 경로 findings에 `needs_review: true`를 절대 남기지 않는다. 운영 코드 내 리터럴은 코드 경로만으로 운영 키 확정 근거가 된다. 단, 확정되는 severity는 Critical이 아니라 **High**다.
 
-> 🔍 **[휴리스틱 탐지 예외]** `needs_review: true`로 플래그된 `HARDCODED_SECRET` — 특히 `Key`, `InitialVector`, `IV`, `HASH_SALT`, `ECG_AES_KEY` 등 **도메인 전용 변수명 또는 고엔트로피 문자열 휴리스틱으로 탐지된 결과** — 는 `src/main/java/` 경로여도 무조건 Critical로 확정하지 말 것.
+> 🔍 **[휴리스틱 탐지 예외]** `needs_review: true`로 플래그된 `HARDCODED_SECRET` — 특히 `Key`, `InitialVector`, `IV`, `HASH_SALT`, `ECG_AES_KEY` 등 **도메인 전용 변수명 또는 고엔트로피 문자열 휴리스틱으로 탐지된 결과** — 는 `src/main/java/` 경로여도 무조건 High로 확정하지 말 것.
 > 코드 문맥을 직접 확인하여 다음 세 가지를 판별한 후 severity를 결정한다:
 > 1. **실제 사용 여부**: 해당 변수가 `Cipher.init()`, `new SecretKeySpec()`, `MessageDigest` 등 암호화 함수에 실제 전달되는가?
 > 2. **테스트/더미 여부**: 변수명, 주석, 파일 경로에 test/mock/dummy/sample 등 힌트가 있는가?
 > 3. **환경 구분**: `@Profile`, `application-local.yml`, `@ConditionalOnProperty` 등으로 로컬/개발 환경에만 활성화되는가?
-> → 조건 1 충족 + 조건 2·3 불충족 → `severity: Critical`, `needs_review: false` 확정
+> → 조건 1 충족 + 조건 2·3 불충족 → `severity: High`, `needs_review: false` 확정
 > → 조건 2 또는 3 충족 → `severity: Informational` 또는 `Low`, `needs_review: false` 처리
+
+> 🔁 **[dev/default ↔ 운영 대조 절차, 필수]** dev/default 프로파일(`application-dev.yml`, `application-local.yml` 등)에서 발견된 자격증명은 판정 전 반드시 운영 프로파일(`application-prod.yml`/`real` 접미사 파일 등) 설정값과 username/password를 직접 대조한다.
+> - **동일** → `severity: High` + `manual_review_note`에 "운영과 자격증명 동일" 명시.
+> - **상이** → `severity: Medium` + `report_expand`(조치 권고)에 "운영 DB·계정과 동일한 자격증명 사용 금지" 명시.
+> - 원 스캔의 `manual_review_note`가 "별도 dev 자격증명"이라고 주장하더라도 **반드시 운영 파일과 값을 직접 열어 대조**한다 — 스캔 단계 주석 판독 오류로 실제로는 동일한 사례가 있었다. 대조 없이 dev 프로파일이라는 이유만으로 Medium을 확정하지 말 것.
 
 ---
 
@@ -262,7 +269,7 @@ LLM 보조 분석 (이 프롬프트)
 
 | 상황 | 심각도 | 대응방안 |
 |---|---|---|
-| 외부 API용 토큰/키가 JS 소스코드에 하드코딩 | **Critical** | BFF 아키텍처 전환 (아래 참조) |
+| 외부 API용 토큰/키가 JS 소스코드에 하드코딩 (빌드 번들에 평문 포함 → 즉시 노출 확정) | **High**(Critical 상한 규정 적용 — 즉시 노출 증거가 구체적 유출 사고와 결합되지 않는 한 Critical 미부여) | BFF 아키텍처 전환 (아래 참조) |
 | `.env` 파일이 git 추적 + 빌드 번들 참조 | **High** | `.gitignore` 추가 + CI/CD 환경변수 주입 |
 | `.env` 파일이 git 추적이나 소스코드 미참조 | **Medium** | 잔존값 여부 확인 후 `.gitignore` 추가 |
 
@@ -312,17 +319,16 @@ BFF 서버가 서버사이드 환경변수에서 토큰을 로드하여 외부 A
 | 내부 추적 식별자 | `userId`, `feedId`, `feedSeq`, `asumUid` | 애플리케이션 내부 동작 추적용. 고객 식별에 직결되지 않음 |
 | 비즈니스 상수/URL | `pushType`, `redirectUri` | 단순 상수값·URL 경로. 개인정보 미포함 |
 | 일반 예외 메시지 | `e.message`, `exception.message` | 오류 타입·메시지 텍스트. 단, **토큰 원문·Secret Key가 결합 출력되는 경우는 TP** |
-| mbrId 단독 업무 이벤트 로그 | 아래 3조건 AND 판정 (리터럴 포맷 무관) | **OCB 사내 정책 허용**: CS·장애 대응 목적의 업무 처리 결과 추적 로그. mbrId 외 민감정보 미결합 시 FP 처리. |
+| mbrId 단독 업무 이벤트 로그 | 아래 2조건 AND 판정 (리터럴 포맷 무관) | **OCB 사내 정책 허용**: CS·장애 대응 목적의 업무 처리 결과 추적 로그. mbrId 외 민감정보 미결합 시 FP 처리. |
 
-> **[판정 방식 — AND 조건, 포맷이 아니라 내용 기준]**
-> `event=XXX mbrId={} result=XXX reason_code={}` 같은 리터럴 key=value 포맷 일치를 요구하지 않는다. 실제 코드는 자유서술형 메시지(`"drawLotto final [{}] seq:{}, {}P received!"` 등)가 대부분이므로, 다음 3가지 조건을 **모두(AND)** 만족하면 포맷과 무관하게 FP(업무 추적성 로그)로 처리한다:
+> **[판정 방식 — 2조건 AND, 포맷이 아니라 내용 기준]** (정책 §16.2/§17 확정)
+> `event=XXX mbrId={} result=XXX reason_code={}` 같은 리터럴 key=value 포맷 일치를 요구하지 않는다. 실제 코드는 자유서술형 메시지(`"drawLotto final [{}] seq:{}, {}P received!"` 등)가 대부분이므로, 다음 2가지 조건을 **모두(AND)** 만족하면 포맷과 무관하게 FP(업무 추적성 로그)로 처리한다:
 > 1. **식별자 존재**: `mbrId`(또는 암호화된 식별자)가 로그 파라미터로 포함됨
-> 2. **클린 데이터**: 아래 금지조합(전화번호/CI/생년월일/카드번호/주소/세션ID/토큰/요청·응답 전문)이 없음
-> 3. **업무 맥락 포함**: 단순 진입(enter)/파라미터 확인이 아니라, 상태 변화를 나타내는 결과값·실패사유가 함께 로깅됨 (예: null 체크 실패, 포인트 지급 결과, 중복/한도초과 사유, insert 실패 등)
+> 2. **금지유형 미해당**: 아래 금지조합(전화번호/CI/생년월일/카드번호/주소/세션ID/토큰/요청·응답 전문)이 없고, 전문/객체 dump가 아님
 >
-> 3조건 중 하나라도 미충족 시 TP. 특히 **"단순 진입 로그"**(`log.info("XXX - [{}], {}", mbrId, version)`처럼 mbrId+API 버전/파라미터만 있고 결과·사유가 없는 패턴)는 조건 3 미충족으로 TP — 정책 §8.2 "INFO 지양 예시"에 해당.
+> **"업무 맥락(결과값·실패사유) 포함 여부"는 판정 조건이 아니다.** mbrId만 단독으로 포함된 **단순 진입(enter) 로그**(`log.info("XXX - [{}], {}", mbrId, version)`처럼 mbrId+API 버전/파라미터만 있고 결과·사유가 없는 패턴)도 조건 2(금지유형 미해당)만 충족하면 FP로 유지한다. 과거 "조건 3(업무 맥락) 미충족 시 TP"로 판정하던 로직은 폐기됨 — 단순 진입 로그를 TP로 잘못 판정하지 말 것.
 >
-> mbrId 단독 업무 이벤트 로그라도 다음 조건 중 하나라도 충족하면 TP:
+> mbrId 단독 로그라도 다음 조건 중 하나라도 충족하면(=조건 2 미충족) TP:
 > - 전화번호(mdn/phone) · CI(ciNo) · 생년월일(birthDate) · 카드번호(cardNo) · 주소(addr) 결합
 > - 세션ID(sessionId) · Access Token · Refresh Token 결합
 > - 요청/응답 전문(request body, response body) 결합
@@ -350,7 +356,7 @@ BFF 서버가 서버사이드 환경변수에서 토큰을 로드하여 외부 A
 
 | 레벨 | mbrId 허용 여부 | 비고 |
 |---|---|---|
-| `DEBUG` | **원칙적 금지** | 로컬 개발·테스트 데이터에서만 허용. 운영 환경 탐지 시 → 정보/Medium |
+| `DEBUG` | **원칙적 금지** | 로컬 개발·테스트 데이터에서만 허용. 운영 환경 탐지 시 → 정보/Medium. **단, 운영 프로파일 설정(`application-prod.yml` 등)에 `logging.level.<package>: Debug`가 실제로 명시되어 있어 운영에서 DEBUG 레벨이 활성화됨이 확인되면 → 취약/High로 상향** |
 | `INFO` | **CS 목적 업무 이벤트만 허용** | 단순 메서드 진입·파라미터 확인·객체 dump 용도는 금지 |
 | `WARN` / `ERROR` | **CS 대응 실패 로그에 허용** | 단, 민감정보 조합·전문 로그는 금지 |
 
@@ -361,11 +367,12 @@ WARN  event=COUPON_ISSUE  mbrId=123456 result=FAIL reason_code=ALREADY_ISSUED co
 ERROR event=AUTH_VERIFY   mbrId=123456 result=FAIL error_code=AUTH_PROVIDER_TIMEOUT
 ```
 
-**허용되는 로그 패턴 (FP 처리) — 자유서술형 예시 (AND 3조건 충족, 실무 코드에서 가장 흔한 형태):**
+**허용되는 로그 패턴 (FP 처리) — 자유서술형 예시 (AND 2조건 충족, 실무 코드에서 가장 흔한 형태):**
 ```kotlin
-log.warn("drawLotto[{}] lottoMeta[{}] is null", mbrId, lottoMeta)                       // 식별자+실패사유 ✓, 금지조합 없음 ✓
-log.info("drawLotto final [{}] seq:{}, {}P received!", mbrId, seq, winPoint)            // 식별자+처리결과 ✓, 금지조합 없음 ✓
-log.warn("[{}] INVITE_CODE {} already received lotto.", mbrId, inviteCode)              // 식별자+실패사유 ✓, inviteCode는 target_id 성격
+log.warn("drawLotto[{}] lottoMeta[{}] is null", mbrId, lottoMeta)                       // 식별자 ✓, 금지조합 없음 ✓
+log.info("drawLotto final [{}] seq:{}, {}P received!", mbrId, seq, winPoint)            // 식별자 ✓, 금지조합 없음 ✓
+log.warn("[{}] INVITE_CODE {} already received lotto.", mbrId, inviteCode)              // 식별자 ✓, inviteCode는 target_id 성격
+log.info("XXX - [{}], {}", mbrId, version)                                              // 식별자 ✓, 금지조합 없음 ✓ — 단순 진입 로그도 FP
 ```
 
 **금지되는 로그 패턴 (TP 처리, 취약/High):**
@@ -382,7 +389,7 @@ ERROR externalResponse={...외부 연동 응답 전문...}                      
 | 버킷 | 조건 | finding 1건으로 통합 | 결과 | 심각도 |
 |---|---|---|---|---|
 | `high` | `info/warn/error/fatal` 레벨 보호 필수 변수 로깅 | 전체 파일 × 라인 집계 | **취약** | **High** |
-| `low` | `debug/trace` 레벨 보호 필수 변수 로깅 | 전체 파일 × 라인 집계 | 정보 | **Medium** |
+| `low` | `debug/trace` 레벨 보호 필수 변수 로깅 | 전체 파일 × 라인 집계 | 정보 | **Medium**(운영 프로파일에서 DEBUG 활성화 확인 시 → **High**) |
 
 **evidence 기재 방법:**
 ```
@@ -765,9 +772,9 @@ API_RESPONSE_PII 자동탐지 건
 
 | 심각도 | 조건 |
 |---|---|
-| **Critical** | 소스코드 내 DB 비밀번호/API 시크릿/AWS 키 하드코딩 + 외부 접근 가능 |
-| **High** | CORS 와일드카드 + credentials, JWT `none` 알고리즘, 미서명 토큰 허용 |
-| **Medium** | 응답 DTO 민감정보 미마스킹, 관리자 페이지 미분리, PII 직접 로깅, Origin 우회 |
+| **Critical** | 저장소 접근 등 선행 조건 없이 **즉시 노출**이 구체적으로 확인된 경우만(공개 저장소, 로그 노출, 응답에 평문 반환 등). 소스코드 내 하드코딩 자체는 종류·개수와 무관하게 Critical 아님 — Critical 상한 규정 참조 |
+| **High** | 소스코드 내 DB 비밀번호/API 시크릿/AWS 키 등 하드코딩(운영 코드·운영 자격증명 동일 케이스 포함), CORS 와일드카드 + credentials, JWT `none` 알고리즘, 미서명 토큰 허용 |
+| **Medium** | 응답 DTO 민감정보 미마스킹, 관리자 페이지 미분리, PII 직접 로깅, Origin 우회, dev/default 프로파일 자격증명(운영과 상이 확인 시) |
 | **Low** | 취약 해시(MD5·SHA-1) 사용, 에러 페이지 서버 버전 노출, 주석 내 테스트 계정 |
 | **Info** | 보안 개선 권고 (JWT 만료 미설정, AES/CBC→GCM 전환, CORS 정책 강화 등) |
 

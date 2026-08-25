@@ -92,6 +92,37 @@
 | 2026-07-28 | OCBX | ocbx-nonce-observer | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocbx-nonce-observer/llm_data_access_log.json |
 | 2026-07-27 | OSA | displayadmin_server | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/displayadmin_server/llm_data_access_log.json |
 | 2026-07-29 | OSA | displayadmin_ui | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/displayadmin_ui/llm_data_access_log.json |
+| 2026-08-03 | OCBNFT | ocb-nft-frontend | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-nft-frontend/llm_data_access_log.json |
+| 2026-08-03 | OCBNFT | ocb-nft-admin-front | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-nft-admin-front/llm_data_access_log.json |
+| 2026-07-28 | OCBNFT | ocb-nft-admin-front-nextjs | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-nft-admin-front-nextjs/llm_data_access_log.json |
+| 2026-07-24 | OCBNFT | ocb-nft-fingerlabs | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-nft-fingerlabs/llm_data_access_log.json |
+| 2026-08-03 | OCBNFT | ocb-nft-homepage | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-nft-homepage/llm_data_access_log.json |
+| 2026-07-23 | OCBNFT | ocb-nft-lambda | all (injection/xss/file/data) | ✅ | ✅ | ✅ | ☐ | ☐ | state/ocb-nft-lambda/llm_data_access_log.json |
+| 2026-08-10 | OCBPU | ocbpayui-front-api | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpayui-front-api/llm_data_access_log.json |
+| 2026-08-10 | OCBPU | ocbpayui-merchant-api | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpayui-merchant-api/llm_data_access_log.json |
+| 2026-08-05 | OCBPU | ocbpayui-admin-api | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpayui-admin-api/llm_data_access_log.json |
+| 2026-08-10 | OCBPU | ocbpayui-frontend-admin | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpayui-frontend-admin/llm_data_access_log.json |
+| 2026-08-05 | OCBPU | ocb-nxmile-grpc | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocb-nxmile-grpc/llm_data_access_log.json |
+| 2026-08-05 | OCBPU | ocbpayui-nxmile-grpc | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpayui-nxmile-grpc/llm_data_access_log.json |
+| 2026-08-13 | OCBPASS | ocbpass-app | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-app/llm_data_access_log.json |
+| 2026-08-13 | OCBPASS | ocbpass-admin | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-admin/llm_data_access_log.json |
+| 2026-08-13 | OCBPASS | ocbpass-admin_web | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-admin_web/llm_data_access_log.json |
+| 2026-08-13 | OCBPASS | ocbpass-verify | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-verify/llm_data_access_log.json |
+| 2026-08-13 | OCBPASS | ocbpass-external | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-external/llm_data_access_log.json |
+| 2026-08-11 | OCBPASS | ocbpass-inside | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-inside/llm_data_access_log.json |
+| 2026-08-12 | OCBPASS | ocbpass-newpg | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-newpg/llm_data_access_log.json |
+| 2026-08-18 | OCBPASS | ocbpass-11st | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-11st/llm_data_access_log.json |
+| 2026-08-18 | OCBPASS | ocbpass-operation-support | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-operation-support/llm_data_access_log.json |
+| 2026-08-18 | OCBPASS | ocbpass-batch | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpass-batch/llm_data_access_log.json |
+| 2026-08-18 | OCBPASS | ocbpg | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpg/llm_data_access_log.json |
+| 2026-08-18 | OCBPASS | ocbpg-batch | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpg-batch/llm_data_access_log.json |
+| 2026-08-20 | OCBPASS | ocbpg-manage | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpg-manage/llm_data_access_log.json |
+| 2026-08-20 | OCBPASS | ocbpg-socket-daemon | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/ocbpg-socket-daemon/llm_data_access_log.json |
+| 2026-08-20 | OKICK | okick-event-server | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/okick-event-server/llm_data_access_log.json |
+| 2026-08-20 | OKICK | okick-reward-server | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/okick-reward-server/llm_data_access_log.json |
+| 2026-08-20 | OKICK | okick-event-batch-server | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/okick-event-batch-server/llm_data_access_log.json |
+| 2026-08-20 | OKICK | okick-reward-batch-server | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/okick-reward-batch-server/llm_data_access_log.json |
+| 2026-08-20 | OKICK | okick-front | all (injection/xss/file/data) | ✅ | ✅ | ✅ | 🔲 | 🔲 | state/okick-front/llm_data_access_log.json |
 
 <!-- 실제 이력은 위 예시 행 아래에 추가 -->
 :::

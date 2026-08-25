@@ -360,6 +360,21 @@ XssUtil / AntiSamy 등 커스텀 필터의 **블랙리스트 방식 우회**가 
 
 ---
 
+### 2-B. Proxy XSS (외부 응답 무살균 반환) — 보수적 판정, 취약/High 고정
+
+**기준:** 외부 서버(광고 서버, 제휴사 API 등)의 응답을 살균 없이 `Content-Type: text/html`로 클라이언트에 그대로 반환하는 프록시/중계 엔드포인트는, **외부 서버가 현재 시점에 파라미터를 실제로 반사하는지와 무관하게** 취약/High로 판정한다.
+
+**판정 근거 (하향 금지):**
+- 외부 서버가 지금 파라미터를 반사하지 않더라도, 코드 구조 자체가 Proxy XSS 매개체 — 외부 서버 침해(공급망 공격) 시 즉시 XSS 실현 가능
+- 쿼리 파라미터를 외부 서버로 그대로 전달(`getParameterMap()` 등) + 응답 본문을 살균 없이 그대로 write = 명백한 취약 구조
+- "현재 발현 가능한 특정 사례가 없다"는 이유로 정보/양호로 하향하지 않는다 (SQL `${}` / SpEL StandardEvaluationContext / 전역 XSS 필터 부재와 동일한 보수적 원칙)
+
+**탐지 힌트 (Auto-Scan/코드 탐색 시):**
+- 쿼리 파라미터 또는 `HttpServletRequest.getParameterMap()`을 외부 HTTP 클라이언트 호출(RestTemplate/WebClient/HttpURLConnection 등)에 그대로 전달하는 패턴
+- 해당 응답을 살균(Jsoup/AntiSamy 등) 없이 `response.getWriter().write(...)` 또는 `Content-Type: text/html`로 그대로 반환하는 패턴
+
+---
+
 ### 3. Redirect XSS (리다이렉트)
 
 사용자 입력값을 검증 없이 리다이렉트 대상으로 사용하는 경우.

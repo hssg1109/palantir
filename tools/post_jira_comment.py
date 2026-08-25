@@ -61,6 +61,7 @@ Assignee 개발자 재할당(--reassign-to-developer): 이행점검 워크플로
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -71,6 +72,33 @@ from tools.jira_utils import load_env, jira_headers
 
 PALANTIR_DIR = Path(__file__).resolve().parent.parent
 _TOKEN_VAR = "JIRA_TOKEN_REMEDIATION"
+
+# Jira 위키 렌더러는 {word} 또는 {word:params} 형태를 전부 매크로 토큰으로 파싱한다.
+# 등록된 매크로(color/panel)가 아닌 임의의 {word}가 본문에 섞이면 — 예: 코드에서 그대로
+# 옮겨적은 Spring 경로변수 "/{channel}/ad/banner" — 렌더러가 이를 미등록/미종료 매크로로
+# 오인해 그 지점부터 표·리스트 파싱이 깨지고 이후 전체 내용이 직전 셀 하나에 뭉쳐 들어간다
+# (2026-08-10 SECUFINDINGS-2117 코멘트에서 실제 발생 — 표가 깨지고 줄바꿈이 사라짐).
+# {{ }}(모노스페이스)로 감싸는 것만으로는 부족하다 — 내부에 {word} 패턴이 있으면 매크로
+# 스캐너가 모노스페이스 경계보다 먼저(또는 별도로) {word}를 macro로 인식해 똑같이 깨진다
+# (1차 수정 시도 "/{{{channel}}}/ad/banner"로도 재현 확인). 대신 중괄호 자체를 HTML
+# 엔티티(&#123; / &#125;)로 치환한다 — 위키 파서는 원시 "{"/"}" 문자만 매크로 델리미터로
+# 인식하므로 엔티티 형태는 매크로로 파싱되지 않고, 최종 HTML을 브라우저가 렌더링할 때
+# 엔티티가 "{"/"}"로 디코드되어 화면에는 원래 텍스트와 동일하게 보인다.
+_ALLOWED_WIKI_MACROS = {"color", "panel"}
+_BRACE_MACRO_RE = re.compile(r"(?<!\{)\{([A-Za-z][A-Za-z0-9_]*)(:[^{}\n]*)?\}(?!\})")
+
+
+def _escape_unsafe_brace_macros(text: str) -> tuple[str, list[str]]:
+    """{color}/{panel} 외의 {word} 패턴을 HTML 엔티티로 치환해 매크로 오인식을 방지한다."""
+    escaped: list[str] = []
+
+    def _repl(m: re.Match) -> str:
+        if m.group(1) in _ALLOWED_WIKI_MACROS:
+            return m.group(0)
+        escaped.append(m.group(0))
+        return "&#123;" + m.group(0)[1:-1] + "&#125;"
+
+    return _BRACE_MACRO_RE.sub(_repl, text), escaped
 
 
 def _get_transitions(jira_url: str, headers: dict, ticket: str) -> list[dict]:
@@ -161,6 +189,9 @@ def main() -> int:
             print(f"[오류] 파일 없음: {body_path}", file=sys.stderr)
             return 1
         body_text = body_path.read_text(encoding="utf-8")
+        body_text, escaped_tokens = _escape_unsafe_brace_macros(body_text)
+        if escaped_tokens:
+            print(f"[알림] 미등록 위키 매크로로 오인될 수 있는 패턴 {len(escaped_tokens)}건을 자동으로 {{{{ }}}}(모노스페이스)로 이스케이프함: {', '.join(sorted(set(escaped_tokens)))}")
 
     if not body_text and not args.transition_name:
         print("[오류] --file 또는 --transition-name 중 하나는 있어야 함", file=sys.stderr)

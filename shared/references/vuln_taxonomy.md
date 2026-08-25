@@ -156,9 +156,44 @@
 
 ---
 
+## 6. 인증/인가/어뷰징 취약점 (sec-scan-auth)
+
+> Auto-Scan은 이 표의 category로 **판정하지 않는다** — 후보 endpoint 태깅(inventory enrichment)만 수행하고,
+> 아래 category/severity 최종 배정은 전량 LLM-Check(수동진단)가 담당한다.
+
+| 취약점 유형 | `category` (정확한 표준값) | `cwe_id` | `owasp_category` | 기본 `severity` | `scope.type` |
+|---|---|---|---|---|---|
+| 인증 우회 (필터 예외·permitAll 오설정) | `AUTH_BYPASS` | `CWE-287` | `A07:2021 Identification and Authentication Failures` | `High` | `endpoint` |
+| 세션 관리 취약 (고정/타임아웃 과다/로그아웃 미무효화) | `SESSION_MGMT` | `CWE-613` | `A07:2021 Identification and Authentication Failures` | `Medium` | `config` |
+| Brute-force 방지 부재 (로그인 시도 제한 없음) | `BRUTE_FORCE_PROTECTION` | `CWE-307` | `A07:2021 Identification and Authentication Failures` | `Medium` | `endpoint` |
+| IDOR/BOLA (파라미터 ID로 타인 데이터 접근) | `IDOR` | `CWE-639` | `A01:2021 Broken Access Control` | `High` | `endpoint` |
+| 기능 수준 접근통제 누락 (수직 권한상승) | `MISSING_FUNCTION_ACCESS_CONTROL` | `CWE-862` | `A01:2021 Broken Access Control` | `Critical` | `endpoint` |
+| Mass Assignment (요청바디 role/isAdmin 등 그대로 바인딩) | `MASS_ASSIGNMENT` | `CWE-915` | `A08:2021 Software and Data Integrity Failures` | `High` | `endpoint` |
+| Rate Limit 부재 (포인트/쿠폰/이벤트 어뷰징) | `RATE_LIMIT_ABSENT` | `CWE-799` | `A04:2021 Insecure Design` | `Medium` (금전적 가치 직접 관련 시 `High`) | `endpoint` |
+| 멱등성 부재 (중복요청 포인트/쿠폰 중복지급) | `IDEMPOTENCY_ABSENT` | `CWE-841` | `A04:2021 Insecure Design` | `High` | `endpoint` |
+| 클라이언트 신뢰 비즈니스 로직 (가격/수량 서버 재검증 없음) | `CLIENT_TRUSTED_LOGIC` | `CWE-602` | `A04:2021 Insecure Design` | `Critical` (결제금액 직접 조작 가능 시) | `endpoint` |
+
+### category 표준값 결정 규칙
+
+- `AUTH_BYPASS` — Security 필터 체인 예외 경로(`permitAll`, `.anonymous()`, ignoring 패턴), 인증 어노테이션 우회.
+- `SESSION_MGMT` — 세션 고정(로그인 후 세션ID 재발급 없음), 과도한 세션 타임아웃, 로그아웃 시 세션/토큰 무효화 누락.
+- `BRUTE_FORCE_PROTECTION` — 로그인/OTP/비밀번호 재설정 endpoint에 시도 횟수 제한(Redis 카운터, 계정 잠금 등) 부재.
+- `IDOR` — path/query param으로 받은 리소스 ID에 대해 소유권(현재 로그인 사용자 소유 여부) 검증 없이 조회/수정/삭제 가능한 경우.
+- `MISSING_FUNCTION_ACCESS_CONTROL` — 관리자 전용 기능(계정 변경, 벌크 처리 등)에 role/권한 체크 자체가 없는 경우 — IDOR(데이터 단위)와 달리 **기능 단위** 접근통제 누락.
+- `MASS_ASSIGNMENT` — RequestBody DTO를 화이트리스트 매핑 없이 그대로 Entity에 바인딩하면서 `role`/`isAdmin`/`status`/`point` 등 서버 전용 필드가 DTO에 포함된 경우.
+- `RATE_LIMIT_ABSENT` — 포인트 적립/쿠폰 발급/이벤트 응모 등 반복 호출로 이득을 얻을 수 있는 endpoint에 호출 빈도 제한이 없는 경우.
+- `IDEMPOTENCY_ABSENT` — 동일 요청 재전송(중복 클릭, 네트워크 재시도)으로 포인트/쿠폰이 중복 지급될 수 있는 경우(멱등키·unique constraint·상태머신 체크 부재).
+- `CLIENT_TRUSTED_LOGIC` — 가격·수량·할인율 등을 클라이언트가 요청 파라미터로 전달하고 서버가 그대로 신뢰(재계산·검증 없음)하는 경우.
+
+> **❌ 금지 category 값 예시**: `Authentication Bypass`, `Authorization`, `IDOR/BOLA`, `권한상승`,
+> `Mass Assignment Vulnerability`, `Rate Limiting`, `abuse`, `어뷰징` — 위 표준값 이외 사용 금지
+
+---
+
 ## 변경 이력
 
 | 날짜 | 요약 |
 |---|---|
 | 2026-05-04 | 초기 작성 — injection/xss 진단 결과물 일관성 고도화 P0 작업 |
 | 2026-05-07 | Section 4 (DATA), Section 5 (FILE) 추가 — schema 위반 방지 고도화 |
+| 2026-08-25 | Section 6 (AUTH — 인증/인가/어뷰징) 추가 — sec-scan-auth 신설에 따른 분류표 확장. Auto-Scan은 판정 없는 후보 태깅만 수행, category/severity 최종 배정은 LLM-Check 전담. |

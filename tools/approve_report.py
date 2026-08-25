@@ -35,6 +35,16 @@ from pathlib import Path
 PALANTIR_DIR = Path(__file__).resolve().parent.parent
 STATE_DIR    = PALANTIR_DIR / "state"
 
+def _lookup_bb_project(repo: str) -> str:
+    """clone 시점에 저장된 state/<repo>/repo_meta.json에서 Bitbucket 프로젝트 키 조회."""
+    try:
+        meta = STATE_DIR / repo / "repo_meta.json"
+        if meta.exists():
+            return json.loads(meta.read_text(encoding="utf-8")).get("project", "")
+    except Exception:
+        pass
+    return ""
+
 
 def _run(cmd: list[str]) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=str(PALANTIR_DIR))
@@ -231,8 +241,12 @@ def _send_to_jira_gateway(
     page_id: str,
     report_key: str,
     review_notes: list | None = None,
-) -> None:
-    """게이트웨이에 MD 페이로드를 POST — 검토 대기(pending) 티켓으로 등록."""
+) -> bool:
+    """게이트웨이에 MD 페이로드를 POST — 검토 대기(pending) 티켓으로 등록.
+
+    반환값은 실제로 티켓이 생성됐는지 여부다 (완료 요약이 이 값을 확인 없이
+    항상 '전송 완료'로 출력하던 버그 수정 — 2026-08-25).
+    """
     import os
     from dotenv import load_dotenv
     load_dotenv(PALANTIR_DIR / ".env")
@@ -240,25 +254,29 @@ def _send_to_jira_gateway(
     gateway_url = os.getenv("JIRA_GATEWAY_URL", "").strip()
     if not gateway_url:
         print("      [WARN] .env에 JIRA_GATEWAY_URL 미설정 — Jira 게이트웨이 전송 생략")
-        return
+        return False
 
     # 최종 보고서 MD 읽기
     md_path = PALANTIR_DIR / report_key
     if not md_path.exists():
         print(f"      [WARN] 최종 보고서 파일 없음: {md_path} — 전송 생략")
-        return
+        return False
 
     md_text = md_path.read_text(encoding="utf-8")
     jira_project = os.getenv("JIRA_PROJECT_KEY", "")
 
+    # system_code_to_repo 에서 Bitbucket 프로젝트 키 조회 (vision API용)
+    bb_project = _lookup_bb_project(repo)
+
     try:
         import urllib.request, urllib.error
         payload = json.dumps({
-            "repo":         repo,
-            "page_id":      page_id or "",
-            "md_text":      md_text,
-            "jira_project": jira_project,
-            "review_notes": review_notes or [],
+            "repo":               repo,
+            "page_id":            page_id or "",
+            "md_text":            md_text,
+            "jira_project":       jira_project,
+            "review_notes":       review_notes or [],
+            "bitbucket_project":  bb_project,
         }, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             f"{gateway_url.rstrip('/')}/api/pending",
@@ -271,8 +289,10 @@ def _send_to_jira_gateway(
         ticket_id = body.get("ticket_id", "?")
         base = os.getenv("JIRA_GATEWAY_URL", "http://localhost:8000").rstrip("/")
         print(f"      게이트웨이 전송 완료 — 검토 대기: {base}/review/{ticket_id}")
+        return True
     except Exception as exc:
         print(f"      [ERROR] 게이트웨이 전송 실패: {exc}")
+        return False
 
 
 def main() -> int:
@@ -302,6 +322,7 @@ def main() -> int:
     run_label = run_id if run_id else "(레포 단위)"
     skip_sca  = args.skip_sca and not args.include_sca
     _confluence_url = ""   # 게시 완료 후 채워짐 (audit 기록용)
+    _jira_sent = False     # Jira 게이트웨이 실제 전송 성공 여부 (완료 요약 판단용)
     print(f"\n[approve] RUN_ID={run_label}  repo={args.repo}")
     if skip_sca:
         print("[approve] --skip-sca: SCA findings 제외 모드")
@@ -374,6 +395,16 @@ def main() -> int:
             else:
                 print("\n[3/4] Confluence 게시 생략 — 보고서에 포함할 취약/정보 finding 없음 (전체 양호)")
         else:
+            meta_path = PALANTIR_DIR / "state" / args.repo / "repo_meta.json"
+            if not meta_path.exists():
+                print(f"\n[GATE] repo_meta.json 누락 — 빈칸 게시 방지를 위해 메타데이터 전용 재clone 시도")
+                bf = _run([sys.executable, "tools/backfill_repo_meta.py", "--repo", args.repo])
+                if bf.returncode != 0 or not meta_path.exists():
+                    print(f"\n[GATE ERROR] 메타데이터 자동 복구 실패 — 게시 차단.")
+                    print(f"  → PROJECT 키를 확인해 수동 실행: python3 tools/backfill_repo_meta.py --repo {args.repo} --project <PROJECT>")
+                    return 1
+                print(f"[GATE] repo_meta.json 복구 완료 — 게시 계속 진행\n")
+
             print(f"\n[3/4] 최종 보고서 생성 + Confluence 게시... (보고 대상 {reportable}건)")
             cmd = [
                 sys.executable, "tools/generate_final_report.py",
@@ -418,7 +449,7 @@ def main() -> int:
             print(f"\n[4/4] Jira 티켓 게이트웨이 전송...")
             _review_notes = _extract_review_notes(args.repo, run_id, skip_sca=skip_sca)
             print(f"      review_notes 추출: {len(_review_notes)}건")
-            _send_to_jira_gateway(args.repo, page_id or "", report_key, _review_notes)
+            _jira_sent = _send_to_jira_gateway(args.repo, page_id or "", report_key, _review_notes)
     else:
         print("\n[3/4] Confluence 게시 생략 (--publish 미지정)")
         if run_id:
@@ -511,7 +542,10 @@ def main() -> int:
             final_path = f"logs/final_{args.repo}_{today}.md"
         print(f"  최종 보고서: {final_path}")
         print(f"  Confluence 게시 완료")
-        print(f"  Jira 게이트웨이 전송 완료 (검토 대기)")
+        if _jira_sent:
+            print(f"  Jira 게이트웨이 전송 완료 (검토 대기)")
+        else:
+            print(f"  [WARN] Jira 게이트웨이 전송 실패 — 위 [ERROR]/[WARN] 로그 확인 후 재전송 필요")
     elif args.publish:
         print(f"  Confluence 게시: 생략 (전체 양호, 보고 대상 0건)")
     print()

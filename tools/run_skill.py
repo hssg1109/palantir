@@ -997,24 +997,43 @@ def run_llm_check_claude_cli(skill: str, src: str, prefix: str,
         if final_text:
             print(f"\n{final_text[:600]}")
 
+    # findings 파일 유효성 우선 확인 — rate-limit 배너가 떠도 실제로는
+    # claude -p가 findings 작성까지 완료했을 수 있음(exit code만 비정상인 케이스).
+    # 2026-08-24 locker-frontend-admin/data 사고: 비용 청구($0.4565)·findings 정상
+    # 저장(llm_checked:true) 상태에서도 rate-limit 문구 매칭만으로 실패 마커가
+    # 찍혀 파이프라인이 오탐 실패 처리함 — findings 유효성을 먼저 판단해 방지.
+    tag = _SKILL_TAG[skill]
+    findings_path = PALANTIR_DIR / prefix / f"findings_{tag}.json"
+    findings_complete = False
+    if findings_path.exists():
+        try:
+            findings_complete = bool(
+                json.loads(findings_path.read_text(encoding="utf-8")).get("llm_checked")
+            )
+        except (json.JSONDecodeError, OSError):
+            findings_complete = False
+
     if result.returncode != 0:
         combined = result.stdout + result.stderr
         if "you've hit your limit" in combined.lower():
-            import re as _re
-            from datetime import datetime as _dt
-            m = _re.search(r'resets\s+[\d:apm]+\s*\([^)]+\)', combined, _re.IGNORECASE)
-            reset_info = m.group(0) if m else ""
-            print(f"\n  [RATE LIMIT] Claude Pro 사용 한도 초과 — {reset_info}")
-            marker = {
-                "reason": "rate_limit_exceeded",
-                "reset_info": reset_info,
-                "failed_at": _dt.now().isoformat(),
-                "skill": skill,
-            }
-            (PALANTIR_DIR / prefix / "llm_check_failed.json").write_text(
-                json.dumps(marker, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            print(f"  → 마커 저장: llm_check_failed.json")
+            if findings_complete:
+                print(f"\n  [RATE LIMIT] 배너 감지되었으나 findings 정상 완료(llm_checked=true) — 실패 처리 안 함")
+            else:
+                import re as _re
+                from datetime import datetime as _dt
+                m = _re.search(r'resets\s+[\d:apm]+\s*\([^)]+\)', combined, _re.IGNORECASE)
+                reset_info = m.group(0) if m else ""
+                print(f"\n  [RATE LIMIT] Claude Pro 사용 한도 초과 — {reset_info}")
+                marker = {
+                    "reason": "rate_limit_exceeded",
+                    "reset_info": reset_info,
+                    "failed_at": _dt.now().isoformat(),
+                    "skill": skill,
+                }
+                (PALANTIR_DIR / prefix / "llm_check_failed.json").write_text(
+                    json.dumps(marker, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                print(f"  → 마커 저장: llm_check_failed.json")
         else:
             stderr_preview = result.stderr.strip()[:400]
             print(f"\n  [WARN] claude CLI exit={result.returncode}")
@@ -1023,9 +1042,6 @@ def run_llm_check_claude_cli(skill: str, src: str, prefix: str,
 
     print(f"\n  ✓ claude -p 완료.{cost_info}")
 
-    # findings 파일 확인
-    tag = _SKILL_TAG[skill]
-    findings_path = PALANTIR_DIR / prefix / f"findings_{tag}.json"
     if not findings_path.exists():
         print(f"\n  [WARN] findings 파일 없음: {findings_path}")
         print("  LLM이 Write 도구를 사용하지 않았을 수 있습니다.")

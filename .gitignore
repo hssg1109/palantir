@@ -16,6 +16,8 @@ state/
 
 ### 진단 보고서 (취약점 포함 — 외부 공개 불가) ###
 logs/
+docs/tmp_publish/
+docs/kick_4brand_report/
 
 ### 고객사 특정 운영 파일 ###
 trigger/scan_targets.yaml

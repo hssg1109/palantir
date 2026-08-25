@@ -1,0 +1,14 @@
+{
+  "_설명": "전사 시스템코드별 보안진단 현황(system_code_scan_status.md) 집계에서 제외되는 레포. state/ 에 스캔 산출물이 일부 남아있지만 정기진단 대상이 아니었던 경우 여기에 등록하면 모든 skill이 '미진단'으로 표시된다.",
+  "repos": [
+    {"slug": "socketwas_duplex2", "reason": "정기진단수행 대상 아님"},
+    {"slug": "socketwas_duplexclient_dev", "reason": "정기진단수행 대상 아님"},
+    {"slug": "socketwas_push2", "reason": "정기진단수행 대상 아님"},
+    {"slug": "socketwas_pushclient_dev", "reason": "정기진단수행 대상 아님"},
+    {"slug": "socketwas_tcallenc", "reason": "정기진단수행 대상 아님"},
+    {"slug": "transwas_trans", "reason": "정기진단수행 대상 아님"},
+    {"slug": "aimt-be-feature-0912_security@2331e64a776", "reason": "정기진단수행 대상 아님"},
+    {"slug": "portalwas_voc", "reason": "정기진단수행 대상 아님"},
+    {"slug": "tsafety_common", "reason": "정기진단수행 대상 아님"}
+  ]
+}

@@ -134,13 +134,24 @@ API 목록 → Controller → Service → 파일 처리 로직
 >
 > | 취약점 유형 | NAS 저장 시 위험 | 판정 |
 > |---|---|---|
-> | MIME 타입 / magic bytes 검증 부재 | polyglot 파일 우회, 콘텐츠 타입 혼동 가능 | **Medium — 별도 finding 필수** |
+> | MIME 타입 / magic bytes 검증 부재 (확장자 화이트리스트는 있음) | polyglot 파일 우회, 콘텐츠 타입 혼동 가능 | 기본 **Medium — 별도 finding 필수** (아래 ⚠️ 체이닝 확인 절차로 상향 여부 재판정) |
 > | 확장자 전용 검증 (`getOriginalFilename()` 기반) | 확장자 위조로 허용 타입 우회 가능 | **Medium — 별도 finding 필수** |
 > | 파일명 난수화(UUID) 미적용 | 원본 파일명 예측 가능, 열거 공격 | **Low — 별도 finding 필수** |
 > | HTML 파일 인라인 서빙 (Content-Disposition 누락) | Stored XSS (브라우저 렌더링) | **High — XSS 스캔과 교차 보고** |
 >
 > **NAS 아키텍처를 이유로 위 항목을 FP 처리하는 것은 금지**한다.
 > 각 항목은 웹쉘 실행과 별개의 공격 표면이므로 독립적으로 finding을 생성한다.
+
+> ⚠️ **MIME/magic bytes 검증 부재 — reachability 체이닝 확인 절차 (필수, "확장자 화이트리스트는 있으나 magic bytes만 없는" 케이스 한정)**
+>
+> 확장자 화이트리스트가 아예 없는 경우(이중확장자 우회 등)는 이 절차 대상이 아니며 별도 사유로 여전히 취약/High가 될 수 있다. 화이트리스트는 있고 magic bytes 검증만 없는 경우, 아래 3조건을 코드로 확인한다:
+>
+> 1. **저장 환경**: 정적 오브젝트 스토리지(S3/NCP/CloudFront 등, 서버 실행 경로 없음)인가, 앱서버가 파일을 실행/처리하는 환경인가?
+> 2. **ContentType 결정 주체**: 서버가 확장자 매칭으로 강제 지정(서버 강제)하는가, 클라이언트 선언값/실제 바이트를 그대로 신뢰하는가?
+> 3. **후속 재처리 로직**: 업로드 파일을 이후 "이미지 등으로 재신뢰"해 처리(리사이징/변환/렌더링)하는 로직이 코드에 존재하는가?
+>
+> - **3조건 모두 "체이닝 불가" 방향** (정적 스토리지 + 서버 강제 ContentType + 후속 재처리 없음) → **정보(review_result=정보) + Medium 유지**. Stored XSS나 셸 실행(RCE)으로 과장 금지.
+> - **하나라도 "체이닝 가능" 방향** (앱서버 실행 환경, 또는 클라이언트 선언 ContentType을 그대로 신뢰, 또는 후속 이미지 재처리 로직 실제 존재) → 실제 익스플로잇 체인 성립 → **취약 + High 이상**.
 
 **recommendation 필수 포함 문구:**
 ```
@@ -549,6 +560,13 @@ LLM-Check Phase 완료 후 `state/<prefix>/findings_FILE.json`을 생성한다.
 > **적용 대상**: `scan_file_processing.py`가 `frontend` 모드로 실행된 결과 (`scan_metadata.mode == "frontend"`)
 > 스캐너가 탐지한 TS/JS/TSX/JSX/Vue 파일의 findings를 LLM이 아래 기준으로 최종 판정한다.
 
+> ⚠️ **[필수 선행 절차] 클라이언트측 검증 부재 = 보안 경계 아님 — finding 생성 전 백엔드 교차 확인**
+> 순수 프론트엔드 레포(백엔드가 별도 서비스/레포)에서 클라이언트측 검증(`accept`, `file.type`/`file.size` JS 체크 등) 부재 finding을 만들기 전에, 반드시 해당 값을 최종 소비하는 백엔드(같은 레포 내 또는 **교차 레포** — 별도 clone 필요)가 이미 동등 이상 검증(확장자 화이트리스트, 매직바이트, 서버측 타입 강제 등)을 수행하는지 코드로 직접 확인한다.
+> - `file.type`/`accept` 등 클라이언트측 검증은 attacker가 요청(FormData/body)을 직접 조작(curl/Burp 등)하면 자명하게 우회되는 UX 편의 필터일 뿐, 실질 보안 경계가 아니다. 보안 통제 책임은 서버 측에 있다.
+> - **백엔드가 이미 충분히 검증하는 것이 코드로 확인되면 → 오탐(FP)**으로 처리하고 finding 자체를 생성하지 않거나(`needs_review: false`), 이미 생성된 경우 review_note에 "클라이언트 검증은 우회 가능한 UX 필터, 실 보안 통제는 서버가 전담" + 확인한 백엔드 검증 로직을 명시해 오탐 후보로 표시한다.
+> - 백엔드 검증이 약하거나(화이트리스트만 있고 매직바이트 없음) 확인이 안 되는 경우는 이 FP 규칙 적용 대상이 아님 — 아래 §MIME/magic bytes reachability 기준을 그대로 따른다.
+> - 이 규칙은 아래 각 표의 "정탐"·"Low"·"Medium" 판정 행보다 **우선 적용**된다 (선례: ogeul/uptn/displayadmin_ui 3건 모두 이 근거로 오탐 확정).
+
 ### [upload_frontend / FormData] FormData 파일 업로드
 
 **판정 기준**:
@@ -558,7 +576,7 @@ LLM-Check Phase 완료 후 `state/<prefix>/findings_FILE.json`을 생성한다.
 | FormData.append(file) + MIME 미검증 + 크기 미제한 | 정탐 | **Medium** | 악성 파일 업로드 시 서버 측 보안 의존 — 클라이언트 1차 검증 부재 |
 | FormData.append(file) + file.type 확인 + file.size 확인 | 오탐 | — | FP: 클라이언트 사전 검증 적용됨 |
 | `accept="image/*"` 속성만 있고 file.type 코드 검증 없음 | 정탐 고려 | **Low** | `accept` 속성은 우회 가능 → 코드 레벨 검증 권고 |
-| 서버 API에서 최종 검증을 수행하는 구조 (코드 주석 또는 서버 코드 확인 시) | 오탐 | — | FP: 서버 측 완전 검증이 입증되면 클라이언트 미검증은 UX 이슈 수준 |
+| 서버 API에서 최종 검증을 수행하는 구조 (**서버 코드 직접 확인 시** — 주석/추정만으로는 불충분) | 오탐 | — | FP: 클라이언트 검증은 우회 가능한 UX 필터일 뿐, 서버 측 완전 검증이 코드로 입증되면 실질 보안경계는 서버가 전담 (선례: ogeul/uptn/displayadmin_ui) |
 
 **확인 절차**:
 1. `file.type` 참조 위치 확인 — FormData 생성 전/후 MIME 타입 비교 여부
@@ -587,6 +605,7 @@ LLM-Check Phase 완료 후 `state/<prefix>/findings_FILE.json`을 생성한다.
 |--------|------|--------|------|
 | `<input type="file">` + MIME/accept 미확인 + 크기 미제한 | 정탐 | **Low** | 클라이언트 1차 검증 부재 (정보 수준) |
 | `<input type="file" accept="image/*,.pdf">` | 오탐 | — | FP: accept 속성으로 1차 필터링 적용 |
+| 위 두 케이스 모두 — 업로드 대상 백엔드가 화이트리스트/매직바이트/서버강제타입 검증을 수행하는 것이 **코드로 확인**된 경우 | 오탐 | — | FP: 클라이언트 검증(accept 유무 무관)은 우회 가능한 UX 필터, 서버가 실질 검증을 전담하면 클라이언트 부재는 무의미 (선례: ogeul/uptn/displayadmin_ui) |
 
 ---
 
@@ -613,3 +632,5 @@ FormData MIME+크기 미검증     → 정보 / Medium
 <input type="file"> 미검증   → 정보 / Low
 Blob URL 다운로드            → 정보 / Low
 ```
+
+> ⚠️ 위 severity는 **백엔드 검증 여부가 확인되지 않았을 때의 기본값**이다. 백엔드(교차 레포 포함)가 동등 이상 검증을 수행하는 것이 코드로 확인되면 FormData/`<input type="file">` 두 항목 모두 severity 배정 이전에 오탐(FP)으로 먼저 처리한다 — 위 §필수 선행 절차 참조.

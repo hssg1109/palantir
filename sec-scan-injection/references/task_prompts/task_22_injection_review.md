@@ -76,7 +76,7 @@ python3 shared/scripts/scan_injection_enhanced.py <source_dir> \
 | `"자동 판정 불가"` | 스캐너가 DB 접근 패턴 자체를 분석하지 못한 경우 |
 | `"DB 접근 미확인"` | Controller→Service 추적은 됐으나 Repository/SQL까지 연결 못한 경우 |
 | `"추적 불가"` | 외부 모듈·인터페이스 등으로 call chain이 끊긴 경우 |
-| `access_type: "mybatis_dynamic_review"` | 4단계 매트릭스 Step 2/3 수동 확인 대기 상태 |
+| `access_type: "mybatis_dynamic_review"` | injection_diagnosis_criteria.md §1 2단계 Tier 판정 대기 상태 (구 4단계 매트릭스 폐기) |
 
 ---
 
@@ -180,8 +180,8 @@ find testbed/ -name "*.xml" | xargs grep -n '\$[a-zA-Z]' 2>/dev/null | grep -v "
 |---|---|---|
 | 전원 DB 없음 | `해당없음(DB접근없음)` | group으로 분리 (1-A-2) |
 | DB 있고, `#{}` 바인딩만 사용 | `양호` | group_judgments + services_reviewed |
-| DB 있고, `${}` + 외부입력 미도달 | `정보` | group_judgments + 근거 |
-| DB 있고, `${}` + 외부입력 도달 | `취약` | findings에 INJ-001 등록 |
+| DB 있고, `${}` + 외부입력 미도달(내부 상수/화이트리스트 포함) | `취약(Tier 1: 잠재적 취약)` | findings에 INJ-00N으로 등록 — "정보" 다운그레이드 금지 |
+| DB 있고, `${}` + 외부입력 도달 | `취약(Tier 2: 매우 취약)` | findings에 INJ-001 등록 |
 | 일부 endpoint는 다른 판정 | 그룹 판정 + `endpoint_verdicts`로 예외 기록 | — |
 
 **완료 조건**: Taint 추적 실패로 분류된 모든 endpoint가 `group_judgments` 내 어느 group의 `endpoints_reviewed`에 포함되어야 한다. 누락 시 Task 미완료.
@@ -213,12 +213,12 @@ for e in taint_failed[:10]:
    - 절차:
      1. `endpoint_diagnoses`에서 `result: 정보` 항목을 `diagnosis_type`별로 그룹화
      2. 각 그룹의 외부 서비스/DAO → MyBatis XML/JPA/iBatis 직접 확인
-     3. `${}` 발견 시 → **injection_diagnosis_criteria.md Section 1의 4단계 매트릭스** 적용
-        - Step 1: `${}` 탐지 → 즉시 취약 판정 금지, taint 역추적 시작
-        - Step 2: 변수가 HTTP 파라미터에서 유래하지 않으면 → **정보**
-        - Step 3: Enum 캐스팅 / Integer형 / 화이트리스트 if-switch → **양호(FP)**
-        - Step 4: 검증 없이 String 직삽 → **취약(TP)**
-        - 스캐너 `access_type="mybatis_dynamic_review"` 결과는 Step 2/3 수동 확인 필요
+     3. `${}` 발견 시 → **injection_diagnosis_criteria.md Section 1의 2단계 Tier 기준** 적용 (구 4단계 매트릭스는 폐기됨)
+        - `${}` 는 사용자 입력 도달 여부와 무관하게 **항상 최소 "잠재적 취약(Tier 1)"** — "정보"/"양호(FP)"로 다운그레이드하지 않는다.
+        - HTTP 파라미터가 직접 도달하면 → **Tier 2: 매우 취약**
+        - 내부 상수/Enum 화이트리스트/int 캐스팅 등 방어 로직이 있어도 → **Tier 1: 잠재적 취약**(양호 아님). 유일하게 양호로 인정되는 경우는 int로 캐스팅된 값만 삽입되고 String fallback 경로가 없음이 코드로 확인될 때뿐이다.
+        - `#{}` 바인딩만 양호.
+        - 스캐너 `access_type="mybatis_dynamic_review"` 결과는 Tier 1/2 구분을 위해 수동 확인 필요
      4. 판정 결과를 `sqli_endpoint_review` 블록으로 저장
    - **전체 매퍼 XML `${}` 패턴 전수 스캔** (`find` + `grep -n '\${' *.xml`) 으로 빠른 일괄 확인 가능
 
@@ -303,14 +303,15 @@ for e in taint_failed[:10]:
 | 유형1: 파라미터 바인딩 | `.bind("param", value)`, `#{param}`, `:param` | **양호** |
 | 유형2: ORM 방식 | `client.insert().using(entity)`, EntityTemplate | **양호** |
 | 유형3: Criteria 기반 | `Criteria.where().is()` + `.matching()` | **양호** |
-| 유형3-취약 | `Utils.toSql(definition)` → SQL 직접 삽입 | **취약/정보** |
+| 유형3-취약 | `Utils.toSql(definition)` → SQL 직접 삽입 | **취약(Tier 1 최소)** |
 | 유형4: Raw SQL 결합 | `"SQL" + variable`, `buildString`, `String.format()` | **취약** |
 | DB 접근 없음 | Repository 호출 없거나 파라미터 없음 | **N/A** |
 
-#### 1.3 취약/정보 세분화 기준
+#### 1.3 취약 세분화 기준 (Tier 1/2 — injection_diagnosis_criteria.md §1 준수)
 
-- **취약**: 사용자 검색/필터 파라미터(search, keyword, field, value)가 취약 코드에 도달
-- **정보**: 취약 패턴 존재하나 사용자 입력이 직접 도달하지 않거나, Pageable sort만 관련
+> `${}`/문자열 직접 결합 패턴은 사용자 입력 도달 여부와 무관하게 **항상 최소 "취약(Tier 1: 잠재적 취약)"**이다. "정보"·"양호"로 다운그레이드하지 않는다. 유일한 예외는 int로 캐스팅된 값만 삽입되고 String fallback이 없는 경우뿐이다.
+- **취약(Tier 2: 매우 취약)**: 사용자 검색/필터 파라미터(search, keyword, field, value)가 직접 도달
+- **취약(Tier 1: 잠재적 취약)**: 취약 패턴은 존재하나 현재 사용자 입력이 직접 도달하지 않음(내부 상수/Enum 화이트리스트/Pageable sort 등 포함) — fallback 경로로 원본값이 반환될 가능성을 배제할 수 없으므로 "정보"가 아닌 취약으로 보고
 
 ---
 
@@ -383,13 +384,20 @@ for e in taint_failed[:10]:
 `injection.json`의 `global_findings.ssi_injection.findings[]`가 비어 있지 않으면 **각 항목에 대해** 아래 절차로 판정하여 `global_findings_analysis.ssi[]`에 기록한다:
 
 ```
+[0] SpEL인 경우 EvaluationContext 종류 최우선 확인 (⚠️ [1][2]보다 먼저 판정)
+    - StandardEvaluationContext 사용 → keyExpression이 현재 컴파일타임 상수라도 항상 "취약/High"
+      (T(java.lang.Runtime).exec() 등 전체 리플렉션·타입 접근이 컨텍스트 자체에 내재되어 있어
+       표현식이 현재 상수라는 사실이 안전성을 보장하지 않음 — 향후 표현식 변경/입력 결합 시 즉시 RCE)
+    - SimpleEvaluationContext.forReadOnlyDataAccess() (또는 forReadWriteDataAccess) 사용 →
+      리플렉션·타입 접근이 애초에 차단되므로 아래 [1][2] 입력출처 판정 절차 적용
 [1] 파일·라인 코드 확인 → 실제 템플릿 엔진 평가(SpEL parseExpression 등) 사용 여부
 [2] 파라미터 소스 추적 → 평가되는 표현식이 사용자 입력인지, 내부 상수/설정값인지
-    - SpEL: @Cacheable key 표현식, @Value 등은 내부 설정 → 취약 아님
+    - SpEL(SimpleEvaluationContext 한정): @Cacheable key 표현식, @Value 등은 내부 설정 → 취약 아님
     - FreeMarker/Thymeleaf: 사용자 입력 문자열이 template 변수로 직접 전달 → 취약 가능
 [3] 판정:
+    - StandardEvaluationContext 사용 → 항상 "취약" (아래 [1][2] 결과와 무관)
     - 사용자 입력 + 비검증 템플릿 평가 → "취약"
-    - 내부 설정값/상수만 → "정보(out-of-scope)"
+    - 내부 설정값/상수만 (SimpleEvaluationContext 한정) → "정보(out-of-scope)"
     - 검색 결과 상 패턴만 매칭, 실제 평가 미발생 → "양호(패턴오탐)"
 ```
 

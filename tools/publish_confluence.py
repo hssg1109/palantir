@@ -133,6 +133,15 @@ def md_to_confluence(md: str) -> str:
             return f'\x00CODE{idx}\x00'
         text = re.sub(r'\[JIRA:([A-Z]+-\d+)\]', _stash_jira, text)
         text = re.sub(r'`([^`]+)`', _stash_code, text)
+        # 1b. 마스킹 표기 등에서 쓰이는 4개 이상 연속 asterisk는 강조 마크업이 아니라
+        # 리터럴 텍스트로 취급 (예: "411111******1234"). 그대로 두면 **/*** 정규식이
+        # 런을 잘못 잘라 <strong>/<em> 태그가 서로 어긋나며 닫혀 Confluence가 HTTP 400으로
+        # 거부한다 (2026-08-12, ocbpayui-nxmile-grpc DATA-001 recommendation에서 발견).
+        def _stash_literal_asterisks(m: re.Match) -> str:
+            idx = len(code_spans)
+            code_spans.append(m.group(0))
+            return f'\x00CODE{idx}\x00'
+        text = re.sub(r'\*{4,}', _stash_literal_asterisks, text)
         # 2. XML 특수문자 이스케이프 (코드 스팬 제외한 나머지)
         text = text.replace('&', '&amp;')
         text = text.replace('<', '&lt;').replace('>', '&gt;')
@@ -410,12 +419,16 @@ def publish(
             )
             return None
 
-        payload = json.dumps({
+        payload_dict = {
             "version": {"number": version},
             "title":   title_to_use,
             "type":    "page",
             "body":    {"storage": {"value": cf_body, "representation": "storage"}},
-        }, ensure_ascii=False)
+        }
+        if parent_id:
+            # 기존 페이지 갱신 시 --parent를 함께 지정하면 상위 페이지 이동(ancestors 변경)도 수행
+            payload_dict["ancestors"] = [{"id": parent_id}]
+        payload = json.dumps(payload_dict, ensure_ascii=False)
 
         status, resp = _confluence_request("PUT",
             f"{base_url}/rest/api/content/{page_id}", token, payload)
@@ -502,6 +515,12 @@ def main():
         reg[md_key] = new_id
         _save_registry(reg)
         print(f"[레지스트리] docs/.confluence_pages.json 갱신 완료")
+    elif not args.dry_run:
+        # publish()가 실패 시 None을 반환하면서도 예외를 던지지 않으므로,
+        # 여기서 명시적으로 비정상 종료 코드를 반환해야 상위(generate_final_report.py의
+        # subprocess.returncode 체크)가 실패를 감지할 수 있다. 이걸 누락하면 게시 실패가
+        # "게시 완료"로 잘못 보고된다 (2026-08-12, ocbpayui-nxmile-grpc에서 발견).
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,9 @@ BASE_DIR = Path(__file__).parent.parent
 STATE_DIR = BASE_DIR / "state"
 TESTBED_DIR = BASE_DIR / "testbed"
 
+sys.path.insert(0, str(BASE_DIR / "shared" / "scripts"))
+import secret_gate  # noqa: E402
+
 CONFLUENCE_PAGE_ID = ""  # main()에서 load_dotenv() 이후 실제 값으로 설정됨
 SKILLS = ["injection", "xss", "file", "data", "sca"]
 
@@ -137,11 +140,27 @@ def audit_state_sources(repo: str) -> tuple[bool, int, list[str]]:
 
 
 def check_scan_redact(repo: str) -> tuple[bool, str]:
-    """scan_data_protection.py _redact_snippet() 적용 여부 — data skill 실행 확인."""
+    """scan_data_protection.py 마스킹 실제 적용 여부 — data skill findings_*.json을
+    공용 게이트(shared/scripts/secret_gate.py)로 재스캔해 미마스킹 자격증명 잔존 여부 확인.
+
+    기존 로직은 data/ 디렉터리가 비어있지 않기만 하면 무조건 True를 반환하는 가짜
+    체크였다 — 2026-08-18 사고(17개 레포 원문 자격증명 노출) 발견 전까지 이 필드가
+    실제 검증 없이 항상 "확인됨"으로 기록돼 왔다."""
     data_dir = STATE_DIR / repo / "data"
-    if data_dir.exists() and any(data_dir.iterdir()):
-        return True, "scan_data_protection.py _redact_snippet() 자동 적용"
-    return False, "data skill 미실행"
+    if not (data_dir.exists() and any(data_dir.iterdir())):
+        return False, "data skill 미실행"
+
+    violations = 0
+    for fp in data_dir.glob("*/findings_*.json"):
+        try:
+            text = fp.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        violations += len(secret_gate.scan_text(text))
+
+    if violations == 0:
+        return True, "secret_gate.scan_text() 재검증 통과 (미마스킹 자격증명 0건)"
+    return False, f"{violations}건 미마스킹 시크릿 잔존 — tools/retroactive_secret_mask.py로 마스킹 후 재확인 필요"
 
 
 def backfill_repo_meta(repo: str, dry_run: bool) -> None:

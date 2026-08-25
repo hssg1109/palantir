@@ -42,7 +42,7 @@
 | 크로스 사이트 스크립팅 (XSS) | 4 | `High` | sec-scan-xss |
 | 리다이렉트 기능 피싱 (Open Redirect) | 4 | `High` | sec-scan-xss |
 | 서버 사이드 요청 위조 (SSRF / RFI) | 4 | `High` | sec-scan-file |
-| 디버그 로그 내 중요정보 노출 (info/warn/error/fatal) | 5 | `Critical` | sec-scan-data |
+| 민감정보 운영 로그 노출 (info/warn/error/fatal 레벨) | 4 | `High` | sec-scan-data |
 | 서버 사이드 템플릿 인젝션 (SSTI) | 5 | `Critical` | sec-scan-xss |
 
 ### LLM 판단 항목 (규정 미명시 — 영향도·맥락 기반 자율 배정)
@@ -54,7 +54,7 @@
 | JWT Algorithm NONE 허용 | 인증 완전 우회 → 5등급(Critical) 유력 | sec-scan-data |
 | JWT parseUnsecuredClaims() 사용 | 인증 완전 우회 → 5등급(Critical) 유력 | sec-scan-data |
 | AWS/GCP 클라우드 키 하드코딩 | 외부 시스템 장악 가능성 → 5등급(Critical) 유력 | sec-scan-data |
-| DB 비밀번호/JWT Secret 하드코딩 | 민감정보 직접 노출 → 4등급(High) 유력 | sec-scan-data |
+| DB 비밀번호/JWT Secret 하드코딩 | 민감정보 직접 노출 → 4등급(High) 유력. **Critical 상한 규정**: 자격증명 종류·개수(복수 결합 포함)와 무관하게 Critical 미부여, 상한 High — 즉시 노출 증거(공개 저장소·로그 노출·응답 평문 반환) 있을 때만 예외적으로 5등급 검토. dev/default 프로파일은 운영 프로파일과 값 대조 후 동일 시 High, 상이 시 3등급(Medium) | sec-scan-data |
 | JWT 서명 키 미설정 | 토큰 위조 가능 → 4등급(High) 유력 | sec-scan-data |
 | JWT 클럭 스큐 과도 설정 | 조건부 토큰 재사용 → 3등급(Medium) 유력 | sec-scan-data |
 | 취약한 암호 알고리즘 (MD5/SHA-1/DES/ECB) | 암호 해독 가능 → 3등급(Medium) 유력 | sec-scan-data |
@@ -63,9 +63,18 @@
 | CORS Origin 헤더 동적 반영 | 조건부 악용 → 3등급(Medium) 유력 | sec-scan-data |
 | 보안 헤더 비활성화 (.headers().disable() 등) | 보안 수준 약화 → 3등급(Medium) 유력 | sec-scan-data |
 | DTO 민감 필드 @JsonIgnore 미적용 | 민감정보 노출 → 4등급(High) 또는 3등급(Medium) | sec-scan-data |
-| PII Logging (debug/trace 레벨) | 운영환경 노출 가능성 낮음 → 1등급(Informational) 유력 | sec-scan-data |
+| PII Logging (debug/trace 레벨) | 운영환경 노출 가능성 낮음 → 3등급(Medium) 유력. **예외**: 운영 프로파일 설정(`logging.level.<package>: Debug` 등)에서 DEBUG 레벨이 실제로 활성화되어 있음이 확인되면 → 4등급(High)로 상향 | sec-scan-data |
 | 파일 업로드 부분 검증 미흡 | 악용 조건에 따라 3~5등급 LLM 판단 | sec-scan-file |
 | CVE (SCA) | CVSS 점수 참고 후 코드 실사용 여부 종합 판단 | sec-scan-sca |
+| 인증 우회 (AUTH_BYPASS — 필터 예외/permitAll 오설정) | 인증 절차 자체 우회 → 4등급(High) 유력 | sec-scan-auth |
+| 세션 관리 취약 (SESSION_MGMT) | 세션 고정/타임아웃 과다/로그아웃 미무효화 → 3등급(Medium) 유력 | sec-scan-auth |
+| Brute-force 방지 부재 (BRUTE_FORCE_PROTECTION) | 로그인/OTP 시도 제한 없음 → 3등급(Medium) 유력 | sec-scan-auth |
+| IDOR/BOLA (IDOR) | 소유권 검증 없이 타인 리소스 접근 가능(reachability 확인 시) → 4등급(High) 유력 | sec-scan-auth |
+| 기능 수준 접근통제 누락 (MISSING_FUNCTION_ACCESS_CONTROL) | 관리자 전용 기능에 권한 체크 자체 부재(수직 권한상승) → 5등급(Critical) 유력 | sec-scan-auth |
+| Mass Assignment (MASS_ASSIGNMENT) | role/isAdmin 등 서버 전용 필드가 화이트리스트 없이 바인딩 → 4등급(High) 유력 | sec-scan-auth |
+| Rate Limit 부재 (RATE_LIMIT_ABSENT) | 포인트/쿠폰/이벤트 어뷰징 가능 → 3등급(Medium) 유력, 금전적 가치 직접 지급 로직까지 확인되면 4등급(High) | sec-scan-auth |
+| 멱등성 부재 (IDEMPOTENCY_ABSENT) | 중복요청으로 포인트/쿠폰 중복지급 가능(insert/지급쿼리 taint 확인 시) → 4등급(High) 유력 | sec-scan-auth |
+| 클라이언트 신뢰 비즈니스 로직 (CLIENT_TRUSTED_LOGIC) | 가격/수량 등을 서버 재검증 없이 신뢰 → 결제금액 직접 조작 가능 시 5등급(Critical), 그 외 4등급(High) | sec-scan-auth |
 
 ---
 
@@ -89,6 +98,7 @@
 
 | 날짜 | 요약 |
 |------|------|
+| 2026-08-25 | `/sec-review` 반복 판정에서 확정된 기준을 스캔 문서에 반영: 민감정보 운영 로그 노출(info/warn/error/fatal) Critical→High 정정, PII Logging(debug/trace) Informational→Medium(운영 DEBUG 활성 시 High) 정정, 하드코딩 자격증명 Critical 상한 규정(즉시 노출 증거 없는 한 상한 High) 명시. 정탐 처리 시 위험도 1(Informational)은 리포팅 대상에서 제외 — 최소 Medium(3) 이상으로 상향해 보고. sec-scan-auth 신설에 따른 인증/인가/어뷰징 9종 severity 매핑 추가. |
 | 2026-04-14 | 주요 정보통신기반시설 보호지침(과학기술정보통신부 고시 제2021-28호) 기반 전면 개정. `Risk 1~5` / `Info` 폐기 → `Critical/High/Medium/Low/Informational` 5종 통일. 규정 미명시 항목은 LLM 판단 원칙 추가. |
 | 2026-03-17 | 전자금융감독규정·주요 정보통신기반시설 보호지침 기반 위험도 1~5 기준 재정의. High/Critical 영문 표기 폐기, 위험도 숫자+결과(취약/정보/양호) 단일 체계로 전환. |
 | 2026-03-09 | 사내 공식 취약점 등급 기준서 기반 전면 개정 |

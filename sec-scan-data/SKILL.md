@@ -41,8 +41,8 @@ tools: Read, Glob, Grep, Bash, Edit, Write, Agent, WebFetch
 
 ```bash
 # WSL(Ubuntu) 터미널에서 실행
-python3 tools/new_scan.py <repo> --skill data --clone <PROJECT> <REPO>
-# 예: python3 tools/new_scan.py ocb-community-api --skill data --clone OCBWEBVIEW ocb-community-api
+python3 tools/clone_repo.py <PROJECT> <REPO>
+# 예: python3 tools/clone_repo.py OCBWEBVIEW ocb-community-api
 ```
 
 실행 결과로 출력되는 `state/<repo>/data/<YYYYMMDD_HHMM>/` 경로를 skill 실행 시 입력할 것.

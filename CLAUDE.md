@@ -24,10 +24,16 @@ Claude Code 보안 진단 모듈 모음 — 취약점 유형별 독립 실행 �
 | 금지 행위 | 올바른 동작 |
 |-----------|------------|
 | `/sec-scan-*` 완료 후 `/sec-review` 자동 실행 | skill 완료 요약 출력 후 대기 |
-| `/sec-review` 완료 후 `approve_report.py` 자동 실행 | 완료 요약 출력 후 대기 |
 | 5개 scan skill 중 하나 완료 후 다음 scan skill 자동 실행 | 완료 요약 출력 후 대기 |
 
 > **근거**: 각 skill 완료 후 사용자가 결과를 검토하고 다음 단계를 직접 지시해야 한다.
+
+**예외 (2026-08-25, 사용자 명시적 지시)**: `/sec-review`는 인터랙티브 판정(§4~§5b) 완료 후,
+`retroactive_cleanse.py`(testbed 삭제 + 클렌징 레지스트리 Confluence 게시) →
+`approve_report.py --publish`(최종 보고서 생성 + Confluence 게시)까지 **자동으로 이어서 실행**한다.
+이 구간(cleansing~report publish)은 findings 정탐/오탐 판정처럼 사람 판단이 필요한 단계가 아니라
+이미 확정된 판정 결과를 기계적으로 반영하는 후속 처리이므로, 자율 완주 규칙의 정상 적용 대상으로
+취급한다. 상세 절차는 `.claude/commands/sec-review.md` §5e/§6 참조.
 
 ### 2. Context Compaction 후 자동 재개 금지
 
@@ -58,6 +64,7 @@ palantir/
 ├── sec-scan-xss/            # Persistent / Reflected / DOM / Redirect XSS
 ├── sec-scan-file/           # File Upload / Download / LFI / RFI
 ├── sec-scan-data/           # CORS / Secrets / JWT / Cryptography / PII Logging
+├── sec-scan-auth/           # 인증/인가/어뷰징 (Auth Bypass / IDOR / Mass Assignment / Rate Limit)
 └── sec-scan-sca/            # 오픈소스 라이브러리 CVE (Gradle / npm)
 ```
 
@@ -69,6 +76,7 @@ palantir/
 | `/sec-scan-xss` | XSS 4종 (Persistent/Reflected/DOM/Redirect) | `shared/scripts/scan_xss.py` |
 | `/sec-scan-file` | 파일 처리 취약점 (Upload/Download/LFI/RFI) | `shared/scripts/scan_file_processing.py` |
 | `/sec-scan-data` | 데이터 보호 (CORS/Secrets/JWT/Crypto/PII) | `shared/scripts/scan_data_protection.py` |
+| `/sec-scan-auth` | 인증/인가/어뷰징 (Auth Bypass/IDOR/Mass Assignment/Rate Limit/멱등성) | `shared/scripts/scan_auth_baseline.py` (판정 없는 후보 태깅, 최종 판정은 LLM-Check 전담) |
 | `/sec-scan-sca` | 오픈소스 CVE 취약점 | `shared/scripts/scan_sca_gradle_tree.py` |
 
 ## Quick Start — 단일 레포 진단 절차
@@ -81,13 +89,16 @@ palantir/
    - 자율 완주: 자산 식별 → Auto-Scan → LLM-Check → Summary 생성
    - `testbed/<repo>/` 소스코드는 보존 (보고서 검토 시 참조)
 
-3. **인터랙티브 리뷰** — 5개 skill 완료 후 `/sec-review` 실행:
+3. **인터랙티브 리뷰 → 클렌징 → 보고서 생성/게시** — 5개 skill 완료 후 `/sec-review` 실행:
    ```
    /sec-review <RUN_ID> <repo>
    ```
-   - finding별 정탐/오탐 판정 (`1`=정탐, `0`=오탐, `s`=스킵)
+   - finding별 정탐/오탐 판정 (AskUserQuestion으로 클릭 선택)
+   - 판정 완료 후 클렌징(`retroactive_cleanse.py`)과 최종 보고서 생성+Confluence 게시
+     (`approve_report.py --publish`)까지 **자동으로 이어서 실행**됨(2026-08-25 갱신) —
+     별도로 4번 단계를 수동 실행할 필요 없음
 
-4. **최종 보고서 생성 + Confluence 게시**:
+4. (참고) 필요 시 수동으로 보고서만 재생성하려면:
    ```bash
    python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
    # → logs/final_<repo>_<RUN_ID>.md  (Confluence :::expand 매크로 포함)

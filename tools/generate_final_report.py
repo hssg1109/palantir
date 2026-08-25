@@ -77,7 +77,7 @@ SKILL_LABEL = {
     "sca":       "SCA (오픈소스 CVE)",
 }
 # 2.2 요약표 · 3 취약점 상세 공통 정렬 순서 (depth1)
-SKILL_ORDER = ["injection", "xss", "file", "data", "sca"]
+SKILL_ORDER = ["injection", "xss", "file", "data", "auth", "sca"]
 
 DISCLAIMER = """본 보고서는 palantir 진단 도구를 통한 소스코드 정적 분석(SAST) 결과이며, 보안 진단 인력이 결과를 직접 검토하였습니다.
 정적 분석(SAST) 도구의 특성상, 인증/결제 로직의 결함이나 시스템 아키텍처 구조에 기인한 심층적인 취약점은 현재 보고서에 반영되지 않았으며, 해당 영역은 추후 별도의 동적 진단(DAST) 또는 아키텍처 리뷰를 통해 리포팅될 예정입니다.
@@ -1005,7 +1005,6 @@ def render_markdown(
         f"| 진단 브랜치 | {branch} |",
         f"| 커밋 해시 | `{commit[:12]}` |" if commit != "—" else f"| 커밋 해시 | — |",
         f"| *담당자 | {_maintainer_display} |",
-    ] + ([f"| 참고: 지정 리뷰어 | {_reviewers_hint_display} |"] if _reviewers_hint_display else []) + [
         f"| 보고서 생성일 | {now} |",
         f"| RUN_ID | `{run_id}` |",
         f"| 전체 발견 건수 | {total_cnt}건 |",
@@ -1049,34 +1048,46 @@ def render_markdown(
     def _detail_sort_key(f: dict) -> tuple:
         return (0 if _get_result(f) == "취약" else 1, _sev_key(f))
 
-    # Sub_No 사전 생성: finding_id → "{skill_idx}-{sub_idx}" (섹션 4와 동일 기준)
+    def _group_by_category(findings: list[dict]) -> list[dict]:
+        """같은 category(취약점 유형)끼리 묶어 연속 넘버링되도록 정렬한다.
+        그룹 순서는 그룹 내 가장 심각한(_detail_sort_key 최솟값) finding 기준,
+        그룹 내부는 기존 (결과, 위험도) 기준을 그대로 따른다."""
+        groups: dict[str, list[dict]] = {}
+        for f in findings:
+            groups.setdefault(f.get("category", "—"), []).append(f)
+        ordered_cats = sorted(
+            groups.keys(),
+            key=lambda cat: min(_detail_sort_key(f) for f in groups[cat]),
+        )
+        result: list[dict] = []
+        for cat in ordered_cats:
+            result.extend(sorted(groups[cat], key=_detail_sort_key))
+        return result
+
+    # Sub_No 사전 생성 + 전체 표시 순서(ordered_flat) 생성 — 요약표(2.2)·상세(3.x) 공통 사용
+    # (동일 순서를 공유해야 Sub_No가 두 섹션에서 항상 순차적으로 나타난다)
     sub_no_map: dict[str, str] = {}
+    ordered_flat: list[tuple[str, dict]] = []
     _sk_idx = 1
     for _skill in ordered_skills:
-        _fs = sorted(data[_skill], key=_detail_sort_key)
+        _fs = _group_by_category(data[_skill])
         if not _fs:
             continue
         for _si, _f in enumerate(_fs, 1):
             _fid = _f.get("finding_id", "")
             if _fid:
                 sub_no_map[_fid] = f"{_sk_idx}-{_si}"
+            ordered_flat.append((_skill, _f))
         _sk_idx += 1
 
-    # 취약점 요약 표 (skill → 취약/정보 → severity 순)
-    def _summary_sort_key(skill_f: tuple) -> tuple:
-        skill, f = skill_f
-        skill_rank  = SKILL_ORDER.index(skill) if skill in SKILL_ORDER else len(SKILL_ORDER)
-        result_rank = 0 if _get_result(f) == "취약" else 1
-        return (skill_rank, result_rank, _sev_key(f))
-
+    # 취약점 요약 표 (skill → 유형(category) → 결과/위험도 순 — 상세 섹션과 동일 순서)
     lines += [
         "### 2.2 취약점 요약 표",
         "",
         "| Sub_No | 결과 | 위험도 | 제목 | 분류 | 파일:라인 | 조치 요약 |",
         "|--------|------|--------|------|------|----------|----------|",
     ]
-    flat_sorted = sorted(all_findings, key=_summary_sort_key)
-    for skill, f in flat_sorted:
+    for skill, f in ordered_flat:
         sub_no = sub_no_map.get(f.get("finding_id", ""), "—")
         sev    = _norm_sev(f.get("severity", "—"))
         result = _result_colored(_get_result(f))
@@ -1100,7 +1111,7 @@ def render_markdown(
     lines += ["## 3. 취약점 상세", ""]
 
     for sec_no, skill in enumerate(ordered_skills, 1):
-        findings = sorted(data[skill], key=_detail_sort_key)
+        findings = _group_by_category(data[skill])
         if not findings:
             continue
         label = SKILL_LABEL.get(skill, skill)
@@ -1188,20 +1199,52 @@ def main() -> int:
     print(f"[최종보고서] 저장 완료: {out_path}")
 
     if args.publish:
+        # [GATE] Confluence 게시 직전 최종 방어선 — _sanitize_secret_expand()가 놓친
+        # 미마스킹 자격증명이 있는지 공용 게이트(shared/scripts/secret_gate.py)로 최종 재검사.
+        # 2026-08-18 사고(17개 레포 findings_DATA.json 원문 노출 후 게시)의 근본 원인 중 하나가
+        # "Confluence 경로에만 시크릿 검사가 전혀 없었다"는 것이었다 — Jira 게이트웨이(422)와
+        # Bitbucket 업로드(secret_scan_gate.py)에는 이미 있던 방어선을 여기에도 동일하게 건다.
+        sys.path.insert(0, str(PALANTIR_DIR / "shared" / "scripts"))
+        import secret_gate as _secret_gate
+        _violations = _secret_gate.scan_text(md)
+        if _violations:
+            print(f"\n[GATE ERROR] 게시 차단 — 최종 보고서에 미마스킹 자격증명 패턴 {len(_violations)}건 발견:")
+            for v in _violations:
+                print(f"  {v}")
+            print(f"\n  → {out_path} 를 확인해 진짜 정탐(원문 자격증명)인지 오탐(플레이스홀더/타입명 등)인지 판단하세요.")
+            print(f"  → 진짜 정탐이면 해당 finding의 review_note/report_expand에서 원문 값을 제거·마스킹 후 재실행하세요.")
+            print(f"  → 오탐이면 shared/scripts/secret_gate.py의 allowlist(_PLACEHOLDER_PREFIX_RE) 보강을 검토하세요.")
+            return 1
+
         publish_script = PALANTIR_DIR / "tools" / "publish_confluence.py"
         if not publish_script.exists():
             print(f"[WARN] publish_confluence.py 없음 — --publish 건너뜀")
             return 0
 
-        # 레지스트리에서 기존 page_id 조회 (exact key 매칭) — 없으면 CREATE, 있으면 UPDATE
-        # prefix 매칭은 다른 RUN_ID의 기존 페이지를 덮어쓰므로 exact key만 사용한다
+        # 레지스트리에서 기존 page_id 조회 — 없으면 CREATE, 있으면 UPDATE
+        #
+        # RUN_ID 모드(args.run_id 명시, 예: 배치 캠페인 "20260630_0957"): exact key만 매칭.
+        #   같은 repo라도 새 RUN_ID는 별도 페이지로 취급 (배치 캠페인 격리 목적, 2026-06-30 도입).
+        # 레포단위 모드(args.run_id 없음, run_id_label=오늘 날짜로 폴백): repo 접두사로 매칭해
+        #   가장 최근 항목을 사용. exact key만 쓰면 원본 게시일과 재생성일(오늘)이 다를 때마다
+        #   기존 페이지를 못 찾아 CREATE를 시도 → Confluence가 동일 제목 페이지 충돌로 거부(HTTP 400)
+        #   하는데 이 실패가 감지되지 않고 "게시 완료"로 잘못 보고되는 문제가 있었다
+        #   (2026-08-12, ocbpayui-admin-api에서 발견 — 레지스트리 미갱신 + 페이지 미갱신 상태로 방치됨).
         reg_path = PALANTIR_DIR / "docs" / ".confluence_pages.json"
         existing_page_id = None
         if reg_path.exists():
             import json as _json
             reg = _json.loads(reg_path.read_text(encoding="utf-8"))
-            exact_key = f"logs/final_{args.repo}_{run_id_label}.md"
-            existing_page_id = reg.get(exact_key)
+            if args.run_id:
+                exact_key = f"logs/final_{args.repo}_{run_id_label}.md"
+                existing_page_id = reg.get(exact_key)
+            else:
+                prefix = f"logs/final_{args.repo}_"
+                candidates = sorted(
+                    (k for k in reg if k.startswith(prefix)),
+                )
+                if candidates:
+                    existing_page_id = reg[candidates[-1]]
 
         # --parent 미지정(0) 시 .env CONFLUENCE_PARENT_ID로 fallback.
         # UPDATE(기존 page_id 존재)는 위치 이동이 아니므로 parent 없이도 허용하되,
@@ -1222,7 +1265,11 @@ def main() -> int:
             cmd += ["--parent", str(parent)]
         if existing_page_id:
             cmd += ["--page-id", str(existing_page_id)]
-        subprocess.run(cmd, cwd=str(PALANTIR_DIR))
+        pub = subprocess.run(cmd, cwd=str(PALANTIR_DIR))
+        if pub.returncode != 0:
+            print(f"\n[ERROR] Confluence 게시 실패 (returncode={pub.returncode}) — "
+                  f"레지스트리/체크리스트 갱신 및 Jira 게이트웨이 전송을 진행하지 마세요.")
+            return 1
 
     return 0
 

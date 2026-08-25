@@ -25,6 +25,7 @@ Jira 이슈 구성:
         - 섹션 2: 취약점 요약 (2.1 개요 + 2.2 요약표)
         - 하단: 티켓 처리 가이드 (5개 안내)
     attachments: Confluence PDF export (실패 시 생략)
+    web link : 보안진단 프로세스 안내 페이지 (Links 패널)
 """
 
 import argparse
@@ -40,7 +41,7 @@ import requests
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tools.jira_utils import (
     load_env, jira_headers, cf_headers, load_repo_project_map,
-    find_fortify_ticket, create_issue_link,
+    find_fortify_ticket, create_issue_link, create_web_link,
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -52,6 +53,10 @@ LOGS_DIR     = PALANTIR_DIR / "logs"
 DOCS_DIR     = PALANTIR_DIR / "docs"
 
 _CF_REGISTRY = DOCS_DIR / ".confluence_pages.json"
+
+# 모든 발행 티켓에 공통으로 연동할 참고 페이지 (사내 보안진단 프로세스 안내)
+_PROCESS_GUIDE_URL = "https://wiki.skplanet.com/pages/viewpage.action?pageId=243378326"
+_PROCESS_GUIDE_TITLE = "11. 보안진단 프로세스"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 고정 텍스트
@@ -489,6 +494,12 @@ def main():
     )
     if not issue_key or args.dry_run:
         return
+
+    # ── 8-0. 보안진단 프로세스 안내 페이지 연동 (web link) ─────────────────────
+    if create_web_link(env, jira_url, issue_key, _PROCESS_GUIDE_URL, _PROCESS_GUIDE_TITLE):
+        print(f"[OK] 보안진단 프로세스 안내 링크 등록: {issue_key}")
+    else:
+        print(f"[WARN] 보안진단 프로세스 안내 링크 등록 실패 — {issue_key}")
 
     # ── 8-1. Fortify 정기진단 이력 연동 (issue link) ─────────────────────────
     if project_key_label:

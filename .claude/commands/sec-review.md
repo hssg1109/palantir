@@ -95,6 +95,14 @@ skill별로 RUN_ID 내림차순(최신) 파일 하나씩 선택:
 
 **SCA 스킬 제외**: `state/<repo>/sca/` 디렉터리는 수집 대상에서 제외한다 (SCA 진단은 별도 검증 후 진행 예정 — `feedback_sca_review_policy.md`에 따라 LLM-Check 완료 SCA는 `/sec-review` 건별 판정 없이 일괄 처리되는 유일한 승인된 예외).
 
+**⚠️ 고정 순서 (필수)**: 파일시스템 glob은 알파벳순(`data, file, injection, xss`)으로 반환되지만, 이 순서를 그대로 쓰지 않는다. 수집 직후 skill별로 findings를 묶어 아래 고정 순서로 재정렬한다:
+
+```
+SKILL_ORDER = ["injection", "xss", "file", "data", "auth", "sca"]
+```
+
+이 순서는 `tools/generate_final_report.py`의 `SKILL_ORDER` 상수와 동일하며, 최종 보고서 생성 시 이미 이 순서가 강제되므로 §2(개요 테이블)·§4(인터랙티브 판정)도 동일 순서를 따라야 보고서와 일관성이 유지된다. 0건인 skill은 순서상 건너뛴다.
+
 #### 1a. Audit 정합성 검증 ⚠️ 필수 — `reviewed: true` 항목의 사람 판정 여부 확인
 
 > **목적**: `reviewed`/`review_status`는 오직 본 skill(`/sec-review`) §4의 사람 판정에서만 부여되는 필드다.
@@ -117,129 +125,18 @@ skill별로 RUN_ID 내림차순(최신) 파일 하나씩 선택:
 
 `"취약"`, `"정보"` 는 물론, 비표준 값(`"수동검토필요"`, `"정보(수동검토필요)"` 등 스캐너 버그로 발생)도 리뷰 대상에 포함한다.
 
-### 1b. 서비스 특징 분석 및 추가 진단 필요 여부 입력
-
-`state/<repo>/review_meta.json` 존재 여부에 따라 두 가지 경로로 분기한다.
-
----
-
-#### 경로 A — review_meta.json 없음 (최초 실행)
-
-**서비스 특징 LLM 분석**:
-
-`testbed/<repo>/` 의 디렉터리 구조, 주요 컨트롤러/서비스 클래스, 빌드 설정(build.gradle / package.json), README 등을 탐색하여 아래 항목을 분석하고 출력한다:
-
-- **기술 스택**: 언어, 프레임워크, 주요 라이브러리
-- **서비스 도메인**: 핵심 업무 영역
-- **주요 기능**: 인증, API, 데이터 처리, 외부 연동 등
-- **취급 민감 데이터**: PII(개인정보), 금융정보, 카드정보, 세션 토큰 등
-- **보안 리스크 프로파일**: 외부 노출 범위, 주요 공격 표면
-
-분석 결과를 아래 형식으로 출력한 뒤, 추가 진단 필요 여부를 입력받는다.
-
----
-
-#### 경로 B — review_meta.json 존재 (재실행)
-
-기존 데이터를 출력하고 업데이트 여부를 선택받는다:
-
-```
-=== 서비스 특징 (기존 데이터) ===
-{service_characteristics 값}
-추가 진단 필요 여부: 필요 / 불필요
-추가 진단 유형     : {additional_diagnosis_types 값, 없으면 "—"}
-============================
-업데이트하시겠습니까?
-  y  →  서비스 특징 LLM 재분석 + 추가 진단 여부 재입력
-  d  →  추가 진단 여부만 재입력 (서비스 특징 분석 생략)
-  Enter  →  변경 없이 스킵
-
-[y/d/Enter]:
-```
-
-- `y` 입력 → 경로 A 전체 실행 (LLM 재분석 포함)
-- `d` 입력 → LLM 분석 생략, 추가 진단 필요 여부 입력만 진행
-- Enter → Step 1b 전체 스킵, 기존 review_meta.json 유지
-
----
-
-**출력 형식** (경로 A 또는 경로 B-y 실행 시):
-
-```
-=== 서비스 특징 분석 ===
-기술 스택    : Spring Boot 2.7 / Java 11 / MyBatis / Redis
-서비스 도메인 : OK Cashbag 포인트 조회·적립 API
-주요 기능    : 회원 인증, 포인트 거래 이력, 외부 가맹점 API 연동
-민감 데이터  : 회원 ID, 거래 금액, 카드 마지막 4자리
-리스크 프로파일: 대외 노출 API, 금융 데이터 취급
-==========================
-```
-
-**추가 진단 필요 여부 입력** (경로 A / B-y / B-d 공통):
-
-> **BLOCKING INPUT** — 이 단계는 **자율 완주 규칙의 예외**다.  
-> Claude가 서비스 특징을 분석하더라도 추가 진단 필요 여부를 **스스로 판단하거나 자동 저장하지 않는다.**  
-> 반드시 아래 프롬프트를 출력하고 **auditor의 실제 입력을 받은 뒤에만** 저장·진행한다.
-
-```
-=== 동적진단 등 추가진단 필요여부 (동적 진단 / 모의해킹 등) ===
-y  →  추가 진단 필요
-n  또는 Enter  →  불필요
-
-판정 [y/n/Enter]:
-```
-
-**추가 진단 유형 입력** (`y` 입력 시에만 진행, `n`/Enter 면 이 단계 스킵):
-
-> **BLOCKING INPUT** — y/n 판정과 동일하게 자율 완주 규칙의 예외다.
-> Claude는 직전 서비스 특징 분석(주요 기능/민감 데이터/리스크 프로파일)을 근거로 **권고 유형을 제시**할 수 있으나,
-> 최종적으로 database(`review_meta.json`)에 남는 유형 목록은 **auditor 입력값**이다.
-
-먼저 서비스 특징 분석 결과를 근거로 권고안을 한 줄로 제시한 뒤 입력을 받는다:
-
-```
-[권고] 이 서비스는 {근거 — 예: 자체 로그인/세션 발급 로직 보유, PG 연동 결제 API 존재 등}로 보아
-       {인증, 결제} 진단을 권고합니다.
-
-=== 추가 진단 유형 선택 ===
-복수 선택 가능, 쉼표로 구분. 목록에 없는 유형은 자유 텍스트로 입력.
-
-  1. 인증   (로그인/세션/토큰/권한 체계)
-  2. 결제   (PG 연동, 정산, 포인트/캐시 차감)
-  3. 인프라 (네트워크 구성, 방화벽, 클라우드 설정)
-  4. 개인정보 (PII 대량 처리, 외부 전송)
-  5. 기타   (자유 텍스트로 명시)
-
-입력 (예: 1,2  또는  인증,결제 / Enter=권고안 그대로 적용 / n=선택 안 함):
-```
-
-- 번호(`1,2`) 또는 유형명 자유 텍스트(`인증,결제`) 모두 허용, 콤마로 다중 선택 파싱
-- Enter(빈 입력) → 직전 [권고] 줄의 유형을 그대로 채택
-- `n` → 유형 미지정 (`additional_diagnosis_types: []`)로 저장, 필요 시 이후 재실행(§경로 B `d`)으로 보완 가능
-- `5.기타` 또는 목록에 없는 자유 텍스트 입력 시 해당 문자열 그대로 배열에 포함
-
-**저장**: `state/<repo>/review_meta.json` 에 아래 형식으로 저장한다 (경로 B-Enter 제외):
-
-```json
-{
-  "repo": "<repo>",
-  "service_characteristics": "기술 스택: Spring Boot / Java 11 | 서비스 도메인: 포인트 API | 민감 데이터: 회원 ID, 거래 금액",
-  "additional_diagnosis_needed": true,
-  "additional_diagnosis_types": ["인증", "결제"],
-  "additional_diagnosis_basis": "자체 로그인/세션 발급 로직 보유, PG 연동 결제 API 존재",
-  "updated_at": "2026-06-17T10:30:00"
-}
-```
-
-- `additional_diagnosis_needed`: `y` 입력 시 `true`, `n` 또는 Enter 시 `false`
-- `additional_diagnosis_types`: `additional_diagnosis_needed == true` 일 때만 입력받아 저장 (문자열 배열). `false`인 경우 `[]`
-- `additional_diagnosis_basis`: 유형 선택의 근거가 된 서비스 특징 요약 1문장 ([권고] 줄 근거를 그대로 기록, auditor가 자유 텍스트로 교체 입력한 경우 해당 텍스트 사용)
-- Claude가 리스크 프로파일을 참고해 권고 의견을 제시할 수 있으나, **최종 판정 입력은 auditor만 한다**
-- `testbed/<repo>/` 가 없으면 LLM 분석 생략, `service_characteristics: "—"` 로 저장, 추가 진단 유형 입력도 생략(`additional_diagnosis_types: []`)
+> **참고**: 서비스 특징 분석 및 추가 진단(동적 진단/모의해킹) 필요 여부 판단은 §5d로 이동했다 — 모든 finding 판정과 review_note 작성이 끝난 뒤, 클렌징(§5e) 전에 진행한다 (근거: 판단 시점에 review_note·정탐 findings 상세를 참조해 PoC 가능성을 종합해야 하므로, finding 리뷰 전 단계에서는 근거가 부족하다).
 
 ### 2. 전체 취약점 개요 출력
 
 리뷰 시작 전, 수집된 모든 finding을 아래 형식의 테이블로 **한 번에** 출력한다.
+finding은 §1의 SKILL_ORDER(`injection > xss > file > data > auth > sca`) 순서로 나열한다.
+
+> **⚠️ 렌더링 필수 규칙**: 아래 `=== ... ===` 배너와 `----+-----+...` 구분선을 실제 채팅 응답으로 출력할 때는
+> 반드시 ` ```text ` ~ ` ``` ` 코드펜스로 감싼 채로 출력한다. 감싸지 않으면 CommonMark가 `----` 구분선을
+> 직전 줄의 Setext 헤딩(H1/H2)으로 오인식하여 글씨가 비정상적으로 커지는 렌더링 오류가 발생한다
+> (2026-07-24, 2026-08-11, 2026-08-13 총 3회 재발 확인됨). 이 규칙은 §2/§3/§4 및 본 문서의 모든
+> `=== ... ===` 콘솔 블록에 동일하게 적용된다.
 
 ```
 === 리뷰 대상 전체 목록 ===
@@ -261,77 +158,66 @@ n  또는 Enter  →  불필요
 
 ### 3. 리뷰 시작 안내
 
-```
+> **⚠️ 렌더링 필수 규칙**: §2와 동일 — 아래 블록을 ` ```text ` 코드펜스로 감싸서 출력한다.
+
+```text
 === 오탐/정탐 인터랙티브 리뷰 ===
 RUN_ID : <RUN_ID>
 레포   : <repo>
 대상   : <N>건 (취약/정보/수동검토필요 판정 findings)
 
-판정 입력 방법:
-  정탐 (실제 취약점)    →  1  또는  y  → 이후 결과 판정(취약/정보) 입력
-  오탐 (false positive) →  0  또는  n
-  스킵 (나중에 판정)    →  s  또는 Enter
-  종료                  →  q
-  의견/질문             →  자유 텍스트 입력 → 코드 확인 후 분석
-
-정탐 판정 후 결과 판정:
-  취약 (보고서에 취약으로 표시) →  v  또는  취약
-  정보 (보고서에 정보로 표시)   →  i  또는  정보
-  Enter (스캔 결과값 유지)      →  그대로 Enter
-
-결과 판정 후 위험도 조정:
-  Enter (스캔 위험도 유지)      →  그대로 Enter
-  c  →  Critical
-  h  →  High
-  m  →  Medium
-  l  →  Low
-  i  →  Informational
+각 finding마다 AskUserQuestion 도구로 클릭 선택을 받는다 (자유 텍스트 입력을
+요구하지 않음). 코드 확인이 필요한 의견/질문은 AskUserQuestion의 "Other" 자유
+입력으로 받는다.
 
 판정 완료 후 approve_report.py 로 최종 보고서를 생성한다.
 ===================================
 ```
 
+> **인터랙션 방식**: §4의 판정 / 결과 판정 / 위험도 조정 프롬프트는 모두 `AskUserQuestion` 도구로 진행한다 (1/0/s/q, v/i, c/h/m/l/i 같은 문자열 입력을 사용자에게 타이핑하게 하지 않는다). 각 프롬프트의 정확한 옵션 구성은 §4에 명시되어 있다. 메모/오탐사유처럼 본질적으로 자유 서술이 필요한 항목만 일반 텍스트 프롬프트로 유지한다.
+
 ### 4. finding별 인터랙티브 판정
 
-각 finding을 아래 형식으로 제시한다:
+finding은 §1의 SKILL_ORDER(`injection > xss > file > data > auth > sca`) 순서로, 동일 skill 내에서는 파일 내 등장 순서로 순회한다. 임의로 알파벳순이나 심각도순으로 재정렬하지 않는다.
 
-```
+각 finding을 아래 형식으로 제시한다 (` ```text ` 코드펜스로 감싼다):
+
+```text
 [{순번}/{전체}] {skill} — {finding_id}
 위험도 : {severity}
 제목   : {title}
 위치   : {scope.affected_file}:{scope.affected_line}  (또는 scope.endpoint)
 설명   : {description} (첫 200자)
 증거   : {evidence.snippet} (첫 300자, 있을 경우)
-
-판정 [1=정탐 / 0=오탐 / s=스킵 / q=종료 / 의견 입력]:
 ```
+
+제시 직후, 아래 3단계를 각각 `AskUserQuestion` 도구로 진행한다 (문자열 키 입력 요구 금지). 각 호출의 "Other" 자유 입력은 도구가 자동 제공하므로 별도 옵션으로 나열하지 않는다.
 
 #### 입력 분기
 
-**플래그 입력 (`1` / `y` / `0` / `n` / `s` / Enter / `q`)**:
+**1단계 — 판정**: `AskUserQuestion`
+- question: "[{순번}/{전체}] {finding_id} — {title} (위험도 {severity}) 판정?"
+- options (단일 선택): `정탐` / `오탐` / `스킵 (나중에 판정)` / `종료`
+- 코드 확인이 필요한 의견/질문은 옵션 대신 "Other"에 자유 텍스트로 입력 → §4a 하단 "자유 텍스트 입력" 흐름으로 처리 후 다시 이 1단계로 복귀
 
-- `1` / `y` → `review_status: "정탐"`, `reviewed: true`
-  - **결과 판정**:
-    `결과 판정 [v=취약 / i=정보 / Enter=스캔값 유지 ({result})]:` 를 출력하고 입력 대기
-    - `v` / `취약` → `review_result: "취약"` 저장
-    - `i` / `정보` → `review_result: "정보"` 저장
-    - Enter (빈 입력) → `review_result` 필드 저장하지 않음 (스캔 result 값 그대로 사용)
-  - **위험도 조정**:
-    `위험도 조정 [Enter=유지 ({severity}) / c=Critical / h=High / m=Medium / l=Low / i=Informational]:` 를 출력하고 입력 대기
-    - Enter (빈 입력) → severity 변경 없음
-    - `c` → `severity: "Critical"` 로 갱신
-    - `h` → `severity: "High"` 로 갱신
-    - `m` → `severity: "Medium"` 로 갱신
-    - `l` → `severity: "Low"` 로 갱신
-    - `i` → `severity: "Informational"` 로 갱신
+- `정탐` → `review_status: "정탐"`, `reviewed: true`
+  - **2단계 — 결과 판정**: `AskUserQuestion`
+    - question: "결과 판정 (스캔값: {result})"
+    - options (단일 선택): `취약` / `정보` / `스캔값 유지 ({result})`
+    - `취약` → `review_result: "취약"` 저장 / `정보` → `review_result: "정보"` 저장 / `스캔값 유지` → `review_result` 필드 저장하지 않음
+  - **3단계 — 위험도 조정**: `AskUserQuestion`
+    - question: "위험도 조정 (스캔값: {severity})"
+    - options (단일 선택): `유지 ({severity})` / `High` / `Medium` / `Low`
+    - Critical 또는 Informational로 조정이 필요하면 옵션 대신 "Other"에 `Critical` 또는 `Informational` 자유 입력
+    - `유지` → severity 변경 없음 / 그 외 → `severity` 를 선택값(또는 Other 입력값)으로 갱신
     - 변경 시 review_note 에 `"위험도 {이전} → {이후} 조정"` 자동 기록 (기존 메모 앞에 추가)
-  - 추가로 "메모 (Enter 스킵):" 입력 받아 `draft_note` 에 임시 저장
+  - 추가로 "메모 (Enter 스킵):" — 자유 서술이 필요하므로 일반 텍스트 프롬프트로 입력 받아 `draft_note` 에 임시 저장
   - **§4a 지시사항 자동 실행** 적용 후 최종 `review_note` 결정
-- `0` / `n` → `review_status: "오탐"`, `reviewed: true`  
-  - 추가로 "오탐 사유 (Enter 스킵):" 입력 받아 `review_note` 에 저장
+- `오탐` → `review_status: "오탐"`, `reviewed: true`
+  - 추가로 "오탐 사유 (Enter 스킵):" — 일반 텍스트 프롬프트로 입력 받아 `review_note` 에 저장
   - `review_result` 는 저장하지 않음 (오탐 finding은 보고서에서 제외됨)
-- `s` / Enter → `reviewed: false` (변경 없음, 다음으로)
-- `q` → 즉시 중단, 지금까지 입력한 내용 저장 후 종료
+- `스킵` → `reviewed: false` (변경 없음, 다음으로)
+- `종료` → 즉시 중단, 지금까지 입력한 내용 저장 후 종료
 
 #### §4a. review_note 지시사항 자동 실행
 
@@ -398,17 +284,13 @@ RUN_ID : <RUN_ID>
    - 취약점이 실제로 존재하는지 코드 레벨에서 검토
    - 관련 함수 / 호출 경로 / 보안 처리 여부 파악
    - 필요 시 `Grep` 으로 관련 패턴 추가 검색
-3. 분석 완료 후 재판정을 요청한다:
+3. 분석 완료 후 분석 내용을 텍스트로 출력한 뒤, `AskUserQuestion`으로 재판정을 요청한다:
+   - question: "[코드 분석 완료] 위 분석을 참고해 재판정?"
+   - options (단일 선택): `정탐` / `오탐` / `스킵`
+   - 추가 질문이 있으면 옵션 대신 "Other"에 자유 텍스트로 입력
 
-```
-[코드 분석 완료]
-<분석 내용>
-
-판정 [1=정탐 / 0=오탐 / s=스킵]:
-```
-
-4. 이후 플래그 입력 분기를 그대로 적용 (메모 입력 포함)
-5. 분석 중 추가 질문이 들어오면 답변 후 다시 판정 요청 — finding이 종료될 때까지 반복
+4. 이후 §4 "1단계 — 판정" 이하 분기를 그대로 적용 (결과판정/위험도조정/메모 입력 포함)
+5. 분석 중 추가 질문이 들어오면(Other 입력) 답변 후 다시 재판정 질문 — finding이 종료될 때까지 반복
 
 #### §4c. Audit 판정 기록
 
@@ -624,11 +506,135 @@ python3 tools/audit_utils.py end-session \
 - 건수는 Phase 1~2 전체 처리 결과 집계값을 사용한다
 - SESSION_ID가 없는 경우(초기화 실패) 이 단계를 생략한다
 
-### 5d. Phase C-2 — 클렌징 완료 처리
+### 5d. 서비스 특징 분석 및 추가 진단(동적 진단/모의해킹) 필요 여부 판단
+
+> **위치 근거**: 이 단계는 원래 §1b였으나, 판단에 finding 리뷰 결과(정탐 여부, review_note, 위험도 조정)와 보고서 초안(§5b) 내용이 필요하다는 사용자 지시(2026-08-25)에 따라 전체 finding 판정 + review_note 작성(§4~§5b) 완료 이후, 클렌징(§5e) 이전으로 이동했다. `testbed/<repo>/` 는 아직 삭제 전이므로 소스 참조가 가능한 마지막 시점이기도 하다.
+
+`state/<repo>/review_meta.json` 존재 여부에 따라 두 가지 경로로 분기한다.
+
+---
+
+#### 경로 A — review_meta.json 없음 (최초 실행)
+
+**서비스 특징 LLM 분석**:
+
+`testbed/<repo>/` 의 디렉터리 구조, 주요 컨트롤러/서비스 클래스, 빌드 설정(build.gradle / package.json), README 등을 탐색하여 아래 항목을 분석하고 출력한다:
+
+- **기술 스택**: 언어, 프레임워크, 주요 라이브러리
+- **서비스 도메인**: 핵심 업무 영역
+- **주요 기능**: 인증, API, 데이터 처리, 외부 연동 등
+- **취급 민감 데이터**: PII(개인정보), 금융정보, 카드정보, 세션 토큰 등
+- **보안 리스크 프로파일**: 외부 노출 범위, 주요 공격 표면
+
+분석 결과를 아래 형식으로 출력한 뒤, 추가 진단 필요 여부를 입력받는다.
+
+---
+
+#### 경로 B — review_meta.json 존재 (재실행)
+
+기존 데이터를 아래 형식(```text``` 코드펜스로 감싸서)으로 먼저 출력한다:
+
+```text
+=== 서비스 특징 (기존 데이터) ===
+{service_characteristics 값}
+추가 진단 필요 여부: 필요 / 불필요
+추가 진단 유형     : {additional_diagnosis_types 값, 없으면 "—"}
+============================
+```
+
+출력 직후 `AskUserQuestion` 도구로 업데이트 여부를 묻는다 (자유 텍스트 입력을 요구하지 않는다):
+
+- question: "review_meta.json 기존 데이터를 업데이트하시겠습니까?"
+- options (단일 선택):
+  1. `변경 없이 유지 (추천)` — Step 5d 전체 스킵, 기존 review_meta.json 그대로 사용
+  2. `서비스 특징 재분석` — 경로 A 전체 실행 (LLM 재분석 + 추가 진단 여부 재입력)
+  3. `추가 진단 여부만 재입력` — LLM 분석 생략, 추가 진단 필요 여부만 재확인
+
+선택 결과에 따라 각각 위 3가지 동작을 수행한다.
+
+---
+
+**출력 형식** (경로 A 또는 경로 B-y 실행 시, ```text``` 코드펜스로 감싸서):
+
+```text
+=== 서비스 특징 분석 ===
+기술 스택    : Spring Boot 2.7 / Java 11 / MyBatis / Redis
+서비스 도메인 : OK Cashbag 포인트 조회·적립 API
+주요 기능    : 회원 인증, 포인트 거래 이력, 외부 가맹점 API 연동
+민감 데이터  : 회원 ID, 거래 금액, 카드 마지막 4자리
+리스크 프로파일: 대외 노출 API, 금융 데이터 취급
+==========================
+```
+
+**추가 진단 필요 여부 입력** (경로 A / B-y / B-d 공통):
+
+> **BLOCKING INPUT** — 이 단계는 **자율 완주 규칙의 예외**다.  
+> Claude가 서비스 특징을 분석하더라도 추가 진단 필요 여부를 **스스로 판단하거나 자동 저장하지 않는다.**  
+> 반드시 `AskUserQuestion` 도구로 auditor의 실제 선택을 받은 뒤에만 저장·진행한다. 자유 텍스트 입력을 요구하지 않는다.
+
+`AskUserQuestion` 호출:
+- question: "동적진단/모의해킹 등 추가 진단이 필요합니까?"
+- options (단일 선택): `추가 진단 필요` / `불필요 (추천)`
+
+**추가 진단 유형 및 시나리오 입력** (`추가 진단 필요` 선택 시에만 진행, `불필요` 선택 시 이 단계 스킵):
+
+> **BLOCKING INPUT** — 위 선택과 동일하게 자율 완주 규칙의 예외다.
+> Claude는 서비스 특징(기술 스택/주요 기능/민감 데이터)뿐 아니라, 이번 세션에서 확정된 **정탐 findings의 상세 내용
+> (title/severity/evidence/review_note, §5b 보고서 초안의 "위험 시나리오"·"코드 직접 확인 결과")** 을 함께 근거로
+> PoC 가능성과 모의해킹 시나리오를 종합해 **권고 유형을 제시**할 수 있으나,
+> 최종적으로 database(`review_meta.json`)에 남는 유형 목록은 **auditor 선택값**이다.
+
+먼저 정탐 findings와 서비스 특징을 종합한 권고안을 아래 형식으로 제시한다:
+
+```text
+[권고] 이 서비스는 {서비스 특징 근거 — 예: 자체 로그인/세션 발급 로직 보유, PG 연동 결제 API 존재 등}로 보아
+       {인증, 결제} 진단을 권고합니다.
+
+[PoC 가능성 / 모의해킹 시나리오]
+- {정탐 finding_id} ({severity}): {해당 finding의 evidence/위험 시나리오를 근거로 실제 브라우저·API 호출
+  환경에서 어떻게 실증 가능한지 1~2문장 — 예: "Persistent XSS(XSS-002)는 관리자 계정 탈취 후 공지 필드에
+  <script> 페이로드를 저장, 타 관리자 세션에서 렌더링되는지 실제 화면에서 확인하는 시나리오로 실증 가능"}
+- (정탐 finding이 여러 건이면 유형별로 대표 1~2건만 요약, 전수 나열하지 않는다)
+```
+
+이어서 `AskUserQuestion` 호출 (multiSelect: true):
+- question: "추가 진단 유형을 선택하세요 (복수 선택 가능)"
+- options: `인증(로그인/세션/토큰/권한)` / `결제(PG연동/정산/포인트차감)` / `인프라(네트워크/방화벽/클라우드)` / `개인정보(PII 대량처리/외부전송)`
+- 목록 4종에 없는 유형(예: 기타 세부 항목)은 도구가 자동 제공하는 "Other" 자유 텍스트로 입력받는다
+- 아무 것도 해당 없으면 옵션을 선택하지 않고 넘어가거나 Other에 "해당없음"으로 입력 → `additional_diagnosis_types: []` 로 저장
+
+- 선택된 옵션(및 Other 자유 텍스트)을 그대로 `additional_diagnosis_types` 배열에 저장
+
+**저장**: `state/<repo>/review_meta.json` 에 아래 형식으로 저장한다 (경로 B-Enter 제외):
+
+```json
+{
+  "repo": "<repo>",
+  "service_characteristics": "기술 스택: Spring Boot / Java 11 | 서비스 도메인: 포인트 API | 민감 데이터: 회원 ID, 거래 금액",
+  "additional_diagnosis_needed": true,
+  "additional_diagnosis_types": ["인증", "결제"],
+  "additional_diagnosis_basis": "자체 로그인/세션 발급 로직 보유, PG 연동 결제 API 존재. PoC: Persistent XSS(XSS-002) 관리자 세션 탈취 시나리오 실증 가능",
+  "updated_at": "2026-06-17T10:30:00"
+}
+```
+
+- `additional_diagnosis_needed`: `추가 진단 필요` 선택 시 `true`, `불필요` 선택 시 `false`
+- `additional_diagnosis_types`: `additional_diagnosis_needed == true` 일 때만 입력받아 저장 (문자열 배열). `false`인 경우 `[]`
+- `additional_diagnosis_basis`: 유형 선택의 근거가 된 서비스 특징 + PoC/시나리오 요약 ([권고]/[PoC 가능성] 줄 근거를 그대로 기록, auditor가 자유 텍스트로 교체 입력한 경우 해당 텍스트 사용)
+- Claude가 리스크 프로파일과 정탐 findings를 참고해 권고 의견을 제시할 수 있으나, **최종 판정 입력은 auditor만 한다**
+- `testbed/<repo>/` 가 없으면 LLM 분석 생략, `service_characteristics: "—"` 로 저장, 추가 진단 유형 입력도 생략(`additional_diagnosis_types: []`)
+
+### 5e. Phase C-2 — 클렌징 완료 처리
 
 > **정책**: `shared/references/llm_data_cleansing_policy.md` | **절차**: `shared/references/phase_c_cleansing.md`
 
 Audit 세션 종료 직후 자동 수행한다.
+
+> **자율 완주 대상 (2026-08-25, 사용자 명시적 지시)**: 이 단계(`tools/retroactive_cleanse.py` 실행 —
+> testbed 삭제 + Confluence 클렌징 레지스트리 게시 포함)는 findings 판정처럼 사람 판단이 필요한
+> 확인 대상이 아니다. 판정 결과를 기계적으로 반영하는 후속 처리이므로 확인 질문 없이 즉시 실행한다.
+> `tools/retroactive_cleanse.py --repo <repo>`로 아래 1~7 단계를 일괄 수행한다 (스크립트가 없거나
+> 실패하면 1~7을 개별 수행).
 
 **1. `state/<repo>/llm_data_access_log.json` 로드**
 - 파일 없는 경우 → 빈 `skills[]`로 신규 생성 후 진행
@@ -677,7 +683,7 @@ find state/<repo>/ \( -name "*.java" -o -name "*.kt" -o -name "*.xml" -o -name "
 | 진단일 | `skills[]` 중 가장 최신 `scanned_at` 날짜 (YYYY-MM-DD) |
 | 고객사/프로젝트 | `project` 값 |
 | 레포 | `repo` 값 |
-| Skill | `all (injection/xss/file/data/sca)` — 실제 존재하는 skill만 나열 |
+| Skill | `all (injection/xss/file/data/auth/sca)` — 실제 존재하는 skill만 나열 |
 | testbed 삭제 | ✅ 또는 ⚠️ |
 | state 감사 | ✅ 또는 ⚠️ |
 | 스캔 redact | ✅ 또는 ⚠️ |
@@ -697,12 +703,14 @@ Confluence 페이지 업데이트 실패 시 → `notes`에 오류 기록 후 �
   스캔 redact    : ✅
   Confluence     : ✅  레지스트리 행 추가 (pageId: <YOUR_REGISTRY_PAGE_ID>)
   로그           : state/<repo>/llm_data_access_log.json
-  ─────────────────────────────────────────
-  [운영자] 이 Claude 세션을 종료하고 새 세션을 시작하세요.
-  (고객사 소스코드가 포함된 대화 컨텍스트를 만료시키기 위한 필수 절차입니다)
 ```
 
-### 5e. 전체양호 자동 처리 (레포 단위 모드 전용)
+확인 질문 없이 곧바로 §5f(전체양호 판단) → §6(보고서 생성/게시)으로 이어서 진행한다.
+
+> **[운영자] 참고**: 이 Claude 세션에는 여전히 `testbed/<repo>/` 소스코드가 포함된 대화 컨텍스트가
+> 남아있다. §6까지 완료된 뒤에는 세션을 종료하고 새 세션을 시작하는 것을 권장한다(자동 실행 대상 아님).
+
+### 5f. 전체양호 자동 처리 (레포 단위 모드 전용)
 
 > **적용 조건 (모두 충족 시에만 실행)**:
 > - **레포 단위 모드** (`run_id=None`, §0 인수 파싱 기준) — RUN_ID 모드에서는 실행하지 않는다.
@@ -718,7 +726,7 @@ python3 tools/update_ocb_plan.py --all-clear <repo>
 ```
 
 - `docs/ocb_scan_plan.md` 의 해당 레포 행 갱신: 보고서 컬럼 → `전체양호`, Jira 티켓 컬럼 → `{bg:#D4EDDA}전체양호`
-- 스크립트 내부에서 Confluence 페이지(pageId: `746439687`, "OCB 서비스 군 보안 진단 계획")까지 자동 동기화
+- 스크립트 내부에서 Confluence 페이지(pageId: `750459063`, "26년 진단결과")까지 자동 동기화
 - 레포 행을 찾지 못하는 등 갱신 실패 시 `[WARN]` 출력 후 계속 진행 (사람 개입 불필요 — blocking 아님)
 - 조건 미충족(정탐 > 0 이거나 미판정 > 0 이거나 RUN_ID 모드) 시 이 단계 전체를 건너뛰고 Step 6으로 진행
 
@@ -729,42 +737,47 @@ python3 tools/update_ocb_plan.py --all-clear <repo>
   Jira 티켓 : 전체양호
 ```
 
-### 6. 완료 요약
+### 6. 최종 보고서 생성 + Confluence 게시 (자동)
 
-RUN_ID 모드:
+> **자율 완주 대상 (2026-08-25, 사용자 명시적 지시)**: §5e 클렌징 직후, 정탐 finding이 1건이라도
+> 있으면 확인 질문 없이 곧바로 `approve_report.py`를 `--publish` 포함하여 실행한다. 이 단계는
+> `/sec-review` 완료 후 별도 스킬/도구를 사용자가 수동으로 재호출해야 하는 것이 아니라, `/sec-review`
+> 자체의 마지막 phase로 취급한다.
 
+**정탐 0건 + 미판정 0건인 경우** (§5f 전체양호 자동 처리가 이미 실행됨) → 이 단계 전체를 건너뛴다
+(`approve_report.py`는 정탐 finding이 없으면 생성할 내용이 없다).
+
+**정탐 ≥ 1건인 경우** — RUN_ID 모드/레포 단위 모드 공통으로 아래를 실행한다:
+
+```bash
+# RUN_ID 모드
+python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
+
+# 레포 단위 모드
+python3 tools/approve_report.py --repo <repo> --publish
 ```
-=== 리뷰 완료 ===
-정탐: {N}건  /  오탐: {N}건  /  미판정: {N}건
 
-다음 단계 — 최종 보고서 생성:
-  python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo>
-
-Confluence 게시 포함:
-  python3 tools/approve_report.py --run-id <RUN_ID> --repo <repo> --publish
-```
-
-레포 단위 모드 (정탐 > 0 이거나 미판정 > 0 — 일반 케이스):
+- 스크립트 실행 중 `[GATE ERROR]` 등 사람만 해결 가능한 blocking 오류가 나면 HARD RULE의 예외 조항에
+  따라 보고 후 대기한다 (예: `repo_meta.json` 누락으로 인한 게시 차단 등)
+- 정상 종료 시 아래 형식으로 완료 요약을 출력한다:
 
 ```
 === 리뷰 완료 ===
 정탐: {N}건  /  오탐: {N}건  /  미판정: {N}건
 report_expand 생성: {N}건
 
-다음 단계 — 최종 보고서 생성:
-  python3 tools/approve_report.py --repo <repo>
-
-Confluence 게시 포함:
-  python3 tools/approve_report.py --repo <repo> --publish
+클렌징 완료 — testbed 삭제 / state 감사 / 클렌징 레지스트리(pageId: <YOUR_REGISTRY_PAGE_ID>) 갱신
+최종 보고서   : logs/final_<repo>_<RUN_ID|repo전체>.md
+Confluence 게시: ✅ <게시된 page 링크 또는 page_id>
 ```
 
-레포 단위 모드 (정탐 0건 + 미판정 0건 — §5e 전체양호 자동 처리 실행됨):
+**정탐 0건 + 미판정 0건인 경우**(§5f 실행됨) 완료 요약:
 
 ```
 === 리뷰 완료 ===
 정탐: 0건  /  오탐: {N}건  /  미판정: 0건
 
-전체양호 처리 완료 — docs/ocb_scan_plan.md 및 Confluence(pageId: 746439687) 갱신됨
+전체양호 처리 완료 — docs/ocb_scan_plan.md 및 Confluence(pageId: 750459063) 갱신됨
 approve_report.py 실행 불필요 (정탐 finding 없음)
 ```
 

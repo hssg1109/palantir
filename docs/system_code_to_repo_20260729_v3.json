@@ -1,0 +1,3005 @@
+[
+  {
+    "system_code": "C000935",
+    "시스템명": "데드코드분석-전금법",
+    "infra_count": 6,
+    "repos": [
+      "SW/external_libs",
+      "VRBT/scavenger"
+    ]
+  },
+  {
+    "system_code": "C000946",
+    "시스템명": "OCB-RECO",
+    "infra_count": 26,
+    "repos": [
+      "TENXTFSYN/ocb-reco-backend",
+      "TENXTFSYN/ocb-reco-ranker"
+    ]
+  },
+  {
+    "system_code": "C000950",
+    "시스템명": "DI-Galleon",
+    "infra_count": 16,
+    "repos": [
+      "DI/gringotts-cron",
+      "DI/gringotts-was",
+      "DI/gringotts-web",
+      "DPT_1/galleon"
+    ]
+  },
+  {
+    "system_code": "C000952",
+    "시스템명": "DI-Cluster",
+    "infra_count": 712,
+    "repos": [
+      "ADS-DA/di-airflow-k8s",
+      "BI/airflow_bi_custpfdb",
+      "BI/airflow_bi_ictfhub",
+      "BI/airflow_bi_ocb",
+      "BI/airflow_bi_proximity",
+      "BI/airflow_bi_syrupstore",
+      "BI/airflow_bi_syrupwallet",
+      "BI/airflow_di_bi_evs_skp",
+      "BI/airflow_di_bi_test",
+      "BI/airflow_di_bi_utils",
+      "DI/chat-dic-front",
+      "DI/cms-airflow",
+      "DI/di-airflow-dags",
+      "DI/di-airflow-packages",
+      "DI/di-jdk",
+      "DI/ding-configs",
+      "DI/ictfamily_crosscheck",
+      "DI/k8s-app-template",
+      "DI/mlflow-api",
+      "DI/mlflow-tracker",
+      "DI/mlworks-install",
+      "DI/mlworks-schedular",
+      "DI/nginx-configs",
+      "DI/oggreapi",
+      "DI/oozie-5.2.1",
+      "DI/probe-airflow-batch",
+      "DI/probe-web",
+      "DI/qcpy",
+      "DI/querycache-oozie",
+      "DI/querycache2",
+      "DI/rake",
+      "DI/rangerbox-cron",
+      "DI/rangerbox-was",
+      "DI/rangerbox-web",
+      "DI/router",
+      "DI/scrooge",
+      "DI/timebomb",
+      "DI/trinoadmin-web",
+      "DIT/dit",
+      "DMP/dmp_column_search_di_airflow",
+      "DMP/dmp_di_airflow",
+      "DMP/dmp_di_airflow_export",
+      "DMP/dmp_di_airflow_temp",
+      "DMP/dmp_di_airflow_utils",
+      "DMP/dmp_trait_rule_engine_v4",
+      "DMP/segment-engine",
+      "OCBNFT/ocb-nft-admin-front",
+      "OCBNFT/ocb-nft-backend",
+      "OCBNFT/ocb-nft-batch",
+      "OCBNFT/ocb-nft-fingerlabs",
+      "OCBNFT/ocb-nft-script",
+      "STSE/lake",
+      "SVCENG/helm-charts"
+    ]
+  },
+  {
+    "system_code": "C000954",
+    "시스템명": "Proxy-기프티콘",
+    "infra_count": 9,
+    "repos": [
+      "IPX/proxy-gifticon-b2b",
+      "IPX/proxy-gifticon-int",
+      "IPX/proxy-gifticon-pub",
+      "IPX/tcpforward-gifticon-b2b",
+      "IPX/tcpforward-gifticon-int",
+      "IPX/tcpforward-gifticon-pub"
+    ]
+  },
+  {
+    "system_code": "C000956",
+    "시스템명": "DI-kafka",
+    "infra_count": 38,
+    "repos": [
+      "DI/hive-admin",
+      "DI/hive-airlock-manager",
+      "DI/hive-audit-hook",
+      "DI/hive-configs",
+      "DI/kafka_script",
+      "DI/logagent",
+      "DI/logagent-keeper",
+      "DI/querycache2",
+      "DI/router",
+      "DI/router-connect",
+      "DI/router-front",
+      "DPT_1/querycache",
+      "OCBNFT/ocb-nft-backend",
+      "OCBNFT/ocb-nft-script"
+    ]
+  },
+  {
+    "system_code": "C000957",
+    "시스템명": "DI-Impala",
+    "infra_count": 7,
+    "repos": []
+  },
+  {
+    "system_code": "C000962",
+    "시스템명": "DI-s3upload",
+    "infra_count": 4,
+    "repos": [
+      "DI/blacksmith",
+      "DI/dic-distcp"
+    ]
+  },
+  {
+    "system_code": "C000970",
+    "시스템명": "IPMS",
+    "infra_count": 21,
+    "repos": [
+      "IDMS/idms01",
+      "NIDMS/ipms_batch",
+      "NIDMS/uidms-employee",
+      "NIDMS/uidms-partners"
+    ]
+  },
+  {
+    "system_code": "C000987",
+    "시스템명": "ADSSO",
+    "infra_count": 9,
+    "repos": []
+  },
+  {
+    "system_code": "C000988",
+    "시스템명": "계정관리",
+    "infra_count": 7,
+    "repos": []
+  },
+  {
+    "system_code": "C000990",
+    "시스템명": "Wiki",
+    "infra_count": 6,
+    "repos": []
+  },
+  {
+    "system_code": "C000995",
+    "시스템명": "JARVIS",
+    "infra_count": 116,
+    "repos": [
+      "DEP/dep-back",
+      "DEV/ha-script",
+      "JVS/ms-notification",
+      "JVS_1/awsjarvis",
+      "JVS_1/jarvis-ts-frontend",
+      "JVS_1/jarvis_playbook",
+      "JVS_1/jhistory-backend",
+      "JVS_1/jhistory-frontend",
+      "JVS_1/pds_jarvis_dashboard",
+      "OCBNFT/ocb-nft-backend",
+      "OCBNFT/ocb-nft-script",
+      "PALAB/devx-backend"
+    ]
+  },
+  {
+    "system_code": "C000998",
+    "시스템명": "Office365",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C001000",
+    "시스템명": "DI-LogSentinel",
+    "infra_count": 8,
+    "repos": [
+      "DI/jdbc-tester",
+      "STSE/sentinel"
+    ]
+  },
+  {
+    "system_code": "C001012",
+    "시스템명": "MGMT(성수)-SE",
+    "infra_count": 30,
+    "repos": []
+  },
+  {
+    "system_code": "C001016",
+    "시스템명": "Proxy-Syrup",
+    "infra_count": 9,
+    "repos": [
+      "IPX/proxy-syrup-b2b",
+      "IPX/proxy-syrup-int",
+      "IPX/proxy-syrup-pub",
+      "IPX/tcpforward-syrup-int"
+    ]
+  },
+  {
+    "system_code": "C001028",
+    "시스템명": "MGMT-DNS",
+    "infra_count": 18,
+    "repos": []
+  },
+  {
+    "system_code": "C001029",
+    "시스템명": "MGMT-DB",
+    "infra_count": 37,
+    "repos": []
+  },
+  {
+    "system_code": "C001030",
+    "시스템명": "MGMT(일산)-NW",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C001033",
+    "시스템명": "MGMT(일산)-SE",
+    "infra_count": 50,
+    "repos": []
+  },
+  {
+    "system_code": "C001034",
+    "시스템명": "MGMT(일산)-Storage",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C001035",
+    "시스템명": "MGMT-백업",
+    "infra_count": 6,
+    "repos": []
+  },
+  {
+    "system_code": "C001041",
+    "시스템명": "DI-mdproxy",
+    "infra_count": 4,
+    "repos": [
+      "DI/mdproxy-configs"
+    ]
+  },
+  {
+    "system_code": "C001043",
+    "시스템명": "BI서비스-OGGSYW",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C001044",
+    "시스템명": "BI서비스-SODAR",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C001053",
+    "시스템명": "OCB-mobile",
+    "infra_count": 17,
+    "repos": [
+      "OC/ocb_module",
+      "OEP/cms_resource"
+    ]
+  },
+  {
+    "system_code": "C001054",
+    "시스템명": "OCB-com",
+    "infra_count": 42,
+    "repos": [
+      "OC/ocb_module",
+      "OCBWEBVIEW/ocbws-frontend",
+      "OCBWEBVIEW/ocbws-nxmile-gateway",
+      "OCBWEBVIEW/ocbws-web-api",
+      "OSA/displayadmin_server",
+      "OSA/displayadmin_ui"
+    ]
+  },
+  {
+    "system_code": "C001055",
+    "시스템명": "OCB-CMSadmin",
+    "infra_count": 7,
+    "repos": [
+      "OC/ocb_module",
+      "OEP/cms_resource"
+    ]
+  },
+  {
+    "system_code": "C001056",
+    "시스템명": "OCB-성수",
+    "infra_count": 2,
+    "repos": [
+      "OCBSUGAR/fail-info"
+    ]
+  },
+  {
+    "system_code": "C001065",
+    "시스템명": "OCB-OneIDPass",
+    "infra_count": 26,
+    "repos": [
+      "ONEIDPASS/oip_admin",
+      "ONEIDPASS/oip_api",
+      "ONEIDPASS/oip_batch",
+      "ONEIDPASS/oip_front"
+    ]
+  },
+  {
+    "system_code": "C001068",
+    "시스템명": "OCBpass",
+    "infra_count": 68,
+    "repos": [
+      "OCBNFT/ocb-nft-backend",
+      "OCBNFT/ocb-nft-batch",
+      "OCBNFT/ocb-nft-homepage",
+      "OCBNFT/ocb-nft-script",
+      "OCBPASS/ocbpass-11st",
+      "OCBPASS/ocbpass-admin",
+      "OCBPASS/ocbpass-app",
+      "OCBPASS/ocbpass-batch",
+      "OCBPASS/ocbpass-inside",
+      "OCBPASS/ocbpass-newpg",
+      "SSI/dummy_jar",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-syrup",
+      "SW/gw_out",
+      "SW/gw_out_homeplus",
+      "VAS/starchip2-creator-fe",
+      "VAS/starchip2-user-fe",
+      "VAS/starchip_admin"
+    ]
+  },
+  {
+    "system_code": "C001070",
+    "시스템명": "OCB-Sugar",
+    "infra_count": 130,
+    "repos": [
+      "AI/ocb-api-with-python",
+      "DI/rake",
+      "GWS/gws-point-be",
+      "GWS/oki-be",
+      "OCBNFT/ocb-nft-backend",
+      "OCBNFT/ocb-nft-fingerlabs",
+      "OCBNFT/ocb-nft-script",
+      "OCBSUGAR/bms_admin",
+      "OCBSUGAR/ocb-epm",
+      "OCBSUGAR/ocb-soi-appweb",
+      "OCBSUGAR/ocb-sugar",
+      "OCBSUGAR/soi-event-consumer",
+      "OCBSUGAR/sugar-admin-worker",
+      "OCBSUGAR/trwas",
+      "OCBWEBVIEW/ocb-admin-frontend",
+      "OCBWEBVIEW/ocb-webview-reward-api",
+      "OCB_BACK_END/nxmilegatewayfortmambership",
+      "OCB_BACK_END/ocb-push",
+      "OE/ocb-appevt",
+      "SSI/dummy_jar",
+      "SSSC/serverconfig-syrup",
+      "STSE/lake",
+      "SW/gw_out",
+      "VAS/starchip_admin"
+    ]
+  },
+  {
+    "system_code": "C001072",
+    "시스템명": "OCB-WebView",
+    "infra_count": 65,
+    "repos": [
+      "DMP/dmp-open-gateway",
+      "DMP/dmp-script",
+      "GWS/gws-admin-be-api",
+      "GWS/gws-admin-be-batch",
+      "GWS/gws-admin-fe",
+      "GWS/gws-point-be",
+      "GWS/oki-admin-fe",
+      "GWS/oki-be",
+      "OCBWEBVIEW/ocb-service-frontend",
+      "OCBWEBVIEW/ocb-webview-api",
+      "OCBWEBVIEW/ocb-webview-frontend",
+      "OCB_BACK_END/ocb-webview"
+    ]
+  },
+  {
+    "system_code": "C001074",
+    "시스템명": "OCB-게임Biz",
+    "infra_count": 28,
+    "repos": [
+      "MKTIS/ocb_marketing_is",
+      "OCB-THP/ocb_fun_real",
+      "OCB-THP/ocb_game_biz",
+      "OCB-THP/ocb_game_biz_admin"
+    ]
+  },
+  {
+    "system_code": "C001076",
+    "시스템명": "OCB-이벤트마일리지",
+    "infra_count": 23,
+    "repos": [
+      "EVENTPOINT/eventpoint"
+    ]
+  },
+  {
+    "system_code": "C001132",
+    "시스템명": "보안-보안진단",
+    "infra_count": 8,
+    "repos": [
+      "PMON/pmon_alarm_proc",
+      "PMON/pmon_service_proc",
+      "PMON/pmon_system_proc",
+      "PNS/notification-mon"
+    ]
+  },
+  {
+    "system_code": "C001143",
+    "시스템명": "QA-로드런너-SKP",
+    "infra_count": 13,
+    "repos": []
+  },
+  {
+    "system_code": "C001148",
+    "시스템명": "DI-NG",
+    "infra_count": 18,
+    "repos": [
+      "DI/airflow",
+      "DI/batch-system",
+      "DI/blacksmith",
+      "DI/burrowtoelasticsearch",
+      "DI/chat-dic-iceberg",
+      "DI/checkmate-java",
+      "DI/dataexportapi",
+      "DI/dataflow",
+      "DI/di-airflow-packages",
+      "DI/di-erlang",
+      "DI/di-findclass",
+      "DI/di-gen-tables",
+      "DI/di-jdk",
+      "DI/di-kermit",
+      "DI/di-rabbitmq-configs",
+      "DI/di-shell-utils",
+      "DI/di-tmpl-codec",
+      "DI/di-utils",
+      "DI/dic_script",
+      "DI/drop_the_bit",
+      "DI/flink-deploy",
+      "DI/governor",
+      "DI/hadoop-3.3.6-rc1",
+      "DI/hdmin",
+      "DI/hive-admin",
+      "DI/hive-configs",
+      "DI/hivemeta-coredata",
+      "DI/install-cert",
+      "DI/jdbc-tester",
+      "DI/kiki",
+      "DI/kyuubi-client-test",
+      "DI/kyuubi-deploy",
+      "DI/medic",
+      "DI/mesh",
+      "DI/meta-gov",
+      "DI/monitoring-alerts",
+      "DI/nginx-configs",
+      "DI/oggreapi",
+      "DI/probe",
+      "DI/probe-was",
+      "DI/qcshell-conf",
+      "DI/querycache-demo",
+      "DI/querycache2",
+      "DI/rake-report",
+      "DI/rangerbox-cron",
+      "DI/rangerbox-was",
+      "DI/recopick-stream2",
+      "DI/router",
+      "DI/router-connect",
+      "DI/router-hive-processor",
+      "DI/router-stream-processor",
+      "DI/router-stream-vector",
+      "DI/skt-checker",
+      "DI/skybridge-airflow-ict-batch",
+      "DI/spark",
+      "DI/spark-ranger",
+      "DI/sqoop-deploy",
+      "DI/trino-dummy",
+      "DI/trinoadmin-was",
+      "DI/udf-di_string",
+      "DI/zookeeper-configs",
+      "DPT_1/galleon",
+      "DPT_1/medic-dataproc",
+      "DPT_1/medic-web",
+      "DPT_1/querycache",
+      "DPT_1/sentrybox-open"
+    ]
+  },
+  {
+    "system_code": "C001149",
+    "시스템명": "DI-Rake",
+    "infra_count": 28,
+    "repos": [
+      "DI/new-rake-javascript",
+      "DI/rake",
+      "DI/rake-server-nginx",
+      "STSE/lake"
+    ]
+  },
+  {
+    "system_code": "C001152",
+    "시스템명": "PICASO",
+    "infra_count": 3,
+    "repos": [
+      "ROL/clever-cdn"
+    ]
+  },
+  {
+    "system_code": "C001166",
+    "시스템명": "Blackduck(OSS)",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C001176",
+    "시스템명": "SyrupWallet-DBIF",
+    "infra_count": 26,
+    "repos": [
+      "SSI/dummy_jar",
+      "SSI/ora_simple_analyzer",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-syrup",
+      "SW/dbif",
+      "SW/dbif_batch",
+      "SW/new_open_api",
+      "VRBT/scavenger"
+    ]
+  },
+  {
+    "system_code": "C001177",
+    "시스템명": "SyrupWallet-IOP",
+    "infra_count": 31,
+    "repos": [
+      "PFMS/qcshell",
+      "SSI/dummy_jar",
+      "SSI/memcached-util",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-syrup",
+      "SW/iop_api",
+      "SW/iop_batch",
+      "SW/iop_batch_admin",
+      "SW/iop_batch_nexg",
+      "SW/iop_search_batch"
+    ]
+  },
+  {
+    "system_code": "C001179",
+    "시스템명": "SyrupWallet-Push",
+    "infra_count": 27,
+    "repos": [
+      "SSI/dummy_jar",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-syrup",
+      "SW/push_admin",
+      "SW/push_ctl",
+      "SW/push_flux",
+      "SW/push_mass",
+      "SW/push_msg",
+      "SW/pushsellscript"
+    ]
+  },
+  {
+    "system_code": "C001181",
+    "시스템명": "SyrupWallet-APPIF",
+    "infra_count": 34,
+    "repos": [
+      "SSI/dummy_jar",
+      "SSI/dummy_so",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-syrup",
+      "SW/appif-ktor",
+      "SW/appif5",
+      "SW/external_libs",
+      "VRBT/scavenger"
+    ]
+  },
+  {
+    "system_code": "C001182",
+    "시스템명": "SyrupWallet-MT",
+    "infra_count": 22,
+    "repos": [
+      "SSI/dummy_jar",
+      "SSI/dummy_so",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-ss",
+      "SSSC/serverconfig-syrup",
+      "SW/crypt",
+      "SW/crypt_api",
+      "SW/mt"
+    ]
+  },
+  {
+    "system_code": "C001185",
+    "시스템명": "SyrupWallet-Coupon",
+    "infra_count": 18,
+    "repos": [
+      "SSI/dummy_jar",
+      "SSSC/serverconfig-common",
+      "SW/coupon_admin",
+      "SW/coupon_batch",
+      "SW/coupon_if"
+    ]
+  },
+  {
+    "system_code": "C001186",
+    "시스템명": "SyrupWallet홈페이지",
+    "infra_count": 13,
+    "repos": [
+      "SSI/dummy_jar",
+      "SSI/dummy_so",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-syrup",
+      "SW/mplus_cii",
+      "SW/syrup_cii_be",
+      "SW/syrup_cii_fe",
+      "SW/syrup_cs",
+      "SW/syrup_homepage"
+    ]
+  },
+  {
+    "system_code": "C001187",
+    "시스템명": "마케팅플러스",
+    "infra_count": 61,
+    "repos": [
+      "SSI/dummy_jar",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-ss",
+      "SSSC/serverconfig-syrup",
+      "SW/mplus_api",
+      "SW/mplus_batch",
+      "SW/mplus_cii",
+      "SW/mplus_event",
+      "SW/mplus_madm",
+      "SW/mplus_rms",
+      "SW/mplus_sadm",
+      "SW/syrup_cii_be",
+      "SW/syrup_cii_fe",
+      "SW/syrup_cs"
+    ]
+  },
+  {
+    "system_code": "C001193",
+    "시스템명": "SyrupWallet-E2E",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C001194",
+    "시스템명": "Proximity",
+    "infra_count": 9,
+    "repos": [
+      "PROXSL/bsms-admin",
+      "PROXSL/bsms-admin-front",
+      "PROXSL/install-api"
+    ]
+  },
+  {
+    "system_code": "C001197",
+    "시스템명": "IMC",
+    "infra_count": 13,
+    "repos": [
+      "ENCP/batch",
+      "PIC/batch-script",
+      "PIC/solution.ad.batch",
+      "PLAC/imc",
+      "PLAC/place_p1_batch_datafeed",
+      "PLAC/place_p1_batch_env_management",
+      "PLAC/place_p1_batch_external",
+      "PLAC/place_p1_batch_internal"
+    ]
+  },
+  {
+    "system_code": "C001198",
+    "시스템명": "SyrupStore-IS",
+    "infra_count": 30,
+    "repos": [
+      "SS/frontend-ia",
+      "SS/frontend-ma",
+      "SS/frontend-solutions",
+      "SS/kmc",
+      "SS/ss-be",
+      "SSI/cdnvalid",
+      "SSI/dummy_jar",
+      "SSI/dummy_so",
+      "SSI/ora_simple_analyzer",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-ss",
+      "SW/dbro"
+    ]
+  },
+  {
+    "system_code": "C001206",
+    "시스템명": "연말정산",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C001212",
+    "시스템명": "Crowd",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C001219",
+    "시스템명": "고객센터효율화",
+    "infra_count": 29,
+    "repos": [
+      "VOC/voc-admin",
+      "VOC/voc-admin-fe",
+      "VOC/voc-api",
+      "VOC/voc-batch"
+    ]
+  },
+  {
+    "system_code": "C001302",
+    "시스템명": "BI서비스-Voyager",
+    "infra_count": 13,
+    "repos": [
+      "VOYAG/voyager",
+      "VOYAG/voyager_kid"
+    ]
+  },
+  {
+    "system_code": "C001310",
+    "시스템명": "OCB-IAM",
+    "infra_count": 9,
+    "repos": [
+      "OCBSUGAR/ocb-iam"
+    ]
+  },
+  {
+    "system_code": "C001321",
+    "시스템명": "Rbinsight",
+    "infra_count": 22,
+    "repos": []
+  },
+  {
+    "system_code": "C001322",
+    "시스템명": "MGMT-infratool",
+    "infra_count": 48,
+    "repos": []
+  },
+  {
+    "system_code": "C001328",
+    "시스템명": "OCB-참여적립",
+    "infra_count": 20,
+    "repos": [
+      "OCBRWD/rwd_adm",
+      "OCBRWD/rwd_front"
+    ]
+  },
+  {
+    "system_code": "C001330",
+    "시스템명": "광고리포팅(WebAR)",
+    "infra_count": 20,
+    "repos": [
+      "ADREPORT/adreport-be",
+      "ADREPORT/adreport-fe"
+    ]
+  },
+  {
+    "system_code": "C001355",
+    "시스템명": "기프티콘-엔쿠폰",
+    "infra_count": 60,
+    "repos": [
+      "MYDATA/cert-front",
+      "MYDATA/ms-batch",
+      "MYDATA/ms-discovery",
+      "MYDATA/ms-gateway"
+    ]
+  },
+  {
+    "system_code": "C001385",
+    "시스템명": "T아카데미",
+    "infra_count": 13,
+    "repos": [
+      "T/tacademy_admin_new",
+      "T/tacademy_batch",
+      "T/tacademy_front_new"
+    ]
+  },
+  {
+    "system_code": "C001391",
+    "시스템명": "AI모멘트",
+    "infra_count": 19,
+    "repos": [
+      "AIMT/aimt-converter",
+      "AIMT/kustomize"
+    ]
+  },
+  {
+    "system_code": "C001403",
+    "시스템명": "MGMT-ME",
+    "infra_count": 2,
+    "repos": [
+      "MEC/me_conf",
+      "MID/root"
+    ]
+  },
+  {
+    "system_code": "C001416",
+    "시스템명": "DI-AI",
+    "infra_count": 8,
+    "repos": []
+  },
+  {
+    "system_code": "C001419",
+    "시스템명": "SyrupWallet-Gateway",
+    "infra_count": 47,
+    "repos": [
+      "SSI/dummy_jar",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-syrup",
+      "SW/dbro",
+      "SW/gw_batch",
+      "SW/gw_in",
+      "SW/gw_out",
+      "SW/gw_out_homeplus",
+      "SW/gw_out_lotte",
+      "SW/syrup_cloud_gw"
+    ]
+  },
+  {
+    "system_code": "C001425",
+    "시스템명": "PICASO",
+    "infra_count": 26,
+    "repos": [
+      "PIC/picaso-gateway",
+      "PIC/picaso-ipf"
+    ]
+  },
+  {
+    "system_code": "C001428",
+    "시스템명": "채용관리시스템",
+    "infra_count": 14,
+    "repos": []
+  },
+  {
+    "system_code": "C001429",
+    "시스템명": "Proximity",
+    "infra_count": 102,
+    "repos": [
+      "ADS-DA/ca_public_data",
+      "ADS-DA/dic-airflow",
+      "ADS-DA/pa-aprefine-ml",
+      "ADS-DA/pa-capa",
+      "ADS-DA/pa-intent",
+      "ADS-DA/pa-udf",
+      "ADS-DA/podo_class1",
+      "ADS-DA/query_bank",
+      "FCP/fcp-csweb",
+      "JVS_1/pds_jarvis_dashboard",
+      "PROXS/cs-batch",
+      "PROXS/mkt-service-admin",
+      "PROXS/mkt-service-admin-front",
+      "PROXS/pcona",
+      "PROXS/px-batch",
+      "PROXS/px-dmpz",
+      "PROXS/px-open-batch",
+      "PROXS/px-policy-api",
+      "PROXSL/ble-gw",
+      "PROXSL/bsms-admin",
+      "PROXSL/bsms-admin-front",
+      "PROXSL/geofence_server",
+      "PROXSL/install-api",
+      "PROXSL/wifi_server"
+    ]
+  },
+  {
+    "system_code": "C001433",
+    "시스템명": "ARHIS",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C001437",
+    "시스템명": "OCB이벤트-AppEvt",
+    "infra_count": 8,
+    "repos": [
+      "OE/ocb-appevt"
+    ]
+  },
+  {
+    "system_code": "C001438",
+    "시스템명": "마이데이터-정보제공(MyDATA)",
+    "infra_count": 46,
+    "repos": [
+      "MYDATA/ms-bank",
+      "MYDATA/ms-card",
+      "MYDATA/ms-ginsu",
+      "MYDATA/ms-insu",
+      "MYDATA/ms-invest",
+      "MYDATA/ms-irp",
+      "MYDATA/ms-oauth",
+      "MYDATA/ms-result",
+      "MYDATA/ms-retroact",
+      "MYDATA/ms-syrup-api",
+      "MYDATA/ms-telecom",
+      "MYDATA/provider-discovery",
+      "MYDATA/provider-gw",
+      "MYDATA/provider-ice",
+      "MYDATA/provider-inquiry-history",
+      "MYDATA/provider-ocb",
+      "MYDATA/provider-sbs",
+      "MYDATA/provider-script"
+    ]
+  },
+  {
+    "system_code": "C001503",
+    "시스템명": "OCB-모바일전단",
+    "infra_count": 22,
+    "repos": [
+      "LEAFLET/newleafletsystem"
+    ]
+  },
+  {
+    "system_code": "C001509",
+    "시스템명": "OCB-Locker",
+    "infra_count": 93,
+    "repos": [
+      "OL/locker-api-maintenance",
+      "OL/locker-api-web-nginx-conf",
+      "OL/locker-frontend-admin",
+      "OL/locker-gwout-web",
+      "OL/locker-push",
+      "OL/locker-server",
+      "OL/locker-vision",
+      "OL/locker-was-deploy",
+      "OL/locker-webview",
+      "OL/locker-webview-front",
+      "SSSC/serverconfig-syrup"
+    ]
+  },
+  {
+    "system_code": "C001516",
+    "시스템명": "V컬러링-MarketPlace",
+    "infra_count": 10,
+    "repos": [
+      "VCMP/vcmp"
+    ]
+  },
+  {
+    "system_code": "C001517",
+    "시스템명": "IP마당",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C001524",
+    "시스템명": "Proxy-DATA",
+    "infra_count": 6,
+    "repos": [
+      "IPX/proxy-data-int",
+      "IPX/proxy-data-pub",
+      "IPX/tcpforward-data-int",
+      "IPX/tcpforward-data-pub"
+    ]
+  },
+  {
+    "system_code": "C001527",
+    "시스템명": "OCB이벤트-PoC",
+    "infra_count": 39,
+    "repos": [
+      "OB/front_resource",
+      "OB/ob-backend",
+      "OEP/cms_resource"
+    ]
+  },
+  {
+    "system_code": "C001537",
+    "시스템명": "Recopick-DIIF",
+    "infra_count": 4,
+    "repos": [
+      "OCBNFT/ocb-nft-script",
+      "RECODEV/cf-recopick-batch",
+      "RECODEV/reco-engine-dic"
+    ]
+  },
+  {
+    "system_code": "C001545",
+    "시스템명": "MGMT-ME",
+    "infra_count": 109,
+    "repos": [
+      "CLOUD/pmm_helm_charts",
+      "MEC/me_conf",
+      "MEC/midc_test_certi"
+    ]
+  },
+  {
+    "system_code": "C001561",
+    "시스템명": "O2O솔루션-이벤트GW",
+    "infra_count": 13,
+    "repos": [
+      "PIC/event-gateway",
+      "PIC/eventgatewayweb"
+    ]
+  },
+  {
+    "system_code": "C001571",
+    "시스템명": "PICASO-Mashup",
+    "infra_count": 9,
+    "repos": [
+      "PIC/solutionbe",
+      "PIC/solutionbeweb"
+    ]
+  },
+  {
+    "system_code": "C001599",
+    "시스템명": "SyrupStore-Auth",
+    "infra_count": 7,
+    "repos": [
+      "SS/kmc",
+      "SS/ss-be",
+      "SSI/dummy_jar",
+      "SSI/dummy_so",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-ss"
+    ]
+  },
+  {
+    "system_code": "C001600",
+    "시스템명": "BI서비스-DQM",
+    "infra_count": 5,
+    "repos": []
+  },
+  {
+    "system_code": "C001601",
+    "시스템명": "DI-trino",
+    "infra_count": 34,
+    "repos": [
+      "DI/di-erlang",
+      "DI/di-ik-bin",
+      "DI/di-rdbms-metrics",
+      "DI/di-shell-utils",
+      "DI/di-utils",
+      "DI/impala-ct",
+      "DI/impala-kudu",
+      "DI/mongodb-conf",
+      "DI/presto-configs",
+      "DI/querycache2",
+      "DI/redis-configs",
+      "DI/trino-configs",
+      "DI/trino-monitor"
+    ]
+  },
+  {
+    "system_code": "C001604",
+    "시스템명": "문자매니저",
+    "infra_count": 9,
+    "repos": [
+      "TMMGR/tmmgr",
+      "TMMGR/tmmgr_tong",
+      "TMMGR/tmmgr_web"
+    ]
+  },
+  {
+    "system_code": "C001611",
+    "시스템명": "OCB-FDS",
+    "infra_count": 16,
+    "repos": [
+      "OCB_BACK_END/ocbfds"
+    ]
+  },
+  {
+    "system_code": "C001613",
+    "시스템명": "BI서비스-SSBI",
+    "infra_count": 21,
+    "repos": []
+  },
+  {
+    "system_code": "C001650",
+    "시스템명": "광고플랫폼-PlanetAD",
+    "infra_count": 16,
+    "repos": [
+      "ADP/cnvsnsvc",
+      "ADP/cs-admin-web",
+      "ADP/cssvc"
+    ]
+  },
+  {
+    "system_code": "C001667",
+    "시스템명": "통합쿠폰-비인증형",
+    "infra_count": 24,
+    "repos": [
+      "PIC/allcoupon.ssa",
+      "PIC/newcoupon",
+      "PIC/skp-coupon",
+      "PIC/syrupwalletapi",
+      "PIC/syrupwalletbatchsys"
+    ]
+  },
+  {
+    "system_code": "C001668",
+    "시스템명": "통합쿠폰-Delivery",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C001699",
+    "시스템명": "OCB-게임PnP",
+    "infra_count": 8,
+    "repos": []
+  },
+  {
+    "system_code": "C001702",
+    "시스템명": "DMP",
+    "infra_count": 110,
+    "repos": [
+      "DMP/airflow-dag-cdp",
+      "DMP/airflow-dag-dmp",
+      "DMP/airflow-plugin",
+      "DMP/cdp-machine-learning",
+      "DMP/dmp-api-gateway",
+      "DMP/dmp-batch",
+      "DMP/dmp-bulk-ingest",
+      "DMP/dmp-column-search-java",
+      "DMP/dmp-config-server",
+      "DMP/dmp-dashboard",
+      "DMP/dmp-dashboard-admin",
+      "DMP/dmp-dashboard-under-construction",
+      "DMP/dmp-data-api",
+      "DMP/dmp-data-worker",
+      "DMP/dmp-esti-scoring",
+      "DMP/dmp-interface-shell",
+      "DMP/dmp-notification",
+      "DMP/dmp-onestore-google-play-scraper",
+      "DMP/dmp-open-discovery",
+      "DMP/dmp-open-gateway",
+      "DMP/dmp-script",
+      "DMP/dmp-trait-classifier",
+      "DMP/dmp-trait-ml",
+      "DMP/dmp-trait-rule",
+      "DMP/dmp-worker-api",
+      "DMP/dmp_di_airflow",
+      "DMP/dmp_ds_filter",
+      "DMP/dmp_pcona",
+      "DMP/dmp_remote_runner",
+      "DMP/ml_flow_new",
+      "DMP/trait_rule_engine_v2",
+      "DMP/trait_rule_engine_v3",
+      "DMP/trait_stat",
+      "OCBPASS/ocbpg",
+      "VAS/starchip_user"
+    ]
+  },
+  {
+    "system_code": "C001706",
+    "시스템명": "BI서비스-ANALOG",
+    "infra_count": 15,
+    "repos": [
+      "AANP/analog-python",
+      "AANP/analog-web",
+      "AANP/monitoring-status-update",
+      "DEP/dep-back",
+      "JVS_1/pds_jarvis_dashboard"
+    ]
+  },
+  {
+    "system_code": "C001714",
+    "시스템명": "T스마트세이프",
+    "infra_count": 23,
+    "repos": [
+      "TSS_SERVER/tsmartsafe_admin_renewal",
+      "TSS_SERVER/tsmartsafe_batch_ivr",
+      "TSS_SERVER/tsmartsafe_batch_kait",
+      "TSS_SERVER/tsmartsafe_batch_tot",
+      "TSS_SERVER/tsmartsafe_front_renewal",
+      "TSS_SERVER/tss_bat_2017",
+      "TSS_SERVER/tss_bc_2020",
+      "VRBT/scavenger-agent"
+    ]
+  },
+  {
+    "system_code": "C001717",
+    "시스템명": "O2O솔루션-CLO",
+    "infra_count": 16,
+    "repos": [
+      "O2SS/solution",
+      "SSI/clo_file_decryptor",
+      "SSI/dbro_clo",
+      "SSI/dist_clo_file_decryptor",
+      "SSI/dummy_jar",
+      "SSSC/serverconfig-clo",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-ss",
+      "SSSC/serverconfig-webtemplate"
+    ]
+  },
+  {
+    "system_code": "C001731",
+    "시스템명": "보안-EDR",
+    "infra_count": 9,
+    "repos": []
+  },
+  {
+    "system_code": "C001737",
+    "시스템명": "OCB-DeepLink",
+    "infra_count": 5,
+    "repos": [
+      "OCBWEBVIEW/ocb-webview-deeplink"
+    ]
+  },
+  {
+    "system_code": "C001738",
+    "시스템명": "OCB-애드팝콘",
+    "infra_count": 9,
+    "repos": [
+      "OCBE/ocb-event-front",
+      "OCBE/ocb-event-server"
+    ]
+  },
+  {
+    "system_code": "C001743",
+    "시스템명": "OCB-캐쉬백몰(적립)",
+    "infra_count": 18,
+    "repos": [
+      "OB/cashbagmall",
+      "OCB_BACK_END/ocb-cashbag-mall"
+    ]
+  },
+  {
+    "system_code": "C001746",
+    "시스템명": "데드코드분석",
+    "infra_count": 6,
+    "repos": [
+      "VRBT/scavenger"
+    ]
+  },
+  {
+    "system_code": "C001748",
+    "시스템명": "LKICK-서비스",
+    "infra_count": 25,
+    "repos": [
+      "LKICK/lkick-event-batch-server",
+      "LKICK/lkick-event-front",
+      "LKICK/lkick-event-server",
+      "LKICK/lkick-reward-batch-server",
+      "LKICK/lkick-reward-front",
+      "LKICK/lkick-reward-server",
+      "SW/syrup_culture_b2b_ticket",
+      "SW/syrup_culture_frontend",
+      "SW/syrup_culture_skmc_salecompany_benepia",
+      "SW/syrup_culture_skmc_salecompany_benepiam",
+      "SW/syrup_culture_skmc_salecompany_hanaskcard",
+      "SW/syrup_culture_skmc_salecompany_hanaskcardm",
+      "SW/syrup_culture_skmc_salecompany_masil",
+      "SW/syrup_culture_skmc_salecompany_skt",
+      "SW/syrup_culture_skmc_salecompany_sktm"
+    ]
+  },
+  {
+    "system_code": "C001753",
+    "시스템명": "OCB-부루마블",
+    "infra_count": 21,
+    "repos": [
+      "OCB-THP/ocb_game_bluemarble"
+    ]
+  },
+  {
+    "system_code": "C001755",
+    "시스템명": "OCB-KHub",
+    "infra_count": 10,
+    "repos": [
+      "OCBBI/pandora"
+    ]
+  },
+  {
+    "system_code": "C001759",
+    "시스템명": "OCB-쇼핑적립",
+    "infra_count": 4,
+    "repos": [
+      "HGV/skhgv-hgv-pub-fe",
+      "HGV/skhgv-hhs-pub-fe"
+    ]
+  },
+  {
+    "system_code": "C001764",
+    "시스템명": "PICASO-IMC",
+    "infra_count": 3,
+    "repos": [
+      "ENCP/batch",
+      "PIC/batch-script",
+      "PIC/solution.ad.batch",
+      "PLAC/place_p1_batch_datafeed",
+      "PLAC/place_p1_batch_di",
+      "PLAC/place_p1_batch_di_legacy",
+      "PLAC/place_p1_batch_env_management",
+      "PLAC/place_p1_batch_external",
+      "PLAC/place_p1_batch_internal"
+    ]
+  },
+  {
+    "system_code": "C001767",
+    "시스템명": "PICASO-BMS",
+    "infra_count": 9,
+    "repos": [
+      "PIC/springpicasogateway"
+    ]
+  },
+  {
+    "system_code": "C001768",
+    "시스템명": "OBIZSMS",
+    "infra_count": 4,
+    "repos": [
+      "OBIZ/obiz-admin",
+      "OBIZ/obiz-api",
+      "OBIZ/obiz-batch",
+      "OBIZ/obiz-batch2",
+      "OBIZ/obiz-mt-mgr",
+      "OBIZ/obiz-rlc-info",
+      "OBIZ/obiz-survey-agent",
+      "OBIZ/obiz-web"
+    ]
+  },
+  {
+    "system_code": "C001778",
+    "시스템명": "BI서비스-DIIF",
+    "infra_count": 9,
+    "repos": [
+      "AANP/zenia",
+      "BI/airflow_bi_custpfdb",
+      "BI/airflow_bi_ocb",
+      "BI/airflow_bi_proximity",
+      "BI/airflow_bi_syrupstore",
+      "BI/airflow_bi_syrupwallet",
+      "BIG-QUICK/quick-hive-udf",
+      "DEUDF/skpde-hive-udf",
+      "OCBBI/ocb_app_spark",
+      "OCBBI/ocb_bi_java",
+      "PROXIBI/oozie-product",
+      "SHELL/data-lifecycle",
+      "TER/t2a",
+      "XL/evs_skp"
+    ]
+  },
+  {
+    "system_code": "C001780",
+    "시스템명": "PStore",
+    "infra_count": 13,
+    "repos": [
+      "PST/pstore",
+      "PST/pstoreadmin"
+    ]
+  },
+  {
+    "system_code": "C001783",
+    "시스템명": "전자결재문서",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C001784",
+    "시스템명": "MGMT(OA)-Network",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C001785",
+    "시스템명": "휴양소시스템",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C001786",
+    "시스템명": "EIMS",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C001787",
+    "시스템명": "MGMT(OA)-Storage",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C001794",
+    "시스템명": "보안-방화벽정책분석",
+    "infra_count": 18,
+    "repos": []
+  },
+  {
+    "system_code": "C001802",
+    "시스템명": "Arena",
+    "infra_count": 5,
+    "repos": []
+  },
+  {
+    "system_code": "C001808",
+    "시스템명": "출입관리",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C001809",
+    "시스템명": "판교-기타",
+    "infra_count": 8,
+    "repos": []
+  },
+  {
+    "system_code": "C001823",
+    "시스템명": "DMP-비실명",
+    "infra_count": 73,
+    "repos": [
+      "DMP/dmp-api-gateway",
+      "DMP/dmp-column-search-java",
+      "DMP/dmp-dashboard",
+      "DMP/dmp-dashboard-api",
+      "DMP/dmp-dashboard-under-construction",
+      "DMP/dmp-data-api",
+      "DMP/dmp-esti-scoring",
+      "DMP/dmp-id-sync",
+      "DMP/dmp-intelligence-api",
+      "DMP/dmp-interface-shell",
+      "DMP/dmp-oauth-api",
+      "DMP/dmp-script",
+      "DMP/dmp-terms",
+      "DMP/dmp-trait-classifier",
+      "DMP/dmp-user-pcona-segment-upload-redis",
+      "DMP/dmp_pcona",
+      "DMP/dmp_remote_runner",
+      "DMP/dmp_upload_redis_v2",
+      "DMP/segment-engine",
+      "DMP/trait_stat",
+      "OTUBE/otube-backend"
+    ]
+  },
+  {
+    "system_code": "C001829",
+    "시스템명": "통합검색시스템",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C001839",
+    "시스템명": "OCB-연말정산",
+    "infra_count": 10,
+    "repos": [
+      "OEP/yetax_resource"
+    ]
+  },
+  {
+    "system_code": "C001841",
+    "시스템명": "DI-governor",
+    "infra_count": 5,
+    "repos": []
+  },
+  {
+    "system_code": "C001846",
+    "시스템명": "DevOps-Docker",
+    "infra_count": 19,
+    "repos": []
+  },
+  {
+    "system_code": "C001852",
+    "시스템명": "BI서비스-DQmeta",
+    "infra_count": 10,
+    "repos": []
+  },
+  {
+    "system_code": "C001853",
+    "시스템명": "BI서비스-정보제공",
+    "infra_count": 8,
+    "repos": []
+  },
+  {
+    "system_code": "C001854",
+    "시스템명": "BI서비스-API",
+    "infra_count": 10,
+    "repos": [
+      "VOYAG/ncbi-admin",
+      "VOYAG/ncbi-api"
+    ]
+  },
+  {
+    "system_code": "C001855",
+    "시스템명": "KHUB-PORTAL",
+    "infra_count": 9,
+    "repos": [
+      "KHUB_PORTAL/khub-batch",
+      "KHUB_PORTAL/khub-front",
+      "KHUB_PORTAL/khub-server"
+    ]
+  },
+  {
+    "system_code": "C001860",
+    "시스템명": "메일",
+    "infra_count": 10,
+    "repos": []
+  },
+  {
+    "system_code": "C001862",
+    "시스템명": "ERP-EP",
+    "infra_count": 26,
+    "repos": []
+  },
+  {
+    "system_code": "C001863",
+    "시스템명": "PNET",
+    "infra_count": 6,
+    "repos": []
+  },
+  {
+    "system_code": "C001865",
+    "시스템명": "EAI",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C001866",
+    "시스템명": "기업홈페이지",
+    "infra_count": 7,
+    "repos": []
+  },
+  {
+    "system_code": "C001870",
+    "시스템명": "보안운영",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C001871",
+    "시스템명": "S-VDI",
+    "infra_count": 19,
+    "repos": []
+  },
+  {
+    "system_code": "C001872",
+    "시스템명": "OA-VDI",
+    "infra_count": 18,
+    "repos": []
+  },
+  {
+    "system_code": "C001873",
+    "시스템명": "보안-DB접근제어",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C001874",
+    "시스템명": "MGMT(OA)-VMware(VCS)",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C001875",
+    "시스템명": "경영지원기타",
+    "infra_count": 8,
+    "repos": []
+  },
+  {
+    "system_code": "C001881",
+    "시스템명": "OCB-NFT",
+    "infra_count": 98,
+    "repos": [
+      "DI/dataflow",
+      "DI/helm-wrapper-fork",
+      "DI/helm3",
+      "DI/helmetapi",
+      "OCBNFT/ocb-nft-admin-front",
+      "OCBNFT/ocb-nft-backend",
+      "OCBNFT/ocb-nft-fingerlabs",
+      "OCBNFT/ocb-nft-frontend",
+      "OCBNFT/ocb-nft-homepage",
+      "OCBNFT/ocb-nft-script",
+      "OCBWEBVIEW/ocb-webview-reward-api",
+      "SVCENG/helm-charts"
+    ]
+  },
+  {
+    "system_code": "C001886",
+    "시스템명": "보안관제",
+    "infra_count": 9,
+    "repos": []
+  },
+  {
+    "system_code": "C001887",
+    "시스템명": "전자문서이관",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C001894",
+    "시스템명": "광고플랫폼-PlanetAD",
+    "infra_count": 2,
+    "repos": [
+      "ADP/cs-admin-web"
+    ]
+  },
+  {
+    "system_code": "C001910",
+    "시스템명": "전자증빙",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C001911",
+    "시스템명": "보안-서버접근제어",
+    "infra_count": 15,
+    "repos": []
+  },
+  {
+    "system_code": "C001915",
+    "시스템명": "보안기타",
+    "infra_count": 11,
+    "repos": []
+  },
+  {
+    "system_code": "C001921",
+    "시스템명": "보안-망연계시스템",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C001925",
+    "시스템명": "보안-서버설정진단",
+    "infra_count": 15,
+    "repos": []
+  },
+  {
+    "system_code": "C001963",
+    "시스템명": "챗봇-고객센터이메일BE",
+    "infra_count": 15,
+    "repos": [
+      "BOTSOL/csmail-server"
+    ]
+  },
+  {
+    "system_code": "C002038",
+    "시스템명": "DMP-실명",
+    "infra_count": 41,
+    "repos": [
+      "DMP/cdp-machine-learning",
+      "DMP/dmp-api-gateway",
+      "DMP/dmp-column-search-java",
+      "DMP/dmp-dashboard",
+      "DMP/dmp-dashboard-api",
+      "DMP/dmp-dashboard-under-construction",
+      "DMP/dmp-data-api",
+      "DMP/dmp-esti-scoring",
+      "DMP/dmp-intelligence-api",
+      "DMP/dmp-interface-shell",
+      "DMP/dmp-oauth-api",
+      "DMP/dmp-script",
+      "DMP/dmp-trait-classifier",
+      "DMP/dmp-trait-rule",
+      "DMP/dmp_remote_runner",
+      "DMP/segment-engine",
+      "DMP/trait_stat"
+    ]
+  },
+  {
+    "system_code": "C002043",
+    "시스템명": "사내GPT",
+    "infra_count": 26,
+    "repos": [
+      "PALAB/private-chatbot-frontend",
+      "PALAB/rag-chatbot-backend",
+      "PALAB/rag-chatbot-frontend",
+      "PALAB/rag-chatbot-langchain-api"
+    ]
+  },
+  {
+    "system_code": "C002056",
+    "시스템명": "OCB-RECO",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002061",
+    "시스템명": "사내고객지원",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002289",
+    "시스템명": "OCB-PAYUI(간편사용)",
+    "infra_count": 60,
+    "repos": [
+      "MEC/me_conf",
+      "OCBPP/ocb_payment_platform",
+      "OCBPU/ocbpayui-front-api",
+      "OCBPU/ocbpayui-frontend-admin",
+      "OCBPU/ocbpayui-frontend-web",
+      "OCBPU/ocbpayui-merchant-api",
+      "OCBPU/ocbpayui-nxmile-grpc"
+    ]
+  },
+  {
+    "system_code": "C002301",
+    "시스템명": "Pnet암호초기화시스템",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C002309",
+    "시스템명": "러닝월드",
+    "infra_count": 11,
+    "repos": [
+      "LMS/lms-admin-fe",
+      "TSAFTYDEV/learningworld"
+    ]
+  },
+  {
+    "system_code": "C002317",
+    "시스템명": "SyrupWallet-ImageRR",
+    "infra_count": 8,
+    "repos": [
+      "SSI/dummy_jar",
+      "SSI/dummy_so",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-commonif",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-rr",
+      "SSSC/serverconfig-ss",
+      "SSSC/serverconfig-syrup",
+      "SSSC/serverconfig-webtemplate",
+      "SW/common-if",
+      "SW/img_rr",
+      "SW/next-commonfe"
+    ]
+  },
+  {
+    "system_code": "C002325",
+    "시스템명": "BI서비스-데이터가명화",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002327",
+    "시스템명": "기프티콘",
+    "infra_count": 318,
+    "repos": [
+      "MYDATA/ms-bank",
+      "MYDATA/ms-batch",
+      "MYDATA/ms-capital",
+      "MYDATA/ms-card",
+      "MYDATA/ms-gateway",
+      "MYDATA/ms-invest",
+      "MYDATA/ms-irp",
+      "MYDATA/ms-oauth",
+      "MYDATA/ms-ocb-api",
+      "MYDATA/ms-result",
+      "MYDATA/ms-support",
+      "MYDATA/ms-syrup-api"
+    ]
+  },
+  {
+    "system_code": "C002354",
+    "시스템명": "",
+    "infra_count": 3,
+    "repos": [
+      "PROXS/cs-service"
+    ]
+  },
+  {
+    "system_code": "C002356",
+    "시스템명": "52시간근무환경",
+    "infra_count": 13,
+    "repos": []
+  },
+  {
+    "system_code": "C002379",
+    "시스템명": "MGMT-VMware(VCS)",
+    "infra_count": 102,
+    "repos": []
+  },
+  {
+    "system_code": "C002384",
+    "시스템명": "DI-proxy",
+    "infra_count": 8,
+    "repos": [
+      "DI/di-jdk",
+      "DI/di-shell-utils",
+      "DI/install-cert",
+      "DI/jdbc-tester",
+      "DI/node-proxy",
+      "DI/proxy-configs",
+      "DI/querycache-conf",
+      "DI/querycache-conf.fdic",
+      "DI/querycache2",
+      "DPT_1/querycache"
+    ]
+  },
+  {
+    "system_code": "C002388",
+    "시스템명": "OCB-LoginUI(간편로그인)",
+    "infra_count": 23,
+    "repos": [
+      "OCBLU/ocbloginui-front-api",
+      "OCBLU/ocbloginui-partner-api",
+      "OCBPU/ocbpayui-batch",
+      "OCBPU/ocbpayui-frontend-web"
+    ]
+  },
+  {
+    "system_code": "C002392",
+    "시스템명": "MGMT(OA)-SE",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002395",
+    "시스템명": "Etax",
+    "infra_count": 8,
+    "repos": []
+  },
+  {
+    "system_code": "C002400",
+    "시스템명": "INFRA-ITSM",
+    "infra_count": 25,
+    "repos": [
+      "SKPIE/opsdb_api",
+      "SKPIE/opsdb_batch",
+      "SKPIE/opsdb_webui"
+    ]
+  },
+  {
+    "system_code": "C002401",
+    "시스템명": "INFRA-opsdb",
+    "infra_count": 8,
+    "repos": [
+      "SKPIE/opsdb_api",
+      "SKPIE/opsdb_webui",
+      "SKPIE/pams-ui",
+      "SKPIE/pams_batch"
+    ]
+  },
+  {
+    "system_code": "C002405",
+    "시스템명": "DI-Druid",
+    "infra_count": 11,
+    "repos": []
+  },
+  {
+    "system_code": "C002416",
+    "시스템명": "MGMT-WIN",
+    "infra_count": 6,
+    "repos": []
+  },
+  {
+    "system_code": "C002417",
+    "시스템명": "MGMT-PMAILTX",
+    "infra_count": 10,
+    "repos": []
+  },
+  {
+    "system_code": "C002452",
+    "시스템명": "동탄성심병원",
+    "infra_count": 10,
+    "repos": [
+      "AIDEV2/il-spring-monitoring",
+      "AIDEV2/smartdt-admin",
+      "AIDEV2/smartdt-admin-web",
+      "AIDEV2/smartdt-channel",
+      "AIDEV2/smartdt-controller",
+      "AIDEV2/smartdt-eureka",
+      "AIDEV2/smartdt-gateway",
+      "AIDEV2/smartdt-media",
+      "AIDEV2/smartdt-media-server",
+      "AIDEV2/smartdt-play",
+      "AIDEV2/smartdt-registry",
+      "AIDEV2/smartdt-snap-proxy",
+      "AIDEV2/smartdt-tablet-web",
+      "AIDEV2/smartdt-tv-web"
+    ]
+  },
+  {
+    "system_code": "C002454",
+    "시스템명": "OCB-AI쇼핑비서",
+    "infra_count": 15,
+    "repos": [
+      "AI/ocb-api-with-python",
+      "AI/ocb-web-integration"
+    ]
+  },
+  {
+    "system_code": "C002455",
+    "시스템명": "Recopick-adm",
+    "infra_count": 3,
+    "repos": [
+      "RECODEV/reco-engine-web"
+    ]
+  },
+  {
+    "system_code": "C002456",
+    "시스템명": "Recopick-batch",
+    "infra_count": 2,
+    "repos": [
+      "RECODEV/recopick-cf-batch-manager"
+    ]
+  },
+  {
+    "system_code": "C002458",
+    "시스템명": "Bitbucket",
+    "infra_count": 5,
+    "repos": []
+  },
+  {
+    "system_code": "C002462",
+    "시스템명": "LOGX",
+    "infra_count": 190,
+    "repos": [
+      "JVS_1/pds_jarvis_dashboard",
+      "PALAB/logx-alert",
+      "PALAB/logx-backend",
+      "PALAB/logx-notification",
+      "PALAB/logx-nxmnoti",
+      "PALAB/logx-relay-svr",
+      "PALAB/logx-scheduler-framework",
+      "PALAB/realx-frontend-renewal",
+      "PALAB/slack-new-bot",
+      "PALAB/visuallayer_grafana_v706"
+    ]
+  },
+  {
+    "system_code": "C002464",
+    "시스템명": "CI빌드관리",
+    "infra_count": 59,
+    "repos": [
+      "PALAB/pitsm-backend"
+    ]
+  },
+  {
+    "system_code": "C002465",
+    "시스템명": "OCB-공통DB",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C002466",
+    "시스템명": "OCB-OMNI",
+    "infra_count": 7,
+    "repos": [
+      "OTH/homeshopping",
+      "OTH/trend-ad",
+      "OTH/trend-cms",
+      "OTH/trendissue"
+    ]
+  },
+  {
+    "system_code": "C002467",
+    "시스템명": "DI-Elastic",
+    "infra_count": 21,
+    "repos": [
+      "DI/di-findclass",
+      "DI/di-jdk",
+      "DI/di-rdbms-metrics",
+      "DI/di-utils",
+      "DI/elasticsearchtest",
+      "DI/impala-kudu",
+      "DI/impala-kudu-configs",
+      "DI/jdbc-tester",
+      "DI/mongodb-conf",
+      "DI/presto-configs",
+      "DI/trino-configs",
+      "DI/trino-gateway",
+      "DI/trino-monitor"
+    ]
+  },
+  {
+    "system_code": "C002470",
+    "시스템명": "OCB-맞고",
+    "infra_count": 16,
+    "repos": [
+      "OCB-THP/ocb_game_biz_matgo",
+      "OCB-THP/ocb_game_biz_matgo_php_real",
+      "OCB-THP/ocb_game_biz_matgo_server"
+    ]
+  },
+  {
+    "system_code": "C002476",
+    "시스템명": "DI-QueryCache",
+    "infra_count": 10,
+    "repos": [
+      "DI/di-jdk",
+      "DI/di-utils",
+      "DI/jdbc-tester",
+      "DI/mcp-qc",
+      "DI/proxy-configs",
+      "DI/querycache-conf",
+      "DI/querycache-conf.fdic",
+      "DI/querycache2",
+      "DI/redis-configs",
+      "DPT_1/querycache"
+    ]
+  },
+  {
+    "system_code": "C002477",
+    "시스템명": "BI서비스-OGGOCB",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002502",
+    "시스템명": "IBAS",
+    "infra_count": 6,
+    "repos": []
+  },
+  {
+    "system_code": "C002506",
+    "시스템명": "UXINFRA",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002511",
+    "시스템명": "PCSW관리시스템",
+    "infra_count": 6,
+    "repos": []
+  },
+  {
+    "system_code": "C002518",
+    "시스템명": "CBH",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002519",
+    "시스템명": "OCB-OMNI",
+    "infra_count": 24,
+    "repos": []
+  },
+  {
+    "system_code": "C002520",
+    "시스템명": "Proxy-OCB",
+    "infra_count": 18,
+    "repos": [
+      "IPX/proxy-ocb-b2b",
+      "IPX/proxy-ocb-int",
+      "IPX/proxy-ocb-pub",
+      "IPX/proxy-ocb2-b2b",
+      "IPX/proxy-ocb2-int",
+      "IPX/proxy-ocb2-pub",
+      "IPX/tcpforward-ocb-b2b",
+      "IPX/tcpforward-ocb-int",
+      "IPX/tcpforward-ocb-pub",
+      "IPX/tcpforward-ocb2-b2b",
+      "IPX/tcpforward-ocb2-int",
+      "IPX/tcpforward-ocb2-pub"
+    ]
+  },
+  {
+    "system_code": "C002521",
+    "시스템명": "SKICK-서비스",
+    "infra_count": 18,
+    "repos": [
+      "SKICK/skick-event-batch-server",
+      "SKICK/skick-event-front",
+      "SKICK/skick-event-server",
+      "SKICK/skick-reward-batch-server",
+      "SKICK/skick-reward-front",
+      "SKICK/skick-reward-server"
+    ]
+  },
+  {
+    "system_code": "C002522",
+    "시스템명": "마이데이터-정보제공(MyDATA)",
+    "infra_count": 13,
+    "repos": []
+  },
+  {
+    "system_code": "C002527",
+    "시스템명": "폰세이프상담AP",
+    "infra_count": 15,
+    "repos": [
+      "MIP/phonesafe-project",
+      "MIP/phonesafe_real-2-mail"
+    ]
+  },
+  {
+    "system_code": "C002541",
+    "시스템명": "RBSpace",
+    "infra_count": 15,
+    "repos": []
+  },
+  {
+    "system_code": "C002547",
+    "시스템명": "APPMON",
+    "infra_count": 24,
+    "repos": [
+      "APPMON/mon_server",
+      "QAC/qax"
+    ]
+  },
+  {
+    "system_code": "C002549",
+    "시스템명": "Rbinsight-DIboat",
+    "infra_count": 5,
+    "repos": []
+  },
+  {
+    "system_code": "C002565",
+    "시스템명": "SKT-TIIS",
+    "infra_count": 6,
+    "repos": [
+      "DM/tiisweb_openapi",
+      "DM/tiisweb_tiisapp"
+    ]
+  },
+  {
+    "system_code": "C002602",
+    "시스템명": "PCONA",
+    "infra_count": 28,
+    "repos": [
+      "PROXS/pcona"
+    ]
+  },
+  {
+    "system_code": "C002609",
+    "시스템명": "보안-OA환경",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002627",
+    "시스템명": "ERP컨텐츠",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002651",
+    "시스템명": "OCB-통장암호화",
+    "infra_count": 9,
+    "repos": [
+      "GWS/gws-admin-be-api",
+      "GWS/gws-promotion-be",
+      "GWS/gws-promotion-consumer-be",
+      "GWS/oki-be",
+      "OCBSUGAR/ocb_passbook_enc",
+      "SS/kmc",
+      "SS/ss-be",
+      "SSI/dummy_jar",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-ss"
+    ]
+  },
+  {
+    "system_code": "C002652",
+    "시스템명": "OCB-TM(보험)-FTS",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002654",
+    "시스템명": "OCB이벤트-Promotion",
+    "infra_count": 20,
+    "repos": [
+      "OEP/cms_resource",
+      "OEP/event_resource",
+      "OEP/ob-promotion",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-syrup"
+    ]
+  },
+  {
+    "system_code": "C002663",
+    "시스템명": "ERP파일서버",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002664",
+    "시스템명": "금융소비자포털",
+    "infra_count": 23,
+    "repos": [
+      "FCP/fcp-admin",
+      "FCP/fcp-front"
+    ]
+  },
+  {
+    "system_code": "C002671",
+    "시스템명": "SyrupWallet-FIDO",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002693",
+    "시스템명": "DEP",
+    "infra_count": 10,
+    "repos": []
+  },
+  {
+    "system_code": "C002701",
+    "시스템명": "DI-hive",
+    "infra_count": 3,
+    "repos": [
+      "DI/hive-admin",
+      "DI/hive-airlock-manager",
+      "DI/hive-audit-hook",
+      "DI/hive-configs",
+      "DI/querycache2",
+      "DPT_1/querycache"
+    ]
+  },
+  {
+    "system_code": "C002708",
+    "시스템명": "Jira-Wiki",
+    "infra_count": 6,
+    "repos": []
+  },
+  {
+    "system_code": "C002741",
+    "시스템명": "광고플랫폼-CICD",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C002766",
+    "시스템명": "개발환경포털",
+    "infra_count": 75,
+    "repos": [
+      "PALAB/cp-backend",
+      "PALAB/devx-backend",
+      "PALAB/devx-frontend",
+      "PALAB/pitsm-backend",
+      "PALAB/pitsm-frontend",
+      "PALAB/sp-backend",
+      "PALAB/sp-frontend",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc"
+    ]
+  },
+  {
+    "system_code": "C002771",
+    "시스템명": "APIGateway",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002772",
+    "시스템명": "BizChat",
+    "infra_count": 27,
+    "repos": [
+      "BAG/biz-admin",
+      "BAG/biz-api-gw",
+      "BAG/biz-api-test",
+      "BAG/biz-mobile-admin",
+      "BAG/biz-rcs-mng",
+      "BAG/biz-vmg-mng",
+      "BAG/biz-webhook",
+      "BIZ/mmate-admin",
+      "BIZ/mmate-agent",
+      "BIZ/mmate-async",
+      "BIZ/mmate-batch",
+      "BIZ/mmate-batch2",
+      "BIZ/mmate-rlc-info",
+      "BIZ/mmate-web",
+      "IMP/imp-msg-test",
+      "IMP/mmate-api",
+      "IMP/mmate-mms-skt",
+      "IMP/mmate-mt-mgr",
+      "IMP/mmate-rcs-skt",
+      "IMP/mmate-sms-skt",
+      "IMP/mmate-survey-agent",
+      "OTP/mmate-otp-admin",
+      "OTP/mmate-otp-web"
+    ]
+  },
+  {
+    "system_code": "C002779",
+    "시스템명": "VAS신규-스타칩2 담당자",
+    "infra_count": 1,
+    "repos": [
+      "VAS/starchip2-user-fe"
+    ]
+  },
+  {
+    "system_code": "C002783",
+    "시스템명": "MGMT(성수)-NW",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C002784",
+    "시스템명": "MGMT(성수)-Storage",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002785",
+    "시스템명": "MGMT-Nutanix(판교)",
+    "infra_count": 7,
+    "repos": []
+  },
+  {
+    "system_code": "C002787",
+    "시스템명": "QA품질관리시스템",
+    "infra_count": 13,
+    "repos": []
+  },
+  {
+    "system_code": "C002788",
+    "시스템명": "AIPLTM",
+    "infra_count": 24,
+    "repos": [
+      "AIPLTM/ai-platform-backend",
+      "AIPLTM/ai-platform-fe"
+    ]
+  },
+  {
+    "system_code": "C002793",
+    "시스템명": "정보료과금",
+    "infra_count": 28,
+    "repos": []
+  },
+  {
+    "system_code": "C002794",
+    "시스템명": "DCMF(디지털컨텐츠관리프레임웍)",
+    "infra_count": 5,
+    "repos": []
+  },
+  {
+    "system_code": "C002797",
+    "시스템명": "NGcP(차세대컨버전스플랫폼)",
+    "infra_count": 9,
+    "repos": []
+  },
+  {
+    "system_code": "C002798",
+    "시스템명": "PMH(플랫폼메시징허브)",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C002799",
+    "시스템명": "T-ARS",
+    "infra_count": 17,
+    "repos": []
+  },
+  {
+    "system_code": "C002800",
+    "시스템명": "T안심콜",
+    "infra_count": 26,
+    "repos": [
+      "TSAFE/portalwas_monitoring",
+      "TSAFE/portalwas_tworld",
+      "TSAFE/portalwas_voc",
+      "TSAFE/restwas_deamon_initqueue",
+      "TSAFE/restwas_safenumber2.5",
+      "TSAFE/smswas_sms",
+      "TSAFE/socketwas_duplex2",
+      "TSAFE/socketwas_push2",
+      "TSAFTYDEV/portalwas_tworld_premium",
+      "VRBT/scavenger-agent"
+    ]
+  },
+  {
+    "system_code": "C002801",
+    "시스템명": "T컬러링검색",
+    "infra_count": 9,
+    "repos": []
+  },
+  {
+    "system_code": "C002803",
+    "시스템명": "T통화매니저",
+    "infra_count": 28,
+    "repos": [
+      "TCALL/tcall-admin",
+      "TCALL/tcall-api",
+      "TCALL/tcall-batch",
+      "TCALL/tcall-feapi",
+      "TCALL/tcall-web"
+    ]
+  },
+  {
+    "system_code": "C002804",
+    "시스템명": "VASGW",
+    "infra_count": 9,
+    "repos": [
+      "TCALL/vas-open-api",
+      "VASGW/vasgw-api",
+      "VASGW/vasgw_admin"
+    ]
+  },
+  {
+    "system_code": "C002811",
+    "시스템명": "TUMS(통합뮤직)",
+    "infra_count": 18,
+    "repos": [
+      "TUMS/junewas",
+      "TUMS/tums_grigo",
+      "TUMS/tums_web"
+    ]
+  },
+  {
+    "system_code": "C002812",
+    "시스템명": "T메모링(TMR)",
+    "infra_count": 11,
+    "repos": []
+  },
+  {
+    "system_code": "C002817",
+    "시스템명": "VDI",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002818",
+    "시스템명": "SyrupWallet-PFMS",
+    "infra_count": 66,
+    "repos": [
+      "ATMOS/atmos-main",
+      "JVS_1/pds_jarvis_dashboard",
+      "O2SS/pfms",
+      "PALAB/devx-backend",
+      "PALAB/pitsm-backend",
+      "PFMS/e2e",
+      "PFMS/fido",
+      "PFMS/pfms-admin",
+      "PFMS/pfms-fin",
+      "PFMS/pfms-gold",
+      "PFMS/pfms-lua",
+      "PFMS/pfms-md",
+      "PFMS/pfms-oz",
+      "PFMS/pfms-oz-gw",
+      "PFMS/qcshell",
+      "SSI/dummy_jar",
+      "SSI/dummy_so",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-pfms",
+      "SSSC/serverconfig-pfms-gold",
+      "SSSC/serverconfig-pfms-mydata",
+      "SSSC/serverconfig-pfmsfin",
+      "SSSC/serverconfig-pfmsoz",
+      "SSSC/serverconfig-ss"
+    ]
+  },
+  {
+    "system_code": "C002819",
+    "시스템명": "AIR",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C002820",
+    "시스템명": "OpenStack-MGMT",
+    "infra_count": 25,
+    "repos": []
+  },
+  {
+    "system_code": "C002823",
+    "시스템명": "AWS-기타",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002825",
+    "시스템명": "AIR",
+    "infra_count": 21,
+    "repos": [
+      "AIDEV2/air-discovery",
+      "AIDEV2/air-notification",
+      "AIDEV2/air-play-happy-comm-admin",
+      "AIDEV2/air-play-happy-comm-batch",
+      "AIDEV2/air-play-happy-comm-push-scheduler",
+      "AIDEV2/air-play-silver-friend-admin-web",
+      "AIDEV2/air-port",
+      "AIDEV2/airframework-project-happy-community",
+      "AIDEV2/happy-community-admin"
+    ]
+  },
+  {
+    "system_code": "C002838",
+    "시스템명": "DI-Boat(k8s)",
+    "infra_count": 69,
+    "repos": [
+      "DI/boat-jars",
+      "DI/di-airflow",
+      "DI/di-airflow-dags",
+      "DI/di-airflow-packages",
+      "DI/di-hadoop",
+      "DI/hadoop-jmx-exporter",
+      "DI/helmet-sb",
+      "DI/k8s-node-default",
+      "DI/llama-api",
+      "DI/llama-server-img",
+      "DI/pythonalt",
+      "DI/querycache2",
+      "DPT_1/querycache",
+      "OCBNFT/ocb-nft-backend",
+      "OCBNFT/ocb-nft-script",
+      "VAS/starchip_creator"
+    ]
+  },
+  {
+    "system_code": "C002839",
+    "시스템명": "DI-CMS-LOCK",
+    "infra_count": 4,
+    "repos": [
+      "DI/cms"
+    ]
+  },
+  {
+    "system_code": "C002843",
+    "시스템명": "보안-보안진단",
+    "infra_count": 43,
+    "repos": []
+  },
+  {
+    "system_code": "C002848",
+    "시스템명": "V컬러링",
+    "infra_count": 146,
+    "repos": [
+      "VRBT/k8s",
+      "VRBT/pinpoint",
+      "VRBT/pinpoint-agent",
+      "VRBT/pinpoint-docker",
+      "VRBT/pinpoint-receiver",
+      "VRBT/scavenger-agent",
+      "VRBT/vbiz-backend",
+      "VRBT/vrbt-backend",
+      "VRBT/vrbt-fe-monorepo",
+      "VRBT/vrbt-frontend",
+      "VRBT/vrbt-frontend-next",
+      "VRBT/vrbt-nginx",
+      "VRBT/vrbt-oem-convert",
+      "VRBT/vrbt-push",
+      "VRBT/vrbt-tworld"
+    ]
+  },
+  {
+    "system_code": "C002849",
+    "시스템명": "OCB-오글오글",
+    "infra_count": 36,
+    "repos": [
+      "OCBWEBVIEW/ocb-community-api",
+      "OCBWEBVIEW/ocb-community-ssr",
+      "OCBWEBVIEW/ocb-ogeul-admin-frontend",
+      "OCBWEBVIEW/ocb-webview-admin-api"
+    ]
+  },
+  {
+    "system_code": "C002850",
+    "시스템명": "OKICK-서비스",
+    "infra_count": 27,
+    "repos": [
+      "DOS/dosub",
+      "OKICK/okick-event-batch-server",
+      "OKICK/okick-event-server",
+      "OKICK/okick-front",
+      "OKICK/okick-reward-batch-server",
+      "OKICK/okick-reward-front",
+      "OKICK/okick-reward-server"
+    ]
+  },
+  {
+    "system_code": "C002851",
+    "시스템명": "챗봇솔루션",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002852",
+    "시스템명": "OCB-KHub-GW",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002858",
+    "시스템명": "OCB-캐쉬백몰(front)",
+    "infra_count": 5,
+    "repos": [
+      "OB/cashbagmall"
+    ]
+  },
+  {
+    "system_code": "C002861",
+    "시스템명": "윤리포털",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002862",
+    "시스템명": "법인카드정산",
+    "infra_count": 3,
+    "repos": []
+  },
+  {
+    "system_code": "C002863",
+    "시스템명": "사보서비스",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002865",
+    "시스템명": "마케팅플러스-Event",
+    "infra_count": 10,
+    "repos": [
+      "SW/mplus_event"
+    ]
+  },
+  {
+    "system_code": "C002866",
+    "시스템명": "SyrupWallet-CIF",
+    "infra_count": 37,
+    "repos": [
+      "PFMS/pfms-loancompare-fe",
+      "PFMS/pfms-lua",
+      "SSI/dummy_jar",
+      "SSI/dummy_so",
+      "SSSC/serverconfig-common",
+      "SSSC/serverconfig-commonif",
+      "SSSC/serverconfig-fc",
+      "SSSC/serverconfig-pfms",
+      "SSSC/serverconfig-ss",
+      "SSSC/serverconfig-syrup",
+      "SW/common-front",
+      "SW/common-if",
+      "SW/dbro",
+      "SW/next-commonfe",
+      "SW/shop",
+      "SW/statistic-fe"
+    ]
+  },
+  {
+    "system_code": "C002870",
+    "시스템명": "Syrup-OZ",
+    "infra_count": 8,
+    "repos": [
+      "OZPAY/oz-pay-socket"
+    ]
+  },
+  {
+    "system_code": "C002872",
+    "시스템명": "정보료과금-과금처리(통합IF)",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002873",
+    "시스템명": "정보료과금-과금처리(실시간)",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002874",
+    "시스템명": "정보료과금-과금처리(후불IF)",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002876",
+    "시스템명": "정보료과금-과금처리(MMS)",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002877",
+    "시스템명": "정보료과금-Billing통계기능",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002884",
+    "시스템명": "MGMT-장애관리IMC",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002885",
+    "시스템명": "OCB-TM(보험)",
+    "infra_count": 8,
+    "repos": [
+      "DET/fts",
+      "TER/t2a"
+    ]
+  },
+  {
+    "system_code": "C002887",
+    "시스템명": "벨ASP",
+    "infra_count": 7,
+    "repos": [
+      "TUMS/bell_admin",
+      "TUMS/bell_service"
+    ]
+  },
+  {
+    "system_code": "C002888",
+    "시스템명": "보안-MGMT(OA)",
+    "infra_count": 13,
+    "repos": []
+  },
+  {
+    "system_code": "C002889",
+    "시스템명": "MGMT(OA)-Server",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C002891",
+    "시스템명": "단말대여시스템",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C002892",
+    "시스템명": "APE-ONE백신서버(PC용도)",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002893",
+    "시스템명": "보안-문서보안-신서버",
+    "infra_count": 5,
+    "repos": []
+  },
+  {
+    "system_code": "C002895",
+    "시스템명": "오사라마켓",
+    "infra_count": 2,
+    "repos": []
+  },
+  {
+    "system_code": "C002896",
+    "시스템명": "DMP-MMP",
+    "infra_count": 6,
+    "repos": []
+  },
+  {
+    "system_code": "C002897",
+    "시스템명": "DI-AI",
+    "infra_count": 8,
+    "repos": [
+      "DI/chat-dic-front",
+      "DI/oozie2airflow-assist"
+    ]
+  },
+  {
+    "system_code": "C002898",
+    "시스템명": "OBIZSMS",
+    "infra_count": 5,
+    "repos": []
+  },
+  {
+    "system_code": "C002899",
+    "시스템명": "OCB-쇼핑적립",
+    "infra_count": 78,
+    "repos": [
+      "GWS/gws-admin-be-api",
+      "GWS/gws-admin-be-batch",
+      "GWS/gws-admin-fe",
+      "GWS/gws-fe",
+      "GWS/gws-gateway-be-api",
+      "GWS/gws-point-be",
+      "GWS/gws-promotion-be",
+      "GWS/gws-promotion-consumer-be",
+      "GWS/gws-user-be-api",
+      "GWS/oki-admin-fe",
+      "GWS/oki-be",
+      "GWS/oki-fe",
+      "HGV/skhgv-hgv-pub-fe",
+      "IDMS/idms01",
+      "IDMS/sqlloader"
+    ]
+  },
+  {
+    "system_code": "C002900",
+    "시스템명": "컬러링플러스",
+    "infra_count": 9,
+    "repos": []
+  },
+  {
+    "system_code": "C002901",
+    "시스템명": "보안포탈개선",
+    "infra_count": 7,
+    "repos": []
+  },
+  {
+    "system_code": "C002902",
+    "시스템명": "FVDI-MGMT",
+    "infra_count": 19,
+    "repos": []
+  },
+  {
+    "system_code": "C002904",
+    "시스템명": "OA-Crowd",
+    "infra_count": 8,
+    "repos": []
+  },
+  {
+    "system_code": "C002906",
+    "시스템명": "NXmile-v2",
+    "infra_count": 55,
+    "repos": []
+  },
+  {
+    "system_code": "C002907",
+    "시스템명": "오라방-livemoa",
+    "infra_count": 27,
+    "repos": [
+      "SKPOF/log-monitor",
+      "SKPOF/skp_admin_server",
+      "SKPOF/skp_logger",
+      "SKPOF/skp_updater"
+    ]
+  },
+  {
+    "system_code": "C002908",
+    "시스템명": "TALKS",
+    "infra_count": 53,
+    "repos": [
+      "TALKS/oggletalk-admin-frontend",
+      "TALKS/oggletalk-backend",
+      "TALKS/talkplanet-frontend",
+      "TALKS/talks-deploy"
+    ]
+  },
+  {
+    "system_code": "C002910",
+    "시스템명": "CONBT",
+    "infra_count": 6,
+    "repos": [
+      "SLO/optimize-lottie",
+      "SLO/webpgenerator"
+    ]
+  },
+  {
+    "system_code": "C002911",
+    "시스템명": "PlanetM",
+    "infra_count": 6,
+    "repos": [
+      "PMHP/planet-m-m-web",
+      "PMHP/planet-m-pc-web",
+      "SSSC/serverconfig-syrup"
+    ]
+  },
+  {
+    "system_code": "C002912",
+    "시스템명": "BCHAT-API",
+    "infra_count": 14,
+    "repos": [
+      "BAG/biz-admin",
+      "BAG/biz-api-gw",
+      "BAG/biz-mobile-admin",
+      "BAG/biz-rcs-mng",
+      "BAG/biz-vmg-mng",
+      "BAG/biz-webhook"
+    ]
+  },
+  {
+    "system_code": "C002913",
+    "시스템명": "OCB-JOY",
+    "infra_count": 39,
+    "repos": [
+      "EMP/ocb-emp-api-if",
+      "OCBWEBVIEW/ocb-joy-api",
+      "OCBWEBVIEW/ocb-joy-frontend"
+    ]
+  },
+  {
+    "system_code": "C002915",
+    "시스템명": "OKICK-컨텐츠",
+    "infra_count": 20,
+    "repos": [
+      "BRG/rankinggame",
+      "DFS/bridge",
+      "DFS/mosquitto",
+      "DFS/php"
+    ]
+  },
+  {
+    "system_code": "C002917",
+    "시스템명": "SyrupWallet-ImageRR",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002919",
+    "시스템명": "SyrupWallet-Crypto",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C002920",
+    "시스템명": "SyrupWallet-Memcached",
+    "infra_count": 4,
+    "repos": []
+  },
+  {
+    "system_code": "C002923",
+    "시스템명": "오픈리워드솔루션",
+    "infra_count": 13,
+    "repos": [
+      "ADREPORT/adecs-be",
+      "ADREPORT/adecs-fe",
+      "ADREPORT/ocbhotplace-be",
+      "ADREPORT/ocbhotplace-fe"
+    ]
+  },
+  {
+    "system_code": "C002924",
+    "시스템명": "INSIGHTLENS",
+    "infra_count": 14,
+    "repos": [
+      "QUERKA/querka-agent",
+      "QUERKA/querka-fe"
+    ]
+  },
+  {
+    "system_code": "C002925",
+    "시스템명": "OCB-복지포인트",
+    "infra_count": 23,
+    "repos": [
+      "JOYPOT/joypot-admin-frontend",
+      "JOYPOT/joypot-backend",
+      "OCBWEBVIEW/ocb-webview-frontend"
+    ]
+  },
+  {
+    "system_code": "C002926",
+    "시스템명": "OUTLINK-RT",
+    "infra_count": 13,
+    "repos": [
+      "OUT/outlink-api-gw",
+      "OUT/outlink-rcs-mng",
+      "OUT/outlink-vmg-mng",
+      "OUT/outlink-webhook"
+    ]
+  },
+  {
+    "system_code": "C002927",
+    "시스템명": "KICK11-서비스",
+    "infra_count": 20,
+    "repos": [
+      "ELEVENKICK/11kick-event-batch-server",
+      "ELEVENKICK/11kick-event-front",
+      "ELEVENKICK/11kick-event-server",
+      "ELEVENKICK/11kick-reward-batch-server",
+      "ELEVENKICK/11kick-reward-front",
+      "ELEVENKICK/11kick-reward-server"
+    ]
+  },
+  {
+    "system_code": "C002928",
+    "시스템명": "AIPF",
+    "infra_count": 11,
+    "repos": []
+  },
+  {
+    "system_code": "C002929",
+    "시스템명": "OCB-MINT",
+    "infra_count": 22,
+    "repos": [
+      "OCB-MINT/mint-fe",
+      "VUL/mint-api"
+    ]
+  },
+  {
+    "system_code": "C002930",
+    "시스템명": "OCB-SugarSol",
+    "infra_count": 51,
+    "repos": [
+      "OCBSUGAR/ocb-vp-api",
+      "OCBSUGAR/ocb-wp-api",
+      "OCBSUGAR/ocb-wp-frontend"
+    ]
+  },
+  {
+    "system_code": "C002933",
+    "시스템명": "광고플랫폼-DOOH",
+    "infra_count": 1,
+    "repos": []
+  },
+  {
+    "system_code": "C999999",
+    "시스템명": "개발환경포털",
+    "infra_count": 6,
+    "repos": [
+      "DMP/dmp-api-gateway",
+      "DMP/dmp-script",
+      "PALAB/sp-frontend"
+    ]
+  }
+]

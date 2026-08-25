@@ -1,0 +1,777 @@
+<title>SECUFINDINGS Jira 연동 규격</title>
+<style>
+  /* ── Token layer ─────────────────────────────────────── */
+  :root {
+    --bg:         #F5F6FA;
+    --surface:    #FFFFFF;
+    --surface2:   #EEF0F7;
+    --border:     #D8DCE9;
+    --ink:        #14181F;
+    --ink-mid:    #4F566B;
+    --ink-soft:   #8A93AA;
+    --accent:     #0052CC;
+    --accent-dim: #D6E4FF;
+    --accent-txt: #003D99;
+    --code-bg:    #1B2035;
+    --code-ink:   #C8D0E8;
+    --code-str:   #A5D6FF;
+    --code-key:   #FF9580;
+    --code-cmt:   #6B7A99;
+    --chip-req-bg:  #FFEBE6;
+    --chip-req-txt: #BF2600;
+    --chip-opt-bg:  #E3FCEF;
+    --chip-opt-txt: #006644;
+    --chip-fix-bg:  #EAE6FF;
+    --chip-fix-txt: #403294;
+    --shadow:     0 1px 4px rgba(20,24,31,.08), 0 0 0 1px rgba(20,24,31,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:         #10131A;
+      --surface:    #181D28;
+      --surface2:   #1E2436;
+      --border:     #2A3045;
+      --ink:        #E4E8F5;
+      --ink-mid:    #8A93AA;
+      --ink-soft:   #4F566B;
+      --accent:     #4C9AFF;
+      --accent-dim: #1A2E50;
+      --accent-txt: #84B8FF;
+      --code-bg:    #0D1019;
+      --code-ink:   #B8C4D8;
+      --code-str:   #79C0FF;
+      --code-key:   #FF9580;
+      --code-cmt:   #4A566E;
+      --chip-req-bg:  #2D0E0E;
+      --chip-req-txt: #FF8B72;
+      --chip-opt-bg:  #0D2B1E;
+      --chip-opt-txt: #5AE08A;
+      --chip-fix-bg:  #1A1540;
+      --chip-fix-txt: #A79FFF;
+      --shadow:     0 1px 6px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.04);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:         #10131A;
+    --surface:    #181D28;
+    --surface2:   #1E2436;
+    --border:     #2A3045;
+    --ink:        #E4E8F5;
+    --ink-mid:    #8A93AA;
+    --ink-soft:   #4F566B;
+    --accent:     #4C9AFF;
+    --accent-dim: #1A2E50;
+    --accent-txt: #84B8FF;
+    --code-bg:    #0D1019;
+    --code-ink:   #B8C4D8;
+    --code-str:   #79C0FF;
+    --code-key:   #FF9580;
+    --code-cmt:   #4A566E;
+    --chip-req-bg:  #2D0E0E;
+    --chip-req-txt: #FF8B72;
+    --chip-opt-bg:  #0D2B1E;
+    --chip-opt-txt: #5AE08A;
+    --chip-fix-bg:  #1A1540;
+    --chip-fix-txt: #A79FFF;
+    --shadow:     0 1px 6px rgba(0,0,0,.4), 0 0 0 1px rgba(255,255,255,.04);
+  }
+
+  /* ── Reset + base ────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { font-size: 15px; -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.65;
+    min-height: 100vh;
+  }
+
+  /* ── Layout ──────────────────────────────────────────── */
+  .layout {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    grid-template-rows: auto 1fr;
+    max-width: 1040px;
+    margin: 0 auto;
+    gap: 0;
+  }
+  header {
+    grid-column: 1 / -1;
+    border-bottom: 1px solid var(--border);
+    padding: 28px 32px 24px;
+    background: var(--surface);
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .logo-mark {
+    width: 38px; height: 38px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .logo-mark svg { width: 22px; height: 22px; }
+  .header-text { flex: 1; }
+  .eyebrow {
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  h1 {
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: var(--ink);
+    letter-spacing: -.02em;
+    text-wrap: balance;
+    line-height: 1.25;
+  }
+  .header-meta {
+    font-size: .8rem;
+    color: var(--ink-mid);
+    margin-top: 6px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .header-meta span { display: flex; align-items: center; gap: 4px; }
+
+  /* ── Sidebar nav ─────────────────────────────────────── */
+  nav {
+    grid-column: 1;
+    padding: 28px 0 40px 32px;
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    overflow-y: auto;
+  }
+  .nav-label {
+    font-size: .68rem;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 10px;
+  }
+  nav ul { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+  nav a {
+    display: block;
+    font-size: .82rem;
+    color: var(--ink-mid);
+    text-decoration: none;
+    padding: 5px 10px 5px 8px;
+    border-left: 2px solid transparent;
+    border-radius: 0 4px 4px 0;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  nav a:hover { color: var(--accent); background: var(--accent-dim); border-color: var(--accent); }
+  nav a.active { color: var(--accent-txt); border-color: var(--accent); font-weight: 600; }
+
+  /* ── Main content ────────────────────────────────────── */
+  main {
+    grid-column: 2;
+    padding: 36px 40px 80px 32px;
+    border-left: 1px solid var(--border);
+  }
+
+  /* ── Sections ────────────────────────────────────────── */
+  .section { margin-bottom: 56px; }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .section-num {
+    font-size: .72rem;
+    font-weight: 700;
+    color: var(--ink-soft);
+    letter-spacing: .05em;
+    font-variant-numeric: tabular-nums;
+    min-width: 24px;
+  }
+  h2 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -.01em;
+    color: var(--ink);
+  }
+
+  h3 {
+    font-size: .9rem;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 20px 0 10px;
+  }
+
+  p { font-size: .88rem; color: var(--ink-mid); margin-bottom: 12px; line-height: 1.7; }
+
+  /* ── Info block ──────────────────────────────────────── */
+  .info-block {
+    background: var(--accent-dim);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 6px 6px 0;
+    padding: 12px 16px;
+    font-size: .83rem;
+    color: var(--accent-txt);
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+
+  /* ── Endpoint pill ───────────────────────────────────── */
+  .endpoint {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    box-shadow: var(--shadow);
+  }
+  .method {
+    font-family: "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .04em;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: #0052CC;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .method.get  { background: #006644; }
+  .url {
+    font-family: "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+    font-size: .82rem;
+    color: var(--ink);
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* ── Code block ──────────────────────────────────────── */
+  .code-wrap { overflow-x: auto; margin: 10px 0 16px; border-radius: 8px; }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    font-family: "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+    font-size: .78rem;
+    line-height: 1.65;
+    padding: 18px 20px;
+    border-radius: 8px;
+    white-space: pre;
+    min-width: max-content;
+  }
+  .tok-key { color: var(--code-key); }
+  .tok-str { color: var(--code-str); }
+  .tok-num { color: #FFD580; }
+  .tok-cmt { color: var(--code-cmt); font-style: italic; }
+  .tok-bool { color: #CF6AE4; }
+
+  /* ── Field table ─────────────────────────────────────── */
+  .table-wrap { overflow-x: auto; border-radius: 8px; border: 1px solid var(--border); margin: 12px 0 20px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .82rem;
+    font-variant-numeric: tabular-nums;
+  }
+  thead { background: var(--surface2); }
+  th {
+    text-align: left;
+    font-weight: 600;
+    font-size: .72rem;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  tr:last-child td { border-bottom: none; }
+  tbody tr:hover { background: var(--surface2); }
+
+  .td-field {
+    font-family: "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+    font-size: .75rem;
+    color: var(--accent-txt);
+    white-space: nowrap;
+  }
+  .td-desc { color: var(--ink-mid); font-size: .81rem; }
+  .td-val { font-family: "SF Mono", Menlo, Monaco, "Cascadia Code", monospace; font-size: .75rem; }
+
+  /* ── Chips ───────────────────────────────────────────── */
+  .chip {
+    display: inline-block;
+    font-size: .66rem;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .chip-req { background: var(--chip-req-bg); color: var(--chip-req-txt); }
+  .chip-opt { background: var(--chip-opt-bg); color: var(--chip-opt-txt); }
+  .chip-fix { background: var(--chip-fix-bg); color: var(--chip-fix-txt); }
+
+  /* ── Response block ──────────────────────────────────── */
+  .response-row {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: .83rem;
+  }
+  .response-row:last-child { border-bottom: none; }
+  .status-code {
+    font-family: "SF Mono", Menlo, Monaco, monospace;
+    font-weight: 700;
+    font-size: .78rem;
+    min-width: 36px;
+  }
+  .s-ok   { color: #006644; }
+  .s-err  { color: #BF2600; }
+  .s-desc { color: var(--ink-mid); }
+
+  /* ── Flow diagram ────────────────────────────────────── */
+  .flow {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 16px 0 20px;
+  }
+  .flow-step {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-size: .82rem;
+  }
+  .flow-step strong { display: block; font-size: .72rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+  .flow-step span { color: var(--ink-mid); font-size: .8rem; }
+  .flow-arrow {
+    display: flex; align-items: center; padding: 0 8px; color: var(--ink-soft); font-size: 1.1rem; flex-shrink: 0;
+  }
+
+  code {
+    font-family: "SF Mono", Menlo, Monaco, "Cascadia Code", monospace;
+    font-size: .82em;
+    background: var(--surface2);
+    color: var(--accent-txt);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+
+  @media (max-width: 700px) {
+    .layout { grid-template-columns: 1fr; }
+    nav { display: none; }
+    main { grid-column: 1; border-left: none; padding: 24px 20px 60px; }
+    header { padding: 20px; }
+    .flow { flex-direction: column; }
+    .flow-arrow { transform: rotate(90deg); padding: 4px 0; justify-content: center; }
+  }
+</style>
+
+<div class="layout">
+
+  <!-- Header -->
+  <header>
+    <div class="logo-mark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+      </svg>
+    </div>
+    <div class="header-text">
+      <div class="eyebrow">Integration Spec</div>
+      <h1>SECUFINDINGS Jira 티켓 발급 연동 규격</h1>
+      <div class="header-meta">
+        <span>📋 프로젝트: SECUFINDINGS</span>
+        <span>🔗 Jira: jira.skplanet.com</span>
+        <span>📅 2026-08-14</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Sidebar -->
+  <nav>
+    <div class="nav-label">목차</div>
+    <ul>
+      <li><a href="#overview">개요</a></li>
+      <li><a href="#auth">인증</a></li>
+      <li><a href="#api">이슈 생성 API</a></li>
+      <li><a href="#fields">필드 레퍼런스</a></li>
+      <li><a href="#mapping">필드 매핑 가이드</a></li>
+      <li><a href="#example">요청 예시</a></li>
+      <li><a href="#response">응답 및 오류</a></li>
+    </ul>
+  </nav>
+
+  <!-- Main -->
+  <main>
+
+    <!-- 1. 개요 -->
+    <div class="section" id="overview">
+      <div class="section-header">
+        <span class="section-num">01</span>
+        <h2>개요</h2>
+      </div>
+      <p>
+        보안진단 결과를 Jira <strong>SECUFINDINGS</strong> 프로젝트에 직접 발급하기 위한 연동 규격입니다.
+        Jira Server/DC REST API v2를 사용하며, PAT(Personal Access Token) Bearer 인증 방식을 따릅니다.
+      </p>
+      <div class="info-block">
+        이 규격은 <strong>팔란티어 게이트웨이를 경유하지 않고</strong>, 외부 시스템이 Jira에 직접 이슈를 생성하는 방법을 정의합니다.
+        토큰은 보안진단 담당팀에서 발급하여 제공합니다.
+      </div>
+
+      <div class="flow">
+        <div class="flow-step">
+          <strong>외부 시스템</strong>
+          <span>우선순위 페이지 / 취약점 목록</span>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <strong>Jira REST API</strong>
+          <span>POST /rest/api/2/issue</span>
+        </div>
+        <div class="flow-arrow">→</div>
+        <div class="flow-step">
+          <strong>SECUFINDINGS 티켓</strong>
+          <span>담당자 배정 · PDF 첨부</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. 인증 -->
+    <div class="section" id="auth">
+      <div class="section-header">
+        <span class="section-num">02</span>
+        <h2>인증</h2>
+      </div>
+      <p>Jira Server/DC 환경이므로 <strong>PAT Bearer</strong> 방식을 사용합니다. 모든 요청에 아래 헤더를 포함해야 합니다.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>헤더</th><th>값</th><th>비고</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="td-field">Authorization</td>
+              <td class="td-val"><span class="tok-str">Bearer &lt;JIRA_PAT&gt;</span></td>
+              <td class="td-desc">보안진단팀에서 발급한 PAT. <strong>절대 코드에 하드코딩 금지</strong> — 환경변수로 관리</td>
+            </tr>
+            <tr>
+              <td class="td-field">Content-Type</td>
+              <td class="td-val">application/json</td>
+              <td class="td-desc">이슈 생성·조회 모든 요청에 필수</td>
+            </tr>
+            <tr>
+              <td class="td-field">X-Atlassian-Token</td>
+              <td class="td-val">no-check</td>
+              <td class="td-desc">파일 첨부(multipart) 요청에만 필요. 일반 JSON 요청에는 불필요</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="code-wrap">
+        <pre><span class="tok-cmt"># curl 예시</span>
+curl -s -X POST \
+  <span class="tok-str">"https://jira.skplanet.com/rest/api/2/issue"</span> \
+  -H <span class="tok-str">"Authorization: Bearer $JIRA_PAT"</span> \
+  -H <span class="tok-str">"Content-Type: application/json"</span> \
+  -d @payload.json</pre>
+      </div>
+    </div>
+
+    <!-- 3. API -->
+    <div class="section" id="api">
+      <div class="section-header">
+        <span class="section-num">03</span>
+        <h2>이슈 생성 API</h2>
+      </div>
+
+      <h3>이슈 생성</h3>
+      <div class="endpoint">
+        <span class="method">POST</span>
+        <span class="url">https://jira.skplanet.com/rest/api/2/issue</span>
+      </div>
+      <p>요청 본문(JSON)에 <code>fields</code> 객체를 포함하여 전송합니다. 성공 시 <code>201 Created</code>와 함께 생성된 이슈 키가 반환됩니다.</p>
+
+      <h3>이슈 조회 (중복 확인용)</h3>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="url">https://jira.skplanet.com/rest/api/2/search?jql=project%3D%22SECUFINDINGS%22+AND+labels%3D%22{repo}%22&maxResults=1</span>
+      </div>
+      <p>동일 레포 티켓이 이미 존재하는지 사전 확인 시 사용합니다. <code>total &gt; 0</code>이면 기존 티켓이 있습니다.</p>
+
+      <h3>파일 첨부 (선택)</h3>
+      <div class="endpoint">
+        <span class="method">POST</span>
+        <span class="url">https://jira.skplanet.com/rest/api/2/issue/{issueKey}/attachments</span>
+      </div>
+      <p>이슈 키를 받은 후 multipart/form-data로 파일을 첨부합니다. <code>X-Atlassian-Token: no-check</code> 헤더가 필요합니다.</p>
+    </div>
+
+    <!-- 4. 필드 레퍼런스 -->
+    <div class="section" id="fields">
+      <div class="section-header">
+        <span class="section-num">04</span>
+        <h2>필드 레퍼런스</h2>
+      </div>
+      <p><code>fields</code> 객체에 포함할 수 있는 전체 필드 목록입니다. <span class="chip chip-fix">FIXED</span>는 고정값, <span class="chip chip-req">REQUIRED</span>는 필수, <span class="chip chip-opt">OPTIONAL</span>은 선택 필드입니다.</p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>API 필드 키</th><th>필수</th><th>값 / 형식</th><th>설명</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="td-field">project.key</td>
+              <td><span class="chip chip-fix">FIXED</span></td>
+              <td class="td-val"><code>"SECUFINDINGS"</code></td>
+              <td class="td-desc">타깃 Jira 프로젝트 키. 변경 불가</td>
+            </tr>
+            <tr>
+              <td class="td-field">issuetype.name</td>
+              <td><span class="chip chip-fix">FIXED</span></td>
+              <td class="td-val"><code>"Task"</code></td>
+              <td class="td-desc">이슈 유형. 보안진단 티켓은 Task로 고정</td>
+            </tr>
+            <tr>
+              <td class="td-field">priority.name</td>
+              <td><span class="chip chip-fix">FIXED</span></td>
+              <td class="td-val"><code>"Major"</code></td>
+              <td class="td-desc">우선순위. Major로 고정</td>
+            </tr>
+            <tr>
+              <td class="td-field">reporter.name</td>
+              <td><span class="chip chip-fix">FIXED</span></td>
+              <td class="td-val"><code>"pc10315"</code></td>
+              <td class="td-desc">보고자. 보안진단 담당자로 고정</td>
+            </tr>
+            <tr>
+              <td class="td-field">summary</td>
+              <td><span class="chip chip-req">REQUIRED</span></td>
+              <td class="td-val">string (최대 255자)</td>
+              <td class="td-desc">티켓 제목. 예: <code>"[보안진단] ocb-event-front 취약점 조치 요청"</code></td>
+            </tr>
+            <tr>
+              <td class="td-field">description</td>
+              <td><span class="chip chip-req">REQUIRED</span></td>
+              <td class="td-val">Jira Wiki markup</td>
+              <td class="td-desc">티켓 본문. <strong>Markdown이 아닌 Jira 위키 마크업</strong> 사용 (§5 참고)</td>
+            </tr>
+            <tr>
+              <td class="td-field">labels</td>
+              <td><span class="chip chip-req">REQUIRED</span></td>
+              <td class="td-val">string[] (공백 불가)</td>
+              <td class="td-desc">레포명 + 프로젝트 키 배열. 예: <code>["ocb-event-front", "OCBWEBVIEW"]</code></td>
+            </tr>
+            <tr>
+              <td class="td-field">assignee.name</td>
+              <td><span class="chip chip-opt">OPTIONAL</span></td>
+              <td class="td-val">string (Jira username)</td>
+              <td class="td-desc">담당자 Jira 계정명. 미지정 시 Unassigned</td>
+            </tr>
+            <tr>
+              <td class="td-field">customfield_21500</td>
+              <td><span class="chip chip-opt">OPTIONAL</span></td>
+              <td class="td-val"><code>"YYYY-MM-DD"</code></td>
+              <td class="td-desc">조치기한 커스텀 필드. 날짜 형식 엄수</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Jira 위키 마크업 주요 문법</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>목적</th><th>Jira Wiki 문법</th><th>Markdown 대응</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>굵게</td><td class="td-val">*텍스트*</td><td class="td-val">**텍스트**</td></tr>
+            <tr><td>인라인 코드</td><td class="td-val">{{코드}}</td><td class="td-val">`코드`</td></tr>
+            <tr><td>표 헤더</td><td class="td-val">|| 열1 || 열2 ||</td><td class="td-val">| 열1 | 열2 |</td></tr>
+            <tr><td>표 행</td><td class="td-val">| 값1 | 값2 |</td><td class="td-val">| 값1 | 값2 |</td></tr>
+            <tr><td>헤딩 2</td><td class="td-val">h2. 제목</td><td class="td-val">## 제목</td></tr>
+            <tr><td>링크</td><td class="td-val">[표시텍스트|URL]</td><td class="td-val">[텍스트](URL)</td></tr>
+            <tr><td>색깔 텍스트</td><td class="td-val">{color:red}텍스트{color}</td><td class="td-val">(없음)</td></tr>
+            <tr><td>패널 박스</td><td class="td-val">{panel:title=제목}내용{panel}</td><td class="td-val">(없음)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 5. 필드 매핑 -->
+    <div class="section" id="mapping">
+      <div class="section-header">
+        <span class="section-num">05</span>
+        <h2>필드 매핑 가이드</h2>
+      </div>
+      <p>
+        외부 시스템(<code>priority/view</code>)의 데이터를 Jira 필드에 매핑하는 기준입니다.
+        페이지에서 제공되는 실제 항목명에 맞게 조정하여 구현하세요.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Jira 필드</th><th>권장 매핑 소스</th><th>변환 규칙</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="td-field">summary</td>
+              <td class="td-desc">취약점 제목 / 서비스명 + 진단 유형</td>
+              <td class="td-desc">예: <code>"[보안진단] {서비스명} 취약점 조치 요청"</code></td>
+            </tr>
+            <tr>
+              <td class="td-field">labels</td>
+              <td class="td-desc">레포명, Bitbucket 프로젝트 키</td>
+              <td class="td-desc">레포명은 공백 없이 그대로, 프로젝트 키는 대문자. 배열로 전달</td>
+            </tr>
+            <tr>
+              <td class="td-field">assignee.name</td>
+              <td class="td-desc">서비스 담당자 Jira 계정명</td>
+              <td class="td-desc">Jira Server/DC는 <code>name</code>(계정명) 사용. email 아님</td>
+            </tr>
+            <tr>
+              <td class="td-field">customfield_21500</td>
+              <td class="td-desc">조치 기한</td>
+              <td class="td-desc"><code>YYYY-MM-DD</code> 형식으로 변환 필수</td>
+            </tr>
+            <tr>
+              <td class="td-field">description</td>
+              <td class="td-desc">진단 결과 본문 전체</td>
+              <td class="td-desc">Jira Wiki markup 형식 변환 필요 (Markdown 직접 사용 불가)</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="info-block">
+        <strong>담당자 계정명 확인 방법</strong><br>
+        <code>GET https://jira.skplanet.com/rest/api/2/user/search?username={검색어}</code><br>
+        응답의 <code>name</code> 필드가 <code>assignee.name</code>에 사용할 값입니다. (email X)
+      </div>
+    </div>
+
+    <!-- 6. 요청 예시 -->
+    <div class="section" id="example">
+      <div class="section-header">
+        <span class="section-num">06</span>
+        <h2>요청 예시</h2>
+      </div>
+      <p>전체 payload 예시입니다. <code>description</code>은 Jira Wiki markup으로 작성합니다.</p>
+
+      <div class="code-wrap">
+        <pre>{
+  <span class="tok-key">"fields"</span>: {
+    <span class="tok-key">"project"</span>:   { <span class="tok-key">"key"</span>:  <span class="tok-str">"SECUFINDINGS"</span> },
+    <span class="tok-key">"issuetype"</span>: { <span class="tok-key">"name"</span>: <span class="tok-str">"Task"</span> },
+    <span class="tok-key">"priority"</span>:  { <span class="tok-key">"name"</span>: <span class="tok-str">"Major"</span> },
+    <span class="tok-key">"reporter"</span>:  { <span class="tok-key">"name"</span>: <span class="tok-str">"pc10315"</span> },
+
+    <span class="tok-key">"summary"</span>: <span class="tok-str">"[보안진단] ocb-event-front 취약점 조치 요청"</span>,
+
+    <span class="tok-key">"labels"</span>: [
+      <span class="tok-str">"ocb-event-front"</span>,
+      <span class="tok-str">"OCBWEBVIEW"</span>
+    ],
+
+    <span class="tok-key">"assignee"</span>: { <span class="tok-key">"name"</span>: <span class="tok-str">"pp61341"</span> },
+
+    <span class="tok-key">"customfield_21500"</span>: <span class="tok-str">"2026-09-30"</span>, <span class="tok-cmt">// 조치기한</span>
+
+    <span class="tok-key">"description"</span>: <span class="tok-str">"h2. 1. 진단 개요\n|| 항목 || 내용 ||\n| 진단 대상 | ocb-event-front |\n| 진단 유형 | SAST |\n| 진단 일시 | 2026-08 |\n\nh2. 2. 취약점 요약\n|| Sub_No || 결과 || 위험도 || 제목 || 조치 계획 || 조치 일자 ||\n| 1-1 | 취약 | High | SQL Injection | | |\n\n----\n{panel:title=티켓 처리 가이드|borderStyle=solid|borderColor=#3b73af|titleBGColor=#3b73af|titleColor=#ffffff}\n*(1)* 담당자가 아닐 경우 comment에 실담당자를 남겨주세요.\n*(2)* 조치 계획 및 조치 일자를 위 표에 작성하여 comment로 답신 바랍니다.\n*(3)* 조치 완료 시 *이행 점검 요청* 상태로 변경해주세요.\n{panel}"</span>
+  }
+}</pre>
+      </div>
+    </div>
+
+    <!-- 7. 응답 및 오류 -->
+    <div class="section" id="response">
+      <div class="section-header">
+        <span class="section-num">07</span>
+        <h2>응답 및 오류</h2>
+      </div>
+
+      <h3>성공 응답</h3>
+      <div class="code-wrap">
+        <pre><span class="tok-cmt">// HTTP 201 Created</span>
+{
+  <span class="tok-key">"id"</span>:   <span class="tok-str">"123456"</span>,
+  <span class="tok-key">"key"</span>:  <span class="tok-str">"SECUFINDINGS-2200"</span>,
+  <span class="tok-key">"self"</span>: <span class="tok-str">"https://jira.skplanet.com/rest/api/2/issue/123456"</span>
+}</pre>
+      </div>
+      <p>반환된 <code>key</code>로 티켓 URL을 구성합니다: <code>https://jira.skplanet.com/browse/{key}</code></p>
+
+      <h3>주요 오류 코드</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>HTTP</th><th>원인</th><th>해결 방법</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="td-field s-err">401</td>
+              <td class="td-desc">PAT 누락 또는 만료</td>
+              <td class="td-desc">Authorization 헤더 및 토큰 유효성 확인</td>
+            </tr>
+            <tr>
+              <td class="td-field s-err">400</td>
+              <td class="td-desc">필드 형식 오류 (날짜, 필수 필드 누락 등)</td>
+              <td class="td-desc">응답 본문의 <code>errors</code> 객체에서 문제 필드 확인</td>
+            </tr>
+            <tr>
+              <td class="td-field s-err">400</td>
+              <td class="td-desc">assignee 배정 불가 (프로젝트 권한 없음)</td>
+              <td class="td-desc">보안진단팀에 해당 계정의 Users role 추가 요청</td>
+            </tr>
+            <tr>
+              <td class="td-field s-err">403</td>
+              <td class="td-desc">이슈 생성 권한 없음</td>
+              <td class="td-desc">PAT 발급 계정의 프로젝트 권한 확인</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>담당자 배정 가능 여부 사전 확인</h3>
+      <div class="endpoint">
+        <span class="method get">GET</span>
+        <span class="url">https://jira.skplanet.com/rest/api/2/user/assignable/search?project=SECUFINDINGS&username={username}</span>
+      </div>
+      <p>응답 배열이 비어있으면 해당 계정은 SECUFINDINGS에 배정 불가. 보안진단팀에 권한 추가를 요청해야 합니다.</p>
+
+      <div class="info-block">
+        <strong>문의 / 토큰 발급 요청</strong><br>
+        PAT 발급 및 담당자 권한 추가는 보안진단실 담당자(pc10315)에게 요청하세요.
+      </div>
+    </div>
+
+  </main>
+</div>
