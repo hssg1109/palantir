@@ -219,3 +219,22 @@ def create_issue_link(env: dict, jira_url: str, inward_key: str, outward_key: st
     except requests.exceptions.RequestException:
         return False
     return resp.status_code == 201
+
+
+def create_web_link(env: dict, jira_url: str, issue_key: str, url: str, title: str, icon_url: str = "") -> bool:
+    """이슈의 Links 패널에 외부 URL(예: Confluence 페이지)을 Web Link로 등록한다."""
+    payload = {
+        "object": {"url": url, "title": title},
+    }
+    if icon_url:
+        payload["object"]["icon"] = {"url16x16": icon_url}
+    try:
+        resp = requests.post(
+            f"{jira_url}/rest/api/2/issue/{issue_key}/remotelink",
+            headers=jira_headers(env),
+            json=payload,
+            timeout=15,
+        )
+    except requests.exceptions.RequestException:
+        return False
+    return resp.status_code == 201
