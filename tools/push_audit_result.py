@@ -24,10 +24,12 @@ push_audit_result.py — 진단이력을 VULCHK/audit_result 레포에 업로드
 """
 
 import argparse
+import fcntl
 import os
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -37,6 +39,12 @@ import secret_scan_gate
 PALANTIR_DIR = Path(__file__).resolve().parent.parent
 STATE_DIR    = PALANTIR_DIR / "state"
 LOGS_DIR     = PALANTIR_DIR / "logs"
+
+# 공유 Windows git workspace(WS_WSL)에 대한 동시 접근 방지 락.
+# 2026-08-26: 여러 push_audit_result.py 인스턴스가 락 없이 동일 workspace의
+# checkout/reset/commit을 동시에 수행해 .git index/reflog가 손상되고,
+# gws-fe/gws-admin-fe/ocbpass-newpg 업로드가 조용히 유실된 사고가 있었다.
+_LOCK_PATH = PALANTIR_DIR / "state" / ".push_audit_result.lock"
 
 SKILL_ORDER   = ["injection", "xss", "file", "data", "sca"]
 BB_REMOTE_URL = os.environ.get("AUDIT_RESULT_REPO_URL", "")
@@ -172,6 +180,51 @@ def _run_powershell(ps_script: str) -> int:
     except Exception:
         pass
     return result.returncode
+
+
+class _WorkspaceLock:
+    """공유 git workspace(WS_WSL)에 대한 프로세스 간 배타 락 (fcntl.flock 기반).
+
+    flock은 파일을 쥔 프로세스가 죽으면(크래시 포함) OS가 자동으로 락을 해제하므로
+    PID 파일 방식과 달리 stale lock으로 인한 데드락이 없다."""
+
+    def __init__(self, path: Path, timeout: float = 600.0):
+        self.path = path
+        self.timeout = timeout
+        self._fh = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = open(self.path, "a+")
+        deadline = time.monotonic() + self.timeout
+        waited = False
+        while True:
+            try:
+                fcntl.flock(self._fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if not waited:
+                    print("  [LOCK] 다른 push_audit_result.py 실행이 workspace를 사용 중 — 대기...")
+                    waited = True
+                if time.monotonic() > deadline:
+                    self._fh.close()
+                    raise TimeoutError(
+                        f"push_audit_result workspace 락 획득 실패 ({self.timeout:.0f}초 초과) — "
+                        f"{self.path} 를 쥔 프로세스가 멈춰있을 수 있습니다."
+                    )
+                time.sleep(2)
+        self._fh.seek(0)
+        self._fh.truncate()
+        self._fh.write(str(os.getpid()))
+        self._fh.flush()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            fcntl.flock(self._fh, fcntl.LOCK_UN)
+        finally:
+            self._fh.close()
+        return False
 
 
 def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int:
@@ -313,21 +366,29 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
         "}",
         "",
         f"git -C $ws add '{repo}\\'",
-        f"git -C $ws commit -m '{commit_msg}'",
-        "$commitExit = $LASTEXITCODE",
-        "if ($commitExit -eq 0) {",
-        f"    git -C $ws {git_auth} push $remote HEAD:refs/heads/main",
-        "    exit $LASTEXITCODE",
-        "} elseif ($commitExit -eq 1) {",
-        "    Write-Host '[INFO] 변경 없음 (already up to date)'",
+        "# git commit의 종료코드 1(\"nothing to commit\")을 곧바로 성공으로 간주하지 않는다 —",
+        "# workspace가 손상돼 commit 자체가 트리 구성 실패(예: invalid object)로 죽어도",
+        "# 종료코드가 1이 될 수 있어, 실제로 스테이징된 diff가 있는지 먼저 직접 확인한다.",
+        f"$staged = git -C $ws diff --cached --name-only -- '{repo}\\'",
+        "if (-not $staged) {",
+        "    Write-Host '[INFO] 변경 없음 (already up to date) - 스테이징된 diff 없음'",
         "    exit 0",
-        "} else {",
-        "    Write-Error \"git commit 실패: $commitExit\"",
-        "    exit $commitExit",
         "}",
+        f"git -C $ws commit -m '{commit_msg}'",
+        "if ($LASTEXITCODE -ne 0) {",
+        "    Write-Error \"git commit 실패 (staged diff 존재했으나 commit 실패, workspace 손상 의심): $LASTEXITCODE\"",
+        "    exit $LASTEXITCODE",
+        "}",
+        f"git -C $ws {git_auth} push $remote HEAD:refs/heads/main",
+        "exit $LASTEXITCODE",
     ])
 
-    rc = _run_powershell(ps_script)
+    try:
+        with _WorkspaceLock(_LOCK_PATH):
+            rc = _run_powershell(ps_script)
+    except TimeoutError as _e:
+        print(f"  [ERROR] {_e}")
+        return 2
 
     if rc == 0:
         audit_url = (

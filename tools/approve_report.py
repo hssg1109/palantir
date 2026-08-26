@@ -462,6 +462,9 @@ def main() -> int:
 
     # 진단이력 업로드 (VULCHK/palantir_result)
     print("\n[audit] 진단이력 업로드 중 (VULCHK/palantir_result)...")
+    _hint = f"python3 tools/push_audit_result.py --repo {args.repo}"
+    if run_id:
+        _hint += f" --run-id {run_id}"
     try:
         import importlib.util, os as _os
         spec = importlib.util.spec_from_file_location(
@@ -470,11 +473,14 @@ def main() -> int:
         )
         _par = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(_par)
-        _par.push(args.repo, run_id)
+        _push_rc = _par.push(args.repo, run_id)
+        # push()의 반환값(0=성공,1=설정오류,2=git push실패)을 반드시 확인한다 —
+        # 과거 여기서 반환값을 무시해 gws-fe/ocbpass-newpg 업로드 실패가 조용히
+        # 묻혀버린 사고가 있었다(2026-08-26 확인).
+        if _push_rc != 0:
+            print(f"  [WARN] 업로드 실패 (returncode={_push_rc})")
+            print(f"  수동 실행: {_hint}")
     except Exception as _exc:
-        _hint = f"python3 tools/push_audit_result.py --repo {args.repo}"
-        if run_id:
-            _hint += f" --run-id {run_id}"
         print(f"  [WARN] 업로드 실패: {_exc}")
         print(f"  수동 실행: {_hint}")
 
