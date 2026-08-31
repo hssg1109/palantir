@@ -35,22 +35,24 @@ load_dotenv(PALANTIR_DIR / ".env", override=False)
 VISION_BASE   = "https://vision.skplanet.com"
 JENKINS_BASE  = "http://ssc.skplanet.com:9090"
 JENKINS_JOB   = "/job/FORTIFY/job/" + urllib.parse.quote("미사용-레포-등록", safe="") + "/build"
-JENKINS_USER  = "[REDACTED-JENKINS-USER]"
-JENKINS_TOKEN = "[REDACTED-JENKINS-TOKEN]"
+JENKINS_USER  = os.getenv("JENKINS_USER", "")
+JENKINS_TOKEN = os.getenv("JENKINS_TOKEN", "")
 REPORTER      = "유성근"
 
 JIRA_URL   = os.getenv("JIRA_URL", "").rstrip("/")
 JIRA_USER  = os.getenv("JIRA_USER", "")
 JIRA_TOKEN = os.getenv("JIRA_TOKEN", "")
 
-# 수동 매핑: 영문명 → assignee_id (Jira 검색 결과 모호한 동명이인)
-_MANUAL_ENG_MAP = {
-    "[REDACTED-NAME]": "[REDACTED-ID]",  # SW/Syrup개발팀 (동명이인 1000063 재무구매팀과 구분)
-}
-# 수동 매핑: 한글 첫 세그먼트 → assignee_id (영문명 없는 assignee)
-_MANUAL_HAN_MAP = {
-    "[REDACTED-NAME]": "[REDACTED-ID]",
-}
+# 수동 매핑(영문명/한글명 → assignee_id, 동명이인 노트 포함)은 임직원 PII이므로
+# gitignore된 shared/references/vision_assignee_manual_overrides.json에 보관한다
+# (2026-08-31 하드코딩 값이 public GitHub에 노출된 사고 이후 분리 — maintainer_manual_overrides.json과 동일 패턴).
+_OVERRIDES_PATH = PALANTIR_DIR / "shared" / "references" / "vision_assignee_manual_overrides.json"
+try:
+    _overrides = json.loads(_OVERRIDES_PATH.read_text(encoding="utf-8"))
+except FileNotFoundError:
+    _overrides = {"eng": {}, "han": {}}
+_MANUAL_ENG_MAP = {k: v["assignee_id"] for k, v in _overrides.get("eng", {}).items()}
+_MANUAL_HAN_MAP = {k: v["assignee_id"] for k, v in _overrides.get("han", {}).items()}
 
 
 # ── 파싱 헬퍼 ─────────────────────────────────────────────────────────────────
