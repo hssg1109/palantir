@@ -27,6 +27,8 @@ docs/.confluence_pages.json
 docs/.ocb_scan_status.json
 docs/credit_requirements_report_*.md
 shared/references/project_ocb_php_targets.md
+docs/vision_repo_status.csv
+docs/ocb_service_history_confluence.md
 
 ### 고객사 감사 자료 ###
 *.png
