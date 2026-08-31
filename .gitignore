@@ -27,6 +27,8 @@ docs/.confluence_pages.json
 docs/.scan_status.json
 docs/credit_requirements_report_*.md
 shared/references/project_php_targets.md
+docs/vision_repo_status.csv
+docs/service_history_confluence.md
 
 ### 고객사 감사 자료 ###
 *.png
