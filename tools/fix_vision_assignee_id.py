@@ -57,6 +57,27 @@ _MANUAL_HAN_MAP = {k: v["assignee_id"] for k, v in _overrides.get("han", {}).ite
 
 # ── 파싱 헬퍼 ─────────────────────────────────────────────────────────────────
 
+# Jenkins USE_YN은 ChoiceParameterDefinition(choices=["사용","미사용"]) 고정 선택지다
+# (2026-09-08 job api/json으로 확인 — config.xml은 job run 전용 계정이라 403).
+# Vision CSV 내보내기 포맷이 한글 텍스트 → 숫자 0/1로 바뀐 걸 같은 날 확인했는데,
+# 숫자를 그대로 보내면 choice에 없는 값이라 Jenkins가 거부하거나 잘못 기록될 수 있어
+# CSV를 읽는 시점에 항상 Jenkins가 요구하는 두 값 중 하나로 정규화한다.
+_USE_YN_CHOICES = ("사용", "미사용")
+_USE_YN_NUMERIC_MAP = {"1": "사용", "0": "미사용"}
+
+
+def normalize_use_yn(raw: str) -> str | None:
+    """Vision CSV의 use_yn 값을 Jenkins USE_YN choice 값으로 정규화.
+
+    지원 입력: "사용"/"미사용"(그대로 통과), "1"/"0"(숫자 포맷 대응).
+    인식 불가 값은 None을 반환 — 호출부가 해당 건을 건너뛰고 경고해야 한다.
+    """
+    v = (raw or "").strip()
+    if v in _USE_YN_CHOICES:
+        return v
+    return _USE_YN_NUMERIC_MAP.get(v)
+
+
 def parse_embedded_id(assignee: str) -> str:
     """assignee 문자열에서 사번/계정ID 추출 시도.
 
@@ -208,13 +229,20 @@ def main():
 
     # 후보 테이블 구성
     candidates = []
+    skipped_use_yn = []
     for r in targets:
-        prj       = r["project"]
-        repo      = r["repository"]
-        use_yn    = r["use_yn"]   # '사용' or '미사용'
-        assignee  = r["assignee"].strip()
-        reason    = r["reason_text"].strip()
-        reason_dt = r["reason_dt"].strip()
+        prj          = r["project"]
+        repo         = r["repository"]
+        raw_use_yn   = r["use_yn"]
+        use_yn       = normalize_use_yn(raw_use_yn)
+        assignee     = r["assignee"].strip()
+        reason       = r["reason_text"].strip()
+        reason_dt    = r["reason_dt"].strip()
+
+        if use_yn is None:
+            print(f"  [WARN] use_yn 값 인식 불가 — {prj}/{repo}: {raw_use_yn!r} (스킵, Jenkins 재등록 대상에서 제외)")
+            skipped_use_yn.append(f"{prj}/{repo} ({raw_use_yn!r})")
+            continue
 
         # 0. 한글명 수동 매핑 (영문명 없는 assignee)
         han_seg = assignee.split('/')[0].strip()
@@ -271,6 +299,11 @@ def main():
                 "assignee_id": "", "source": "미확인",
                 "display": f"???  ({assignee})",
             })
+
+    if skipped_use_yn:
+        print(f"\n[SKIP] use_yn 인식 불가로 제외된 {len(skipped_use_yn)}건:")
+        for s in skipped_use_yn:
+            print(f"  {s}")
 
     # 결과 출력
     print(f"{'#':<4} {'PROJECT':<16} {'REPO':<35} {'assignee_id(후보)':<20} {'출처':<20} assignee")
