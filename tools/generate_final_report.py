@@ -37,6 +37,22 @@ STATE_DIR      = PALANTIR_DIR / "state"
 LOGS_DIR       = PALANTIR_DIR / "logs"
 TESTBED_DIR    = PALANTIR_DIR / "testbed"
 DOCS_DIR       = PALANTIR_DIR / "docs"
+GATEWAY_DIR    = PALANTIR_DIR.parent / "palantir-jira-gateway"
+
+
+def _vision_lookup(bb_project: str, repo: str) -> dict | None:
+    """gateway가 pending 티켓 생성 시 쓰는 Vision 조회 경로를 그대로 재사용.
+
+    gateway 레포가 없거나 조회 실패 시 None — 호출부가 기존 커밋 이력 기반
+    담당자로 fallback해야 한다."""
+    if not bb_project or bb_project == "—":
+        return None
+    try:
+        sys.path.insert(0, str(GATEWAY_DIR / "lambda"))
+        from vision_api import lookup
+        return lookup(bb_project, repo)
+    except Exception:
+        return None
 
 
 def _load_env() -> dict:
@@ -974,14 +990,24 @@ def render_markdown(
     clone_url     = clone_info.get("clone_url", "—")
     cloned_at     = (clone_info.get("cloned_at") or "")[:10] or "—"
     project       = clone_info.get("project", "—")
-    maintainer    = clone_info.get("maintainer") or clone_info.get("last_commit_author") or "—"
-    _m_count      = clone_info.get("maintainer_commit_count")
-    _m_window     = clone_info.get("maintainer_window_months")
-    _m_anchor     = clone_info.get("maintainer_window_anchor")
-    _maintainer_display = (
-        f"{maintainer} (최근 커밋 {_m_anchor} 기준 {_m_window}개월 내 커밋 {_m_count}건)"
-        if _m_count else maintainer
-    )
+    # 담당자 — gateway create_pending()과 동일한 정책: Vision 등록 담당자 우선,
+    # 없으면 기존 커밋 이력 기반 fallback (2026-09-08).
+    _vision_record  = _vision_lookup(project, repo)
+    _vision_aid     = ((_vision_record or {}).get("assignee_id") or "").strip()
+    if _vision_aid:
+        _vision_name = ((_vision_record or {}).get("assignee") or "").strip() or _vision_aid
+        _maintainer_display = f"{_vision_name} (Vision 등록 담당자)"
+        _maintainer_footnote = "\\* 담당자는 Vision(레포 사용여부·담당자 관리 시스템)에 등록된 담당자입니다."
+    else:
+        maintainer    = clone_info.get("maintainer") or clone_info.get("last_commit_author") or "—"
+        _m_count      = clone_info.get("maintainer_commit_count")
+        _m_window     = clone_info.get("maintainer_window_months")
+        _m_anchor     = clone_info.get("maintainer_window_anchor")
+        _maintainer_display = (
+            f"{maintainer} (최근 커밋 {_m_anchor} 기준 {_m_window}개월 내 커밋 {_m_count}건)"
+            if _m_count else maintainer
+        )
+        _maintainer_footnote = "\\* 담당자는 Vision 미등록 레포로, 해당 repo clone 시 가장 최근 commit 한 개발 매니저로 임의 설정되어있습니다. 변경 필요시 댓글부탁드립니다."
     _reviewers_hint = clone_info.get("reviewers_hint")
     _reviewers_hint_display = ", ".join(_reviewers_hint) if _reviewers_hint else ""
     exposure_type = load_service_exposure(repo)
@@ -1010,7 +1036,7 @@ def render_markdown(
         f"| 전체 발견 건수 | {total_cnt}건 |",
         f"| 동적진단 등 추가진단 필요여부 | {add_diag} |",
         "",
-        "\\* 담당자는 해당 repo clone 시 가장 최근 commit 한 개발 매니저로 임의 설정되어있습니다. 변경 필요시 댓글부탁드립니다.",
+        _maintainer_footnote,
         "",
     ]
 
