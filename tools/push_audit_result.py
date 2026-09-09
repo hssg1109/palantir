@@ -386,6 +386,17 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
     try:
         with _WorkspaceLock(_LOCK_PATH):
             rc = _run_powershell(ps_script)
+            if rc != 0:
+                # 2026-09-03: 워크스페이스 로컬 .git 오브젝트 손상(reflog/cache-tree invalid)으로
+                # commit이 트리 구성 단계에서 실패하는 사고가 반복 발생 — fetch+reset --hard만으로는
+                # 이미 로컬에 존재한다고 표시된 손상 오브젝트가 복구되지 않으므로, 실패 시 워크스페이스를
+                # 통째로 지우고 fresh clone으로 한 번 자동 재시도한다 (원본은 원격 레포에 안전하게 보존됨).
+                print(f"  [WARN] 1차 시도 실패 (returncode={rc}) — 워크스페이스 손상 의심, "
+                      f"삭제 후 fresh clone으로 재시도...")
+                shutil.rmtree(WS_WSL, ignore_errors=True)
+                rc = _run_powershell(ps_script)
+                if rc == 0:
+                    print("  [SELF-HEAL] 재clone 후 재시도 성공")
     except TimeoutError as _e:
         print(f"  [ERROR] {_e}")
         return 2
@@ -397,7 +408,8 @@ def push(repo: str, run_id: str | None = None, folder: str | None = None) -> int
         )
         print(f"  업로드 완료: {audit_url}")
     else:
-        print(f"  [WARN] git push 실패 (returncode={rc}) — 파일은 {WS_WIN}\\{repo}\\{folder_name}\\ 에 보존됨")
+        print(f"  [WARN] git push 실패 (returncode={rc}, 자동 재시도 후에도 실패) — "
+              f"파일은 {WS_WIN}\\{repo}\\{folder_name}\\ 에 보존됨")
         print("  수동 push (Windows PowerShell):")
         print(f"    git -C \"{WS_WIN}\" add \"{repo}\\\"")
         print(f"    git -C \"{WS_WIN}\" commit -m \"{commit_msg}\"")
