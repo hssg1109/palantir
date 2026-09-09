@@ -306,8 +306,13 @@ def _load_maintainer_cache() -> dict:
     return _MAINTAINER_CACHE
 
 
-def _jira_lookup_display_name(email: str) -> str | None:
-    """Jira 사용자 검색 API로 이메일 기준 displayName을 best-effort 조회한다. 실패 시 None."""
+def _jira_lookup_user(email: str) -> dict | None:
+    """Jira 사용자 검색 API로 이메일 기준 계정 정보를 best-effort 조회한다.
+
+    반환: {"id": <name 필드 — 이 Jira Server 인스턴스의 실제 계정명/사번>,
+           "display_name": <displayName 필드 — 이미 "이름(영문)/팀/SKP" 완성형>}
+    실패 시 None.
+    """
     if not email:
         return None
     try:
@@ -327,7 +332,10 @@ def _jira_lookup_display_name(email: str) -> str | None:
         resp.raise_for_status()
         results = resp.json()
         if results:
-            return results[0].get("displayName")
+            return {
+                "id": results[0].get("name"),
+                "display_name": results[0].get("displayName"),
+            }
         return None
     except Exception:
         return None
@@ -337,10 +345,15 @@ def _normalize_maintainer_label(name: str, email: str) -> tuple[str, bool, str]:
     """
     (name, email) 원시 조합을 통일된 표기로 변환한다.
 
-    - 사내(INTERNAL_EMAIL_DOMAINS): "{이름}({영문명})/{팀명}/SKP <{이메일}>"
+    - 사내(INTERNAL_EMAIL_DOMAINS): 실제 Jira 계정명(사번)이 확보되면
+      "{사번} <{이메일}> {이름}({영문명})/{팀명}/SKP" (jira-gateway가 담당자 셀에서
+      사번을 그대로 추출할 수 있도록 사번을 라벨 맨 앞에 둔다)
       1) 캐시에 status="퇴사"(또는 "departed") 마킹 → "{이름} <{이메일}> (퇴사 확인됨)"
-      2) shared/references/maintainer_directory_cache.json 이메일 매칭(+팀 정보 존재) → 이름/영문명/팀 사용
-      3) 캐시(팀 없음) 또는 Jira user/search API(best-effort)로 실제 displayName 확보 성공 → 팀은 "미확인"
+      2) shared/references/maintainer_directory_cache.json 이메일 매칭(+팀 정보 존재) → 이름/영문명/팀 사용,
+         Jira user/search API로 사번 추가 조회(best-effort, 실패 시 사번 없이 기존 포맷 유지)
+      3) 캐시(팀 없음) 또는 Jira user/search API(best-effort)로 실제 displayName 확보 성공 →
+         displayName은 이미 "이름(영문)/팀/SKP" 완성형이므로 그대로 사용(중복 접미사 없음),
+         같은 조회 응답의 사번(name 필드)을 라벨 앞에 붙임
       4) 캐시/Jira 모두 실패(사람 자체를 확인할 수 없음 — 퇴사/조직변경 등 가능성) → "(확인불가)" 태그, 원본 name/사번을 그대로 노출
     - 외주(그 외 도메인): "{이름 또는 git계정} <{이메일}> (외주)"
 
@@ -368,14 +381,20 @@ def _normalize_maintainer_label(name: str, email: str) -> tuple[str, bool, str]:
         name_kr = entry.get("name_kr") or name
         name_en = entry.get("name_en")
         team = entry["team"]
-        label = f"{name_kr}({name_en})/{team}/SKP <{email}>" if name_en else f"{name_kr}/{team}/SKP <{email}>"
+        display = f"{name_kr}({name_en})/{team}/SKP" if name_en else f"{name_kr}/{team}/SKP"
+        jira_user = _jira_lookup_user(email)
+        jira_id = (jira_user or {}).get("id")
+        label = f"{jira_id} <{email}> {display}" if jira_id else f"{display} <{email}>"
         return (label, False, "resolved")
 
     # 캐시(이름만) 또는 Jira 조회로 "실존이 확인된 이름"을 얻은 경우에 한해 미확인 처리.
     # (주의: name은 git commit author의 raw 표기 — 사번 등 신뢰할 수 없는 값일 수 있어 fallback으로 쓰지 않는다)
-    resolved_display_name = (entry or {}).get("name_kr") or _jira_lookup_display_name(email)
+    jira_user = _jira_lookup_user(email)
+    resolved_display_name = (entry or {}).get("name_kr") or (jira_user or {}).get("display_name")
     if resolved_display_name:
-        return (f"{resolved_display_name}/미확인/SKP <{email}>", True, "unresolved_team")
+        jira_id = (jira_user or {}).get("id")
+        label = f"{jira_id} <{email}> {resolved_display_name}" if jira_id else f"{resolved_display_name} <{email}>"
+        return (label, True, "unresolved_team")
 
     # 캐시/Jira 모두 미매칭 — 사내 도메인이지만 이 사람의 실존 자체를 확인할 수 없음(퇴사 가능성 포함)
     fallback_display = name or email.split("@")[0]
