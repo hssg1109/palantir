@@ -13,6 +13,8 @@ audit_utils.py — 진단 이력 누적 · Audit Log 관리 유틸리티
                                              [--review-note <note>]
                                              [--auditor-questions <json_list>]
                                              [--code-analysis <summary>]
+                                             [--decided-by human|auto|rule] [--auto-confidence high|low|none]
+                                             [--precedent-finding-ids <json_list>]
   python3 tools/audit_utils.py end-session  --session-id <sid> --정탐 N --오탐 N --스킵 N
   python3 tools/audit_utils.py log-report   --repo <repo> --run-id <run_id>
                                              --report-path <path> [--confluence-url <url>]
@@ -143,6 +145,9 @@ def log_finding_review(
     review_note:         str = "",
     auditor_questions:   list[str] | None = None,
     code_analysis:       str = "",
+    decided_by:          str = "human",        # "human" | "auto" | "rule"
+    auto_confidence:     str | None = None,     # "high" | "low" | "none" (decided_by != "human"일 때만)
+    precedent_finding_ids: list[str] | None = None,  # ["<repo>/<finding_id>", ...]
 ) -> None:
     severity_changed = (
         severity_before is not None
@@ -175,6 +180,9 @@ def log_finding_review(
             "code_analysis_performed": bool(code_analysis),
             "code_analysis_summary":   code_analysis,
             "review_note":             review_note,
+            "decided_by":              decided_by,
+            "auto_confidence":         auto_confidence,
+            "precedent_finding_ids":   precedent_finding_ids or [],
         },
     }
     append_audit_log(entry)
@@ -603,6 +611,7 @@ def _cli_init_session(args: argparse.Namespace) -> None:
 
 def _cli_log_review(args: argparse.Namespace) -> None:
     questions = json.loads(args.auditor_questions) if args.auditor_questions else []
+    precedents = json.loads(args.precedent_finding_ids) if args.precedent_finding_ids else []
     log_finding_review(
         session_id=args.session_id,
         repo=args.repo,
@@ -619,8 +628,11 @@ def _cli_log_review(args: argparse.Namespace) -> None:
         review_note=args.review_note or "",
         auditor_questions=questions,
         code_analysis=args.code_analysis or "",
+        decided_by=args.decided_by,
+        auto_confidence=args.auto_confidence,
+        precedent_finding_ids=precedents,
     )
-    print(f"[audit] logged: {args.finding_id} → {args.decision}")
+    print(f"[audit] logged: {args.finding_id} → {args.decision} (decided_by={args.decided_by})")
 
 
 def _cli_end_session(args: argparse.Namespace) -> None:
@@ -692,6 +704,9 @@ def _build_parser() -> argparse.ArgumentParser:
     s.add_argument("--review-note",       default="")
     s.add_argument("--auditor-questions", default=None, help="JSON array string")
     s.add_argument("--code-analysis",     default="")
+    s.add_argument("--decided-by",        default="human", choices=["human", "auto", "rule"])
+    s.add_argument("--auto-confidence",   default=None, choices=["high", "low", "none"])
+    s.add_argument("--precedent-finding-ids", default=None, help='JSON array string, e.g. \'["repo/FID"]\'')
     s.set_defaults(func=_cli_log_review)
 
     # end-session
