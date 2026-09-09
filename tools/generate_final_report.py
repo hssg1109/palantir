@@ -37,20 +37,22 @@ STATE_DIR      = PALANTIR_DIR / "state"
 LOGS_DIR       = PALANTIR_DIR / "logs"
 TESTBED_DIR    = PALANTIR_DIR / "testbed"
 DOCS_DIR       = PALANTIR_DIR / "docs"
-GATEWAY_DIR    = PALANTIR_DIR.parent / "palantir-jira-gateway"
 
 
 def _vision_lookup(bb_project: str, repo: str) -> dict | None:
-    """gateway가 pending 티켓 생성 시 쓰는 Vision 조회 경로를 그대로 재사용.
+    """tools/vision_status_db.py 캐시(state/vision_repo_status.json) 경유 조회.
 
-    gateway 레포가 없거나 조회 실패 시 None — 호출부가 기존 커밋 이력 기반
-    담당자로 fallback해야 한다."""
+    캐시 hit면 라이브 API 왕복 없이 즉시 반환(보고서 생성 속도 개선). miss면
+    refresh_if_missing=True라 gateway vision_api.lookup()을 한 번 호출해 캐시에
+    저장 — 다음부터는 캐시로 처리됨. 반환 dict 형태(assignee_id/assignee/...)는
+    기존과 동일. gateway 레포가 없거나 조회 실패 시 None — 호출부가 기존 커밋
+    이력 기반 담당자로 fallback해야 한다."""
     if not bb_project or bb_project == "—":
         return None
     try:
-        sys.path.insert(0, str(GATEWAY_DIR / "lambda"))
-        from vision_api import lookup
-        return lookup(bb_project, repo)
+        sys.path.insert(0, str(PALANTIR_DIR / "tools"))
+        import vision_status_db
+        return vision_status_db.get(bb_project, repo, refresh_if_missing=True)
     except Exception:
         return None
 
@@ -90,10 +92,11 @@ SKILL_LABEL = {
     "xss":       "XSS",
     "file":      "파일 처리",
     "data":      "데이터 보호",
+    "php":       "PHP (레거시)",
     "sca":       "SCA (오픈소스 CVE)",
 }
 # 2.2 요약표 · 3 취약점 상세 공통 정렬 순서 (depth1)
-SKILL_ORDER = ["injection", "xss", "file", "data", "auth", "sca"]
+SKILL_ORDER = ["injection", "xss", "file", "data", "auth", "php", "sca"]
 
 DISCLAIMER = """본 보고서는 palantir 진단 도구를 통한 소스코드 정적 분석(SAST) 결과이며, 보안 진단 인력이 결과를 직접 검토하였습니다.
 정적 분석(SAST) 도구의 특성상, 인증/결제 로직의 결함이나 시스템 아키텍처 구조에 기인한 심층적인 취약점은 현재 보고서에 반영되지 않았으며, 해당 영역은 추후 별도의 동적 진단(DAST) 또는 아키텍처 리뷰를 통해 리포팅될 예정입니다.
@@ -390,7 +393,10 @@ def _location_cells(f: dict, omit_cve: bool = False) -> tuple[str, str, str]:
             af = (_sm.rstrip("/") + "/" + _sf) if _sm else _sf
     if not af:
         af = _ev_d.get("file", "")
-    line    = scope.get("affected_line") or scope.get("line") or _ev_d.get("lines", "")
+    if not af:
+        # scope 자체가 없는 finding (예: DATA 스캔 일부): 최상위 file/line 필드로 폴백
+        af = f.get("file", "")
+    line    = scope.get("affected_line") or scope.get("line") or _ev_d.get("lines", "") or f.get("line", "")
     pkg     = scope.get("package") or ""
 
     if pkg:
