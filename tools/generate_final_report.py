@@ -1186,6 +1186,9 @@ def main() -> int:
     parser.add_argument("--allow-missing-meta", action="store_true",
                         help="레포 메타데이터(Bitbucket 프로젝트/브랜치/커밋/담당자) 누락 상태로도 "
                              "--publish 강행 (기본: 누락 시 게시 차단)")
+    parser.add_argument("--force-publish", action="store_true",
+                        help="publish_confluence.py의 row 축소(데이터 유실 의심) 가드를 우회 "
+                             "(finding 오탐/제외 처리로 인한 의도된 축소일 때만 사용)")
     args = parser.parse_args()
 
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1291,6 +1294,8 @@ def main() -> int:
             cmd += ["--parent", str(parent)]
         if existing_page_id:
             cmd += ["--page-id", str(existing_page_id)]
+        if args.force_publish:
+            cmd += ["--force"]
         pub = subprocess.run(cmd, cwd=str(PALANTIR_DIR))
         if pub.returncode != 0:
             print(f"\n[ERROR] Confluence 게시 실패 (returncode={pub.returncode}) — "
