@@ -28,12 +28,83 @@ approve_report.py — /sec-review 완료 후 최종 보고서 생성 및 Conflue
 
 import argparse
 import json
+import re
 import subprocess
 import sys
+import urllib.parse
+from datetime import datetime as _dt
 from pathlib import Path
 
 PALANTIR_DIR = Path(__file__).resolve().parent.parent
 STATE_DIR    = PALANTIR_DIR / "state"
+
+# clone_repo의 PowerShell relay + BB 환경변수 재사용 (WSL → Bitbucket 직접 접근 불가)
+sys.path.insert(0, str(PALANTIR_DIR / "tools"))
+try:
+    from clone_repo import _bb_get_json_via_powershell, BITBUCKET_BASE_URL, CUSTOMER_BB_TOKEN  # noqa: E402
+    _BB_AVAILABLE = bool(CUSTOMER_BB_TOKEN)
+except Exception:
+    _BB_AVAILABLE = False
+
+
+def _top_committers(bb_project: str, repo: str, months: int = 6, top_n: int = 3) -> list[str]:
+    """Bitbucket API로 최근 months개월 최다 커밋자 top_n명 Jira ID(email prefix) 반환.
+
+    실패 또는 BB 접근 불가 시 빈 리스트 반환 (nonfatal).
+    """
+    if not _BB_AVAILABLE or not bb_project or not repo:
+        return []
+    counts: dict = {}
+    prefixes: dict = {}
+    start = 0
+    limit = 100
+    MAX_PAGES = 20
+    anchor_ts = None
+    cutoff_ms = None
+    try:
+        for _ in range(MAX_PAGES):
+            params = urllib.parse.urlencode({"start": start, "limit": limit})
+            api_url = (
+                f"{BITBUCKET_BASE_URL}/rest/api/1.0/projects/{bb_project}"
+                f"/repos/{repo}/commits?{params}"
+            )
+            data = _bb_get_json_via_powershell(api_url)
+            if not data:
+                break
+            values = data.get("values", [])
+            if anchor_ts is None and values:
+                anchor_ts = values[0].get("authorTimestamp") or int(_dt.now().timestamp() * 1000)
+                cutoff_ms = anchor_ts - (30 * months * 24 * 60 * 60 * 1000)
+            reached_cutoff = False
+            for commit in values:
+                ts = commit.get("authorTimestamp") or 0
+                if cutoff_ms is not None and ts < cutoff_ms:
+                    reached_cutoff = True
+                    break
+                author = commit.get("author", {})
+                email  = (author.get("emailAddress") or "").strip()
+                # GitHub no-reply 주소(\d+\+name@users.noreply.github.com) 제외
+                if email and re.search(r'^\d+\+.+@users\.noreply\.github\.com$', email):
+                    continue
+                key    = email or (author.get("name") or "").strip()
+                if not key:
+                    continue
+                counts[key] = counts.get(key, 0) + 1
+                if email and "@" in email:
+                    prefixes[key] = email.split("@")[0]
+                else:
+                    prefixes[key] = key
+            if reached_cutoff or data.get("isLastPage", True):
+                break
+            start = data.get("nextPageStart", start + limit)
+        if not counts:
+            return []
+        sorted_keys = sorted(counts, key=lambda k: counts[k], reverse=True)
+        return [prefixes[k] for k in sorted_keys[:top_n] if prefixes.get(k)]
+    except Exception as exc:
+        print(f"[WARN] BB top_committers 조회 실패: {exc}")
+        return []
+
 
 def _lookup_bb_project(repo: str) -> str:
     """clone 시점에 저장된 state/<repo>/repo_meta.json에서 Bitbucket 프로젝트 키 조회."""
@@ -124,7 +195,7 @@ def apply_review_results(repo: str, run_id: str | None, skip_sca: bool = False) 
         print(f"[WARN] findings 없음: state/{pattern}")
         return {"updated": 0, "skipped": 0, "total_findings": 0}
 
-    counts = {"updated": 0, "skipped": 0, "total_findings": 0}
+    counts = {"updated": 0, "skipped": 0, "total_findings": 0, "severity_floored": 0}
 
     for path in paths:
         try:
@@ -163,6 +234,23 @@ def apply_review_results(repo: str, run_id: str | None, skip_sca: bool = False) 
                         f["result"] = review_result
                         modified = True
                         counts["updated"] += 1
+
+                # feedback_severity_reporting_policy.md 최저기준 강제(결정론적 백스톱):
+                # 정탐+정보성 결과인데 severity가 Low/Informational로 남아 있으면 Medium으로 상향.
+                # /sec-review LLM 판정이 "severity == Informational" 문자열만 체크하고
+                # Low를 놓치는 사례(locker-webview-front XSS-004, 2026-09-04)가 실제로 발생해 추가.
+                if review_status == "정탐" and f.get("result") == "정보" and f.get("severity") in ("Low", "Informational"):
+                    prev_severity = f["severity"]
+                    f["severity"] = "Medium"
+                    if "risk_level" in f:
+                        f["risk_level"] = 3  # SEVERITY_TO_RISK["Medium"] (validate_findings.py 기준)
+                    note = f.get("review_note", "") or ""
+                    floor_msg = f"[SEVERITY-FLOOR] 위험도 {prev_severity} → Medium 조정 (정보성 정탐 결과는 feedback_severity_reporting_policy.md 기준 최소 Medium)"
+                    f["review_note"] = f"{floor_msg}\n\n{note}" if note else floor_msg
+                    modified = True
+                    counts["updated"] += 1
+                    counts["severity_floored"] += 1
+
                 counts["skipped"] += 1
 
             # 최종 result 기준으로 보고서에 포함될 건수 집계
@@ -268,15 +356,21 @@ def _send_to_jira_gateway(
     # system_code_to_repo 에서 Bitbucket 프로젝트 키 조회 (vision API용)
     bb_project = _lookup_bb_project(repo)
 
+    # BB API로 최근 6개월 최다 커밋자 top-3 (watcher 후보)
+    committers = _top_committers(bb_project, repo, months=6, top_n=3)
+    if committers:
+        print(f"      BB 커밋 기반 담당자 후보: {committers}")
+
     try:
         import urllib.request, urllib.error
         payload = json.dumps({
-            "repo":               repo,
-            "page_id":            page_id or "",
-            "md_text":            md_text,
-            "jira_project":       jira_project,
-            "review_notes":       review_notes or [],
-            "bitbucket_project":  bb_project,
+            "repo":                 repo,
+            "page_id":              page_id or "",
+            "md_text":              md_text,
+            "jira_project":         jira_project,
+            "review_notes":         review_notes or [],
+            "bitbucket_project":    bb_project,
+            "suggested_committers": committers,
         }, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             f"{gateway_url.rstrip('/')}/api/pending",
@@ -355,6 +449,8 @@ def main() -> int:
     print("\n[1/4] 오탐 판정 적용 중...")
     stats = apply_review_results(args.repo, run_id, skip_sca=skip_sca)
     print(f"      전체 {stats['total_findings']}건  /  오탐→양호: {stats['updated']}건  /  유지: {stats['skipped']}건")
+    if stats.get("severity_floored"):
+        print(f"      [SEVERITY-FLOOR] 정보성 정탐 위험도 하한 미달 → Medium 상향: {stats['severity_floored']}건")
 
     # 2. final 1차 보고서 생성 + palantir-reports 커밋
     print("\n[2/4] final 1차 보고서 생성...")
