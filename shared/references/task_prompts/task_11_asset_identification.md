@@ -83,9 +83,37 @@ find testbed/<project>/ -maxdepth 2 -name "build.gradle" | grep -v "^testbed/<pr
 
 #### 1-5. PHP / 미지원 언어 판정
 
-PHP 파일이 주 언어인 경우:
-→ `skills/sec-audit-static/references/unsupported_lang_targets.md` 확인
-→ Auto-Scan Phase skip, 해당 없음으로 기록
+PHP 파일이 주 언어인 경우 (단, `/sec-scan-php` 실행 시에는 이 분기 대신
+`sec-scan-php/references/task_prompts/task_php_asset_identification.md` 절차를 따른다):
+
+**1) idempotency 체크** — `/sec-scan-php`가 이미 이 레포에 대해 실행되었는지 먼저 확인한다:
+
+```bash
+ls state/<repo>/php/*/findings_php.json 2>/dev/null | sort | tail -1
+```
+
+- 파일이 존재하고 그 안의 finding 중 하나 이상이 `llm_checked: true`이면
+  → 이미 `/sec-scan-php`로 진단 완료된 것으로 간주, **재실행하지 않는다** (아래 3번으로).
+- 파일이 없으면 → 아래 2번 실행.
+
+**2) 미실행 상태면 `/sec-scan-php`를 인라인으로 위임 실행** (자율 완주, 확인 질문 없이):
+
+`sec-scan-php/SKILL.md` 전체를 읽고, 그 안의 Step 1(참조 로드) → Phase 1
+(`task_php_asset_identification.md`) → Auto-Scan(`task_php_baseline.md`,
+`scan_php_baseline.py`) → LLM-Check(`task_php_llm_review.md`) → Step 3/4를 현재
+세션에서 그대로 따라 자율 완주한다. `testbed/<repo>`는 현재 실행 중인 skill이 이미
+그 레포를 대상으로 시작했으므로 재-clone하지 않는다. 완료 후
+`state/<repo>/php/<RUN_ID>/findings_php.json`이 생성된다.
+
+**3) 현재 skill의 Phase 1 출력** — 위임 실행 여부와 무관하게 기존과 동일하게
+`unsupported_lang: true`로 기록하고, 이 skill 자신의 Auto-Scan/LLM-Check는 그대로
+skip한다. `findings[].note`(또는 자유 필드)에 아래처럼 위임 상태를 남긴다:
+
+- 방금 위임 실행함 → `"PHP — /sec-scan-php로 위임 실행 완료 (state/<repo>/php/<RUN_ID>/findings_php.json)"`
+- 이미 실행되어 있었음 → `"PHP — /sec-scan-php로 이미 진단 완료, 이 skill 해당없음"`
+
+**4) 다중 레포 처리** — `$ARGUMENTS`에 레포가 여러 개면 이 판단은 레포 단위로 독립
+적용한다 (한 레포가 PHP라고 다른 레포까지 이 분기를 타지 않는다).
 
 ---
 

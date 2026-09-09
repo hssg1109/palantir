@@ -17,6 +17,7 @@
 | OS Command 인젝션 (내부값·설정값·Dead Code) | `OS Command Injection` | `CWE-78` | `A03:2021 Injection` | `Medium` | `file` |
 | SSI 인젝션 (`<!--#exec`, `<!--#include`) | `SSI Injection` | `CWE-97` | `A03:2021 Injection` | `Critical` | `file` |
 | 서버사이드 템플릿 인젝션 (SSTI — SpEL/FreeMarker/Thymeleaf) | `SSTI` | `CWE-94` | `A03:2021 Injection` | `Critical` | `endpoint` |
+| 코드 인젝션 (PHP `eval()`/`assert()`/`create_function()` 등 동적 코드 실행) | `코드 인젝션` | `CWE-95` | `A03:2021 Injection` | `Critical` | `file` |
 
 ### category 표준값 결정 규칙
 
@@ -24,6 +25,7 @@
 - `OS Command Injection` — `Runtime.exec`, `ProcessBuilder`, `child_process.exec/spawn`, `os.system` 등 OS 명령 실행 패턴 전체.
 - `SSI Injection` — SSI 디렉티브(`<!--#exec`, `<!--#include`, `<!--#echo`) 직접 삽입.
 - `SSTI` — SpEL parseExpression(), FreeMarker/Thymeleaf에 사용자 입력 문자열이 템플릿 변수로 전달되는 경우.
+- `코드 인젝션` — `eval()`, `assert()`(PHP 문자열 인자 버전), `create_function()`, `preg_replace()`의 `/e` modifier 등 문자열을 코드로 실행하는 함수에 사용자 입력이 도달하는 경우 (`sec-scan-php` 전용, SQL/OS Command/SSTI 어디에도 속하지 않는 동적 코드 실행).
 
 > **❌ 금지 category 값 예시**: `Injection / OS Command (Stored RCE Pattern)`, `SQL Injection` (영문),
 > `injection`, `SQL인젝션(잠재)`, `OS 명령 실행`, `Command Injection` — 위 표준값 이외 사용 금지
