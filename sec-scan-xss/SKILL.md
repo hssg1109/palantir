@@ -68,7 +68,7 @@ testbed/ 에 소스코드가 없으면 **위 명령을 직접 실행하고 clone
 **Phase 1 — 자산 식별 (Asset Identification)**
 - `shared/references/task_prompts/task_11_asset_identification.md` 절차 실행
 - frontend/backend 판별, 언어/프레임워크 확인, 템플릿 엔진(Thymeleaf/JSP/React 등) 식별
-- PHP 등 미지원 언어이면 Auto-Scan Phase skip 후 기록
+- PHP 등 미지원 언어이면 `task_11_asset_identification.md` §1-5에 따라 `/sec-scan-php`로 위임 실행(최초 1회, idempotent) 후 이 skill의 Auto-Scan Phase는 skip 후 기록
 - **프론트엔드 레포 판별 시** → [프론트엔드 LLM 심층진단 Phase](#frontend-llm-check) 로 분기 (Auto-Scan Phase skip)
 
 **Auto-Scan Phase — XSS 정적 분석 (Python 스크립트, 백엔드 전용)**
@@ -506,7 +506,45 @@ testbed 삭제 + Confluence 등록은 `/sec-review` 완료 시 Phase C-2에서 �
   [다음] /sec-review 완료 시 testbed 삭제 + Confluence 레지스트리 등록 수행
 ```
 
-Phase C-1 완료 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
+### Step C-1b: 전사 진단현황 위키 갱신 (필수 — 매 skill 완료마다)
+
+> **정책**: 야간 배치뿐 아니라 주간 인터랙티브 세션에서 `/sec-scan-*`를 실행한 경우도 예외
+> 없이 이 단계를 수행한다. 두 스크립트 모두 `state/`(및 `docs/ocb_scan_plan.md` 체크리스트)를
+> 다시 읽어 재계산하는 읽기 전용 집계이므로 `/sec-review` 판정 완료 여부와 무관하게 즉시
+> 실행 가능하다 (2026-09-08 ONEIDPASS 배치 후 위키 미갱신 사고 재발 방지, 2026-09-08 재수정 —
+> 최초 버전이 실제 정책상 추적 페이지가 아닌 부차적 집계 페이지만 갱신하던 오류 수정).
+
+> **⚠️ 두 페이지 모두 갱신 필수 — 하나만 갱신하면 안 됨**:
+> - `docs/ocb_scan_plan.md` → Confluence pageId `750459063` — **실제 진단현황 갱신·추적이
+>   진행되는 정책상 원본(authoritative) 페이지**. `update_ocb_plan.py --auto`가 `state/`를
+>   스캔해 레포별 skill 체크리스트(❌→✅)를 갱신하고 곧바로 이 페이지에 동기화한다.
+> - `docs/system_code_scan_status.md` → Confluence pageId `771074589` — 전사 297개
+>   시스템코드 단위의 더 넓은 집계 뷰. `750459063`의 체크리스트를 우선(sticky) 참조하므로
+>   반드시 **`update_ocb_plan.py --auto`를 먼저 실행한 뒤** 재생성해야 최신 상태가 반영된다.
+
+**수행 (반드시 이 순서로)**:
+
+```bash
+python3 tools/update_ocb_plan.py --auto
+python3 tools/build_system_code_scan_status.py
+python3 tools/publish_confluence.py docs/system_code_scan_status.md
+```
+
+- 1번째 명령은 `docs/ocb_scan_plan.md`에 해당 레포 행이 있을 때만 체크리스트를 갱신하고
+  `750459063`에 자동 동기화한다(레포가 체크리스트에 없으면 이 부분은 조용히 no-op).
+- 3번째 명령은 `docs/.confluence_pages.json`에 등록된 기존 page_id(`771074589`)로 자동
+  갱신한다 (최초 게시가 아니라면 `--parent`/`--title` 불필요).
+- Confluence 접근 실패(네트워크/토큰) 시 → 에러 원문을 출력하고 계속 진행(blocking 아님).
+  단, 실패 원인이 `.env`의 `CONFLUENCE_TOKEN` 누락처럼 사람만 해결 가능한 경우는 보고 후 대기.
+
+**완료 출력**:
+```
+[Step C-1b] 전사 진단현황 위키 갱신 완료
+  체크리스트 : docs/ocb_scan_plan.md → pageId 750459063
+  전사집계   : docs/system_code_scan_status.md → pageId 771074589
+```
+
+Step C-1b 완료 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
 
 ## Resources
 
