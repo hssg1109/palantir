@@ -316,6 +316,9 @@ def main() -> int:
                         help="SCA(오픈소스 CVE) findings를 보고서·Jira 티켓에서 제외 (기본: 제외)")
     parser.add_argument("--include-sca", action="store_true",
                         help="SCA findings를 보고서에 포함 (--skip-sca 기본값 override)")
+    parser.add_argument("--force-publish", action="store_true",
+                        help="generate_final_report.py의 row 축소(데이터 유실 의심) 가드를 우회 "
+                             "(finding 오탐/제외 처리로 인한 의도된 축소일 때만 사용)")
     args = parser.parse_args()
 
     run_id   = args.run_id
@@ -419,6 +422,8 @@ def main() -> int:
                 cmd += ["--parent", str(args.parent)]
             if skip_sca:
                 cmd += ["--skip-sca"]
+            if args.force_publish:
+                cmd += ["--force-publish"]
             r = _run(cmd)
             if r.returncode != 0:
                 print(f"[ERROR] generate_final_report.py 실패 (returncode={r.returncode})")
