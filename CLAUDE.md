@@ -35,6 +35,18 @@ Claude Code 보안 진단 모듈 모음 — 취약점 유형별 독립 실행 �
 이미 확정된 판정 결과를 기계적으로 반영하는 후속 처리이므로, 자율 완주 규칙의 정상 적용 대상으로
 취급한다. 상세 절차는 `.claude/commands/sec-review.md` §5e/§6 참조.
 
+**예외 (2026-09-03, 사용자 명시적 지시)**: 5개 `/sec-scan-*`(injection/xss/file/data/
+auth)는 Phase 1 자산식별(`task_11_asset_identification.md` §1-5)에서 대상 레포가
+PHP로 판별되면, `/sec-scan-php`가 해당 레포에 대해 아직 실행되지 않은 경우
+(`state/<repo>/php/*/findings_php.json` 부재로 판단) 그 전체 절차(Phase1→Auto-Scan→
+LLM-Check)를 인라인으로 자율 완주 실행한다. 이는 "한 skill이 자기 작업을 끝내고 다음
+skill로 자동 이행"하는 것이 아니라, "해당 skill이 애초에 이 언어를 진단할 수단이 없어
+(언어 미지원) 실제로 그 언어를 다루는 유일한 skill로 위임하는 것"이므로 일반 규칙과
+성격이 다르다. 이미 `/sec-scan-php` 실행 결과가 있으면 재실행하지 않는다(idempotent).
+이 예외는 PHP 위임에만 적용되며, 5개 skill 간 서로를 자동 연쇄 호출하는 것을 허용하지
+않는다. 상세 절차는 `shared/references/task_prompts/task_11_asset_identification.md`
+§1-5 참조.
+
 ### 2. Context Compaction 후 자동 재개 금지
 
 Auto-compact에 의해 새 세션이 시작된 경우, compaction summary의 "Pending Tasks" 또는 "Optional Next Step"을 자동 실행하지 않는다.
@@ -65,6 +77,7 @@ palantir/
 ├── sec-scan-file/           # File Upload / Download / LFI / RFI
 ├── sec-scan-data/           # CORS / Secrets / JWT / Cryptography / PII Logging
 ├── sec-scan-auth/           # 인증/인가/어뷰징 (Auth Bypass / IDOR / Mass Assignment / Rate Limit)
+├── sec-scan-php/            # 레거시 PHP (라우터 없음, LLM 체크리스트 기반 전량 수동진단)
 └── sec-scan-sca/            # 오픈소스 라이브러리 CVE (Gradle / npm)
 ```
 
@@ -77,6 +90,7 @@ palantir/
 | `/sec-scan-file` | 파일 처리 취약점 (Upload/Download/LFI/RFI) | `shared/scripts/scan_file_processing.py` |
 | `/sec-scan-data` | 데이터 보호 (CORS/Secrets/JWT/Crypto/PII) | `shared/scripts/scan_data_protection.py` |
 | `/sec-scan-auth` | 인증/인가/어뷰징 (Auth Bypass/IDOR/Mass Assignment/Rate Limit/멱등성) | `shared/scripts/scan_auth_baseline.py` (판정 없는 후보 태깅, 최종 판정은 LLM-Check 전담) |
+| `/sec-scan-php` | 레거시 PHP 8종 (SQLi/OS Command/LFI-RFI/XSS/Hardcoded Secret/Weak Crypto/Path Traversal/Eval) | `shared/scripts/scan_php_baseline.py` (판정 없는 후보 태깅, 최종 판정은 LLM-Check 전담 — 정적분석기 없음) |
 | `/sec-scan-sca` | 오픈소스 CVE 취약점 | `shared/scripts/scan_sca_gradle_tree.py` |
 
 ## Quick Start — 단일 레포 진단 절차
