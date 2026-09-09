@@ -46,7 +46,7 @@ VALID_SKILLS  = ["injection", "xss", "file", "data", "sca"]
 
 # skill → findings 파일명 매핑 (신버전 우선, 구버전 소문자 fallback)
 SKILL_FINDINGS = {
-    "injection": ["findings_INJ.json",  "findings_injection.json"],
+    "injection": ["findings_INJ.json",  "findings_injection.json", "findings_INJECTION.json"],
     "xss":       ["findings_XSS.json",  "findings_xss.json"],
     "file":      ["findings_FILE.json", "findings_file.json"],
     "data":      ["findings_DATA.json", "findings_data.json"],

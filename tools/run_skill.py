@@ -946,6 +946,14 @@ def run_llm_check_claude_cli(skill: str, src: str, prefix: str,
     print(f"  토큰 예산: ${max_budget_usd:.2f} / skill (초과 시 자동 중단)")
     _sep()
 
+    # 이전 시도의 실패 마커 정리 — 지우지 않으면 이번 시도가 성공해도 main()의
+    # 사후 체크(exists()만 확인)가 과거 마커를 보고 거짓 실패로 오판한다.
+    # (2026-09-04 ocb-cashbag-mall 재시도 시 확인: findings 정상 생성+비용 청구
+    #  됐음에도 전날 23:26 rate_limit 마커가 남아있어 exit 1 처리됨)
+    stale_marker = PALANTIR_DIR / prefix / "llm_check_failed.json"
+    if stale_marker.exists():
+        stale_marker.unlink()
+
     system_prompt = _build_claude_cli_system_prompt(skill, batch=batch)
     task_prompt   = build_claude_cli_task_prompt(skill, src, prefix)
 
