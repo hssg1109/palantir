@@ -183,10 +183,10 @@ _SCA2_RE = re.compile(
     re.IGNORECASE,
 )
 _SEV_SUFFIX_RE = re.compile(
-    r'\s*[—\-–]\s*(Critical|High|Medium|Low|Informational)\b.*$',
+    r'\s+[—\-–]\s*(Critical|High|Medium|Low|Informational)\b.*$',
     re.IGNORECASE,
 )
-_COUNT_DASH_RE = re.compile(r'\s*[—\-–]\s*\d+[건개].*$')
+_COUNT_DASH_RE = re.compile(r'\s+[—\-–]\s*\d+[건개].*$')
 _TRAILING_COUNT_RE = re.compile(r'\s+\d+[건개]\s*$')
 _TRAILING_TECH_PAREN_RE = re.compile(
     r'\s*\((?:'
@@ -196,12 +196,24 @@ _TRAILING_TECH_PAREN_RE = re.compile(
     r')\)\s*$'
 )
 _TECH_DASH_RE = re.compile(
-    r'\s*[—\-–]\s*[^—\-–]*(?:문자열\s*보간|StandardEvaluation|getOriginalFilename|\.kt\b|\.java\b)[^—\-–]*$'
+    r'\s+[—\-–]\s*[^—\-–]*(?:문자열\s*보간|StandardEvaluation|getOriginalFilename|\.kt\b|\.java\b)[^—\-–]*$'
 )
+
+
+# 재발방지(2026-09-11, oip_front DATA-LOG-MODIFY-001 "hand-written toString()..." →
+# "hand"로 잘려 보고서에 노출된 사고): _SEV_SUFFIX_RE/_COUNT_DASH_RE/_TECH_DASH_RE는
+# "— 상세내용" 구분자를 찾아 그 뒤를 통째로 잘라내는데, "hand-written"처럼 공백 없이
+# 단어에 바로 붙은 하이픈(—/-/–)을 그 구분자로 오인하면 단어 중간이 잘려나간다.
+# (괄호 suffix 제거 — 예: "Dto.mdn(전화번호/CI)" → "Dto.mdn" — 는 괄호 자체가
+# self-delimiting이라 공백 유무와 무관하게 정상 동작이므로 이 가드 대상이 아니다.)
+# 절단 지점 바로 그 문자가 대시이면서 바로 앞 문자가 공백이 아닌 경우만 이상 징후로
+# 판단해(원인 정규식이 무엇이든) 정제를 취소하고 원본 제목을 그대로 사용한다.
+TITLE_CLEAN_ANOMALIES: list[tuple[str, str]] = []
 
 
 def _clean_title(title: str) -> str:
     """제목 정규화: SCA 재포맷, verbose suffix 제거."""
+    original = title
     # SCA format 1: "SCA/CVE — artifact ver {vuln...}"
     m = _SCA1_RE.match(title)
     if m:
@@ -230,7 +242,17 @@ def _clean_title(title: str) -> str:
     title = _TRAILING_COUNT_RE.sub('', title)
     title = _TECH_DASH_RE.sub('', title)
     title = _TRAILING_TECH_PAREN_RE.sub('', title)
-    return title.strip()
+    cleaned = title.strip()
+
+    orig_stripped = original.strip()
+    if len(cleaned) < len(orig_stripped) and orig_stripped.startswith(cleaned):
+        cut_idx = len(cleaned)
+        cut_char = orig_stripped[cut_idx] if cut_idx < len(orig_stripped) else ""
+        prev_char = orig_stripped[cut_idx - 1] if cut_idx > 0 else ""
+        if cut_char in "—-–" and prev_char and not prev_char.isspace():
+            TITLE_CLEAN_ANOMALIES.append((orig_stripped, cleaned))
+            return orig_stripped
+    return cleaned
 
 
 # ── 데이터 수집 ───────────────────────────────────────────────────────────────
@@ -406,6 +428,22 @@ def _location_cells(f: dict, omit_cve: bool = False) -> tuple[str, str, str]:
         if not omit_cve and cve:
             af_str += f" ({cve})"
         return ("—", af_str, "—")
+
+    if not af:
+        # 병합 finding(instance_count>1 등): scope에 대표 파일이 없는 경우
+        # affected_locations 배열에서 첫 항목을 대표 위치로 뽑아
+        # "N개 파일(대표파일 외 N-1)" 형태로 표기한다. 파일별 상세 내역은
+        # report_expand의 "노출 위치 상세" 표에서 별도로 확인 가능하므로 유실되지 않는다.
+        aff_locs = f.get("affected_locations") or []
+        if isinstance(aff_locs, list) and aff_locs:
+            rep_path, _, rep_line = str(aff_locs[0]).rpartition(":")
+            if not rep_path:
+                rep_path, rep_line = rep_line, ""
+            rep_path = _to_relative_path(rep_path)
+            rep_str = f"{rep_path}:{rep_line}" if rep_line else rep_path
+            n = len(aff_locs)
+            af_str = f"{n}개 파일({rep_str} 외 {n - 1})" if n > 1 else rep_str
+            return (ep or "—", af_str, handler or "—")
 
     af = _to_relative_path(af)
     af_str = f"{af}:{line}" if af and line else af or "—"
@@ -1232,6 +1270,12 @@ def main() -> int:
     md = render_markdown(run_id_label, args.repo, data, clone_info)
     out_path.write_text(md, encoding="utf-8")
     print(f"[최종보고서] 저장 완료: {out_path}")
+
+    if TITLE_CLEAN_ANOMALIES:
+        print(f"\n[TITLE-CHECK][WARN] 제목 정제 중 단어 중간 절단 감지 {len(TITLE_CLEAN_ANOMALIES)}건 — "
+              f"원본 제목으로 자동 복원됨(보고서 유실 없음). 정규식 재점검 권장:")
+        for orig, cleaned in TITLE_CLEAN_ANOMALIES:
+            print(f"  - \"{cleaned}\" (절단됨) ← 원본: \"{orig}\"")
 
     if args.publish:
         # [GATE] Confluence 게시 직전 최종 방어선 — _sanitize_secret_expand()가 놓친
