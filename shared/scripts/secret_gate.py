@@ -13,6 +13,19 @@ palantir 파이프라인 내 시크릿 노출 방어의 단일 소스(single sou
 
 2026-08-07 ocb-nft-batch AWS Access Key ID 노출 사고, 2026-08-18 17개 레포
 findings_DATA.json 자격증명 원문 노출 + Confluence 라이브 게시 사고 재발방지용.
+
+2026-09-15 ocb_game_biz_matgo / ocb_game_biz_matgo_php_real "SSH Private Key"
+노출 사고: 실제 키 본문(base64)은 처음부터 정상 마스킹(`***REDACTED***`)되어
+있었으나, PEM 헤더/푸터(`-----BEGIN ... PRIVATE KEY-----` 등) 리터럴 문자열이
+그대로 남아 palantir_result(Bitbucket) 자체 DLP가 이를 독자적으로 탐지해
+알림을 발생시켰다. 2026-09-14 이 사고 조사 중 임시로 "본문이 이미 REDACTED면
+헤더만으로는 통과"시키는 negative lookahead를 추가했었으나, 이는 우리 내부
+리스크만 고려한 것이고 업로드 대상(Bitbucket)이 헤더 텍스트만으로도 자체
+DLP를 발동시킨다는 점을 놓친 잘못된 완화였다 — 되돌리고, 대신 PEM 블록
+전체(BEGIN~END)를 `mask_text()`가 헤더까지 포함해 통째로 치환하도록 바꿔
+애초에 헤더 리터럴이 결과물에 남지 않게 한다. 게이트(_VALUE_PATTERNS)는
+다시 헤더 존재만으로 무조건 차단하는 fail-safe로 복원 — 마스킹이 제대로
+됐다면 게이트에 걸릴 헤더 텍스트 자체가 남아있지 않아야 한다.
 """
 
 from __future__ import annotations
@@ -20,12 +33,28 @@ from __future__ import annotations
 import re
 
 # 값 포맷 자체로 식별 가능한 시크릿 (키 이름과 무관 — 오탐 위험이 매우 낮음)
+#
+# PEM Private Key: 헤더(-----BEGIN...-----) 존재 자체를 무조건 위반으로 본다(lookahead 없음).
+# Bitbucket 등 업로드 대상 플랫폼의 자체 DLP도 이 헤더 리터럴만으로 탐지를 발동시키므로,
+# 본문이 마스킹됐는지 여부와 무관하게 헤더가 결과물에 남아있으면 안 된다는 것이 fail-safe
+# 기준이다(2026-09-15 ocb_game_biz_matgo SSH Private Key 노출 사고). 정상 경로라면
+# mask_text()가 PEM 블록 전체(헤더~푸터)를 먼저 치환하므로 이 헤더 패턴이 이 시점에
+# 매치될 일이 없어야 한다 — 매치된다면 상류 마스킹이 실패했다는 신호로 간주해 차단한다.
 _VALUE_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("AWS Access Key ID / STS Session Key", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
     ("PEM Private Key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----")),
     ("GitHub Token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
     ("Slack Token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
 ]
+
+# PEM 키 블록 전체(헤더~푸터, 개행 포함) — mask_text()가 이 패턴을 최우선으로 치환해
+# 헤더 리터럴 자체가 결과물에 남지 않도록 한다. JSON 직렬화 시 실제 개행이 리터럴
+# "\n"(백슬래시+n)으로 나타나는 경우까지 포괄하기 위해 [\s\S]로 모든 문자를 허용하고
+# non-greedy(*?)로 첫 END 마커까지만 매치한다(여러 키 블록이 연속될 때 과매치 방지).
+_PEM_BLOCK_RE = re.compile(
+    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----[\s\S]*?"
+    r"-----END (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----"
+)
 
 # key = value / key: "value" 형태에서, 시크릿성 key 이름 뒤에 마스킹되지 않은
 # 원문 값이 남아있는지 검사. 플레이스홀더/안전 패턴으로 시작하는 값은 스킵.
@@ -287,12 +316,21 @@ def mask_text(text: str) -> tuple[str, int]:
 
     count = 0
 
+    def _mask_pem_block(m: re.Match) -> str:
+        nonlocal count
+        count += 1
+        return "[REDACTED PEM PRIVATE KEY BLOCK]"
+
+    # PEM 블록(헤더~푸터) 전체를 최우선으로 치환 — 헤더 리터럴이 결과물에 남지 않도록 한다.
+    # 이후 _VALUE_PATTERNS의 "PEM Private Key" 헤더 전용 패턴은 이 치환이 실패한
+    # 잔여분(예: END 마커 없이 헤더만 있는 손상된 스니펫)만 잡아내는 2차 방어선이 된다.
+    result = _PEM_BLOCK_RE.sub(_mask_pem_block, text)
+
     def _mask_value_pattern(m: re.Match) -> str:
         nonlocal count
         count += 1
         return "[REDACTED]"
 
-    result = text
     for _label, pattern in _VALUE_PATTERNS:
         result = pattern.sub(_mask_value_pattern, result)
 

@@ -90,7 +90,7 @@ palantir/
 | `/sec-scan-file` | 파일 처리 취약점 (Upload/Download/LFI/RFI) | `shared/scripts/scan_file_processing.py` |
 | `/sec-scan-data` | 데이터 보호 (CORS/Secrets/JWT/Crypto/PII) | `shared/scripts/scan_data_protection.py` |
 | `/sec-scan-auth` | 인증/인가/어뷰징 (Auth Bypass/IDOR/Mass Assignment/Rate Limit/멱등성) | `shared/scripts/scan_auth_baseline.py` (판정 없는 후보 태깅, 최종 판정은 LLM-Check 전담) |
-| `/sec-scan-php` | 레거시 PHP 8종 (SQLi/OS Command/LFI-RFI/XSS/Hardcoded Secret/Weak Crypto/Path Traversal/Eval) | `shared/scripts/scan_php_baseline.py` (판정 없는 후보 태깅, 최종 판정은 LLM-Check 전담 — 정적분석기 없음) |
+| `/sec-scan-php` | 레거시 PHP 9종 (SQLi/OS Command/LFI-RFI/XSS/Hardcoded Secret/Weak Crypto/Path Traversal/Eval/Insecure TLS Client) | `shared/scripts/scan_php_baseline.py` (판정 없는 후보 태깅, 최종 판정은 LLM-Check 전담 — 정적분석기 없음) |
 | `/sec-scan-sca` | 오픈소스 CVE 취약점 | `shared/scripts/scan_sca_gradle_tree.py` |
 
 ## Quick Start — 단일 레포 진단 절차

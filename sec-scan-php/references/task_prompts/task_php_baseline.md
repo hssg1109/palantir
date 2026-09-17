@@ -2,7 +2,8 @@
 
 ## 목적
 
-`scan_php_baseline.py`로 PHP 소스 디렉터리를 직접 순회하며 8종 취약 패턴 후보를 태깅한다.
+`scan_php_baseline.py`로 PHP 소스 디렉터리를 직접 순회하며 9종 취약 패턴 후보를 태깅한다
+(2026-09-16 ocb_game_biz PHP-010 추가진단으로 `INSECURE_TLS_CLIENT_CANDIDATE` 편입 — 그 전까지는 8종).
 **판정(TP/FP/category/severity)은 수행하지 않는다** — 전량 `result: "정보"`,
 `needs_review: true`로 출력하고 `task_php_llm_review.md` 절차의 LLM-Check가 전담한다.
 

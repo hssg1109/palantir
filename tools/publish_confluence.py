@@ -381,6 +381,13 @@ def publish(
     """마크다운을 Confluence에 게시/갱신. page_id 반환."""
 
     md_text  = md_path.read_text(encoding="utf-8")
+    # <!-- CONFLUENCE_PUBLISH_END --> 마커가 있으면 그 이전까지만 게시한다.
+    # 로컬 참고용 부록(작업메모/WBS 등)을 위키 페이지 본문에서 의도적으로 제외하기
+    # 위한 opt-in 절단점 — 2026-09-15 ocb_scan_plan.md 부록 섹션 오게시 사고 이후 도입.
+    marker = "<!-- CONFLUENCE_PUBLISH_END -->"
+    marker_pos = md_text.find(marker)
+    if marker_pos != -1:
+        md_text = md_text[:marker_pos]
     cf_body  = md_to_confluence(md_text)
 
     if dry_run:
@@ -494,10 +501,17 @@ def main():
         print(f"[ERROR] 파일 없음: {md_path}", file=sys.stderr)
         sys.exit(1)
 
-    title   = args.title or md_path.stem.replace("_", " ").replace("-", " ")
+    title   = args.title
     md_key  = str(md_path.relative_to(PALANTIR_DIR)) if md_path.is_absolute() else str(md_path)
     reg     = _load_registry()
     page_id = args.page_id or reg.get(md_key)
+
+    if title is None and not page_id:
+        # 신규 생성 시에만 파일명 기반 기본 제목 사용.
+        # 기존 페이지 갱신(page_id 존재)에는 적용하지 않는다 — publish()의
+        # "title=None → 기존 제목 유지" 가드가 여기서 무력화되면 사람이 직접
+        # 지정한 제목이 파일명으로 덮어써지는 사고가 발생한다(2026-09-15 확인).
+        title = md_path.stem.replace("_", " ").replace("-", " ")
 
     new_id = publish(
         md_path  = md_path,

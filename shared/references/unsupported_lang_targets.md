@@ -1,6 +1,8 @@
 # 미지원 언어 진단 대상 목록
 
 > palantir 스캐너는 Java/Kotlin을 완전 지원하며, TypeScript/JavaScript 프론트엔드는 XSS/File/Data 스캔 자동 지원 + SCA(npm) 지원.
+> Python(Django/FastAPI 등)은 4개 도메인(Injection/XSS/File/Data) 전부 자동 스캐너가 없어
+> `shared/references/python_diagnosis_criteria.md` 기준 LLM 체크리스트 기반 수동 진단으로 지원한다(2026-09-14).
 > 이 파일은 **정식 스캐너가 없어 자동 진단이 불가한 언어**와 향후 스캐너 구현 요구사항을 명세합니다.
 >
 > PHP 진단 보류 대상 repo 목록: `shared/references/project_ocb_php_targets.md` 참조.
@@ -11,8 +13,9 @@
 
 ### 현재 처리 방식
 
-정적분석기가 별도로 없어 `shared/scripts/scan_php_baseline.py`가 정규식으로 8종 후보만
-판정 없이 태깅하고(`result: "정보"`, `needs_review: true` 전량), TP/FP·category·severity
+정적분석기가 별도로 없어 `shared/scripts/scan_php_baseline.py`가 정규식으로 9종 후보만
+판정 없이 태깅하고(`result: "정보"`, `needs_review: true` 전량, 2026-09-16 `INSECURE_TLS_CLIENT_CANDIDATE`
+추가 전까지는 8종), TP/FP·category·severity
 판정은 `sec-scan-php/references/task_prompts/task_php_llm_review.md` 절차에 따라
 LLM-Check가 100% 수동으로 전담한다. 상세 아키텍처는 `sec-scan-php/SKILL.md` 참조.
 
@@ -65,6 +68,39 @@ system("ls " . $_GET['dir']);
 
 ---
 
+## Python (🟡 LLM 체크리스트 기반 지원 — `python_diagnosis_criteria.md`, 2026-09-14 신설)
+
+### 현재 처리 방식
+
+PHP와 달리 후보 태깅 스크립트(`scan_python_baseline.py` 등)조차 존재하지 않아 **전담
+위임 skill을 두지 않는다.** 대신 기존 5개 skill(`/sec-scan-injection` 등)이 Phase 1에서
+Python을 감지하면 `task_11_asset_identification.md` §1-6에 따라 Auto-Scan 대신
+`shared/references/python_diagnosis_criteria.md`를 참조해 **자기 담당 카테고리만**
+직접 LLM 수동 진단을 이어간다 — PHP처럼 한 skill이 4개 도메인을 전부 대신 실행하지
+않는다.
+
+PHP와의 차이:
+- PHP: 전담 `/sec-scan-php` skill + `scan_php_baseline.py` 후보 태깅, 5개 skill이
+  Phase 1에서 감지 시 그 전담 skill을 인라인 위임 실행.
+- Python: 전담 skill/스크립트 없음, 5개 skill이 각자 자기 카테고리만 Auto-Scan 없이
+  직접 LLM 수동 진단(JS/TS Injection이 현재 "자동스캔 skip → LLM 수동" 처리되는 것과
+  동일 패턴을 5개 도메인 전체로 확장한 것).
+
+JS/TS와의 차이: JS/TS는 XSS/File/Data 3개 도메인은 자동 스캔이 지원되고 Injection만
+수동인 반면, Python은 **4개 도메인 전부** 수동이다.
+
+상세 진단 기준(프레임워크 탐지, API 리스팅 방법론, 카테고리별 패턴, 신규 발견 항목)은
+`shared/references/python_diagnosis_criteria.md` 참조.
+
+**실사례** (2026-09-14 `rwd_adm`/`ocb-api-with-python` 코드 분석 결과 — 상세는
+`python_diagnosis_criteria.md` 참조): 기존 `ocb_scan_plan.md`상 `rwd_adm`은 4개 도메인
+전부 ✅완료로 기록돼 있었으나 Auto-Scan이 Python을 파싱하지 못해 `findings_INJ.json
+total:0`이 나온 것을 LLM이 "정적 프론트엔드 페이지"로 오판한 false negative였음 — 실제로는
+`statistic/views.py`에 SQL Injection, `settings/base.py`/`prod.py`/`dev.py`에 하드코딩
+시크릿이 존재했다.
+
+---
+
 ## 지원 언어 현황
 
 | 언어 / 프레임워크 | 지원 수준 | 주요 스캔 항목 | Task |
@@ -74,7 +110,7 @@ system("ls " . $_GET['dir']);
 | TypeScript (React / Next.js / Turborepo) | ✅ 자동 스캔 부분 지원 | FE-XSS(자동) / FE-File(자동) / FE-Data(자동) / SCA-npm(자동) | 자동 스캔 + LLM 검증 |
 | JavaScript (Node.js / React) | ✅ 자동 스캔 부분 지원 | FE-XSS(자동) / FE-File(자동) / FE-Data(자동) / SCA-npm(자동) | 자동 스캔 + LLM 검증 |
 | PHP (레거시, 라우터 없음) | 🟡 LLM 체크리스트 기반 지원 | SQLi/OS Command/LFI-RFI/XSS/Hardcoded Secret/Weak Crypto/Path Traversal/Eval | `/sec-scan-php` |
-| Python | ❌ 미지원 | — | — |
+| Python (Django / FastAPI) | 🟡 LLM 체크리스트 기반 지원 (자동 스캐너 없음) | Injection/XSS/File/Data/Auth 전량 수동 + 설정하이진/CORS/JWT/역직렬화/SSTI/인증우회 | `python_diagnosis_criteria.md` |
 | Go | ❌ 미지원 | — | — |
 
 **TypeScript/JavaScript 스킬별 자동 스캔 지원 현황** (v1.5 기준):

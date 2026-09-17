@@ -27,6 +27,9 @@ update_ocb_plan.py — OCB 진단 체크리스트 갱신 + Confluence 동기화
     findings_FILE.json → FILE 컬럼 완료
     findings_DATA.json → DATA 컬럼 완료
     findings_SCA.json  → SCA 컬럼 완료
+    findings_php.json  → INJ/XSS/FILE/DATA 4개 컬럼 동시 완료 (셀에 "(PHP)" 표시)
+        — /sec-scan-php가 레거시 PHP 레포에서 이 4개 skill 범위를 단일 진단으로
+          커버하므로, state/<repo>/php/<RUN_ID>/findings_php.json 하나로 갱신된다.
 """
 
 import argparse
@@ -52,6 +55,14 @@ SKILL_FINDINGS = {
     "data":      ["findings_DATA.json", "findings_data.json"],
     "sca":       ["findings_SCA.json",  "findings_sca.json"],
 }
+
+# /sec-scan-php는 레거시 PHP 레포에서 SQLi/OS Command/LFI-RFI/Reflected XSS/
+# HARDCODED_SECRET/WEAK_CRYPTO/Path Traversal/Eval 8종을 단일 진단으로 커버한다
+# (5개 skill 중 injection/xss/file/data와 동등한 범위, auth/SCA는 제외).
+# state/<repo>/php/<RUN_ID>/findings_php.json 하나로 아래 4개 컬럼을 동시에
+# ✅ 처리한다 — "php" 자체는 체크리스트 컬럼이 없으므로 VALID_SKILLS에는 넣지 않는다.
+PHP_FINDINGS = ["findings_php.json"]
+PHP_EQUIVALENT_SKILLS = ["injection", "xss", "file", "data"]
 
 # 체크리스트 테이블의 컬럼 인덱스 (split("|") 기준)
 # "| `repo` | ↔️ 대내외 | INJ | XSS | FILE | DATA | SCA | 보고서 | Jira 티켓 |"
@@ -94,15 +105,29 @@ def _save_status(status: dict) -> None:
 
 # ── 체크박스 갱신 ─────────────────────────────────────────────────────────────
 
-def mark_done(repo: str, skills: list[str], date: str | None = None) -> int:
+_SYNC_DATE_RE = re.compile(r"^> 진단 상태 마지막 동기화: \S+(.*)$", re.MULTILINE)
+
+
+def _touch_diagnosis_sync_date(date: str, text: str) -> str:
+    """
+    ocb_scan_plan.md 상단 front matter의 '진단 상태 마지막 동기화' 날짜를 갱신한다.
+    실제 체크리스트 셀이 변경될 때만 호출 — 변경 없는 재실행에서는 건드리지 않는다
+    (2026-09-15: 이 필드가 수개월간 수동 갱신 없이 방치되어 있던 문제 수정).
+    """
+    return _SYNC_DATE_RE.sub(lambda m: f"> 진단 상태 마지막 동기화: {date}{m.group(1)}", text, count=1)
+
+
+def mark_done(repo: str, skills: list[str], date: str | None = None, note: str = "") -> int:
     """
     ocb_scan_plan.md 내 해당 repo + skill 체크리스트 셀을 완료로 변경.
     date: YYYY-MM-DD 형식. 미지정 시 오늘 날짜.
+    note: 셀에 덧붙일 표시(예: " (PHP)") — /sec-scan-php 위임/통합 진단으로 완료된
+          경우 개별 skill 실행과 구분하기 위함.
     반환: 변경된 셀 수.
     """
     if not date:
         date = datetime.now().strftime("%Y-%m-%d")
-    done_mark = f"✅ {date}"
+    done_mark = f"✅ {date}{note}"
 
     text = PLAN_MD.read_text(encoding="utf-8")
     changed = 0
@@ -124,6 +149,7 @@ def mark_done(repo: str, skills: list[str], date: str | None = None) -> int:
     text = "\n".join(new_lines)
 
     if changed > 0:
+        text = _touch_diagnosis_sync_date(date, text)
         PLAN_MD.write_text(text, encoding="utf-8")
     return changed
 
@@ -251,15 +277,18 @@ def sync_from_state(no_sync: bool = False) -> int:
             continue
         repo_slug = repo_dir.name
 
-        for skill in VALID_SKILLS:
+        # (스캔 대상 디렉터리명, findings 후보 파일명, 체크리스트에 반영할 컬럼들, 셀 표시용 note)
+        scan_specs = [(s, SKILL_FINDINGS[s], [s], "") for s in VALID_SKILLS]
+        scan_specs.append(("php", PHP_FINDINGS, PHP_EQUIVALENT_SKILLS, " (PHP)"))
+
+        for skill, findings_candidates, target_columns, note in scan_specs:
             skill_dir = repo_dir / skill
             if not skill_dir.exists():
                 continue
 
-            findings_candidates = SKILL_FINDINGS[skill]
-
-            # 이미 완료로 기록된 경우 건너뜀
-            already = status.get("completed", {}).get(repo_slug, {}).get(skill)
+            # 이미 완료로 기록된 경우 건너뜀 (php는 대상 컬럼 전부 완료 기록된 경우만 skip)
+            completed_map = status.get("completed", {}).get(repo_slug, {})
+            already = all(completed_map.get(c) for c in target_columns)
             if already:
                 continue
 
@@ -297,6 +326,16 @@ def sync_from_state(no_sync: bool = False) -> int:
                     except Exception:
                         print(f"  [SKIP] {repo_slug:<35s} {skill:<10s} — findings 파싱 오류 (run={ts_dir.name})")
                         continue
+                elif skill == "php":
+                    # php는 llm_check_failed.json 가드가 없어도 llm_checked 여부는 확인한다
+                    try:
+                        fdata = json.loads(findings_path.read_text(encoding="utf-8"))
+                        if not fdata.get("llm_checked", False):
+                            print(f"  [SKIP] {repo_slug:<35s} php        — llm_checked=false (run={ts_dir.name})")
+                            continue
+                    except Exception:
+                        print(f"  [SKIP] {repo_slug:<35s} php        — findings 파싱 오류 (run={ts_dir.name})")
+                        continue
 
                 # 정상 완료 — YYYYMMDD_HHMM → YYYY-MM-DD
                 ts = ts_dir.name
@@ -305,13 +344,14 @@ def sync_from_state(no_sync: bool = False) -> int:
                 except Exception:
                     date_str = datetime.now().strftime("%Y-%m-%d")
 
-                n = mark_done(repo_slug, [skill], date=date_str)
+                n = mark_done(repo_slug, target_columns, date=date_str, note=note)
                 if n > 0:
-                    print(f"  [AUTO] {repo_slug:<35s} {skill:<10s} → ✅ {date_str}")
-                    status.setdefault("completed", {}) \
-                          .setdefault(repo_slug, {})[skill] = date_str
+                    print(f"  [AUTO] {repo_slug:<35s} {'/'.join(target_columns):<20s} → ✅ {date_str}{note}")
+                    for c in target_columns:
+                        status.setdefault("completed", {}) \
+                              .setdefault(repo_slug, {})[c] = date_str
                     changed_md = True
-                    total += 1
+                    total += n
                 break  # 가장 최신 유효 타임스탬프만 사용
 
     if changed_md:

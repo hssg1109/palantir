@@ -520,7 +520,7 @@ def _git_clone_via_powershell(token: str, bare_url: str, dest: Path, branch: str
     print(f"[INFO] 브랜치: {branch_label}  |  대상 경로(Windows): {win_dest}")
     return subprocess.run(
         ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", ps_cmd],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
 
 

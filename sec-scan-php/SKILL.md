@@ -92,6 +92,9 @@ python3 shared/scripts/scan_php_baseline.py <src>/ocb_php \
 - **WEAK_CRYPTO_CANDIDATE**: `md5()`/`sha1()` 호출
 - **PATH_TRAVERSAL_CANDIDATE**: `fopen`/`file_get_contents`/`readfile`/`unlink` 인자에 `$_GET`/`$_POST`/`$_REQUEST`/`$_COOKIE` 직접 전달
 - **EVAL_CANDIDATE**: `eval`/`assert`/`create_function` 인자에 변수 포함
+- **INSECURE_TLS_CLIENT_CANDIDATE**: `CURLOPT_SSL_VERIFYPEER`/`CURLOPT_SSL_VERIFYHOST`를 `false`/`0`으로 설정
+  (2026-09-16 ocb_game_biz PHP-010 추가진단으로 신설 — 결제 연동 curl 요청에서 TLS 인증서 검증이 비활성화된
+  패턴이 기존 8종에 없어 원본 스캔 단계에서부터 누락됐던 것을 보완)
 
 출력: `state/<prefix>/php.json` (`candidates[]` — 전량 판정 대기, `findings[]`는 항상 빈 배열)
 
@@ -227,7 +230,45 @@ testbed 삭제 + Confluence 등록은 `/sec-review` 완료 시 Phase C-2에서 �
   [다음] /sec-review 완료 시 testbed 삭제 + Confluence 레지스트리 등록 수행
 ```
 
-Phase C-1 완료 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
+### Step C-1b: 전사 진단현황 위키 갱신 (필수 — 매 skill 완료마다)
+
+> **정책**: 야간 배치뿐 아니라 주간 인터랙티브 세션에서 `/sec-scan-php`를 실행한 경우도
+> 예외 없이 이 단계를 수행한다. 두 스크립트 모두 `state/`(및 `docs/ocb_scan_plan.md`
+> 체크리스트)를 다시 읽어 재계산하는 읽기 전용 집계이므로 `/sec-review` 판정 완료
+> 여부와 무관하게 즉시 실행 가능하다 ([[feedback_wiki_refresh_every_scan.md]] — 5개
+> `/sec-scan-*`에는 이 단계가 있었으나 `/sec-scan-php`에는 누락되어 있어, PHP 레포를
+> 5개 skill의 자동위임 없이 `/sec-scan-php` 단독으로 실행한 경우(예: P3-F: OTH 배치)
+> 위키가 갱신되지 않는 사각지대가 있었다 — 2026-09-10 수정).
+
+> **⚠️ 두 페이지 모두 갱신 필수 — 하나만 갱신하면 안 됨**:
+> - `docs/ocb_scan_plan.md` → Confluence pageId `750459063` — **실제 진단현황 갱신·추적이
+>   진행되는 정책상 원본(authoritative) 페이지**. `update_ocb_plan.py --auto`가 `state/`를
+>   스캔해 `findings_php.json` 존재를 확인하고, 이 레포의 **INJ/XSS/FILE/DATA 4개 컬럼을
+>   동시에** `✅ YYYY-MM-DD (PHP)`로 갱신한다 — `/sec-scan-php`가 이 4개 skill 범위를
+>   단일 진단으로 커버하기 때문이다(SCA/auth 컬럼은 대상 아님).
+> - `docs/system_code_scan_status.md` → Confluence pageId `771074589` — 전사 297개
+>   시스템코드 단위의 더 넓은 집계 뷰. `750459063`의 체크리스트를 우선(sticky) 참조하므로
+>   반드시 **`update_ocb_plan.py --auto`를 먼저 실행한 뒤** 재생성해야 최신 상태가 반영된다.
+
+**수행 (반드시 이 순서로)**:
+
+```bash
+python3 tools/update_ocb_plan.py --auto
+python3 tools/build_system_code_scan_status.py
+python3 tools/publish_confluence.py docs/system_code_scan_status.md
+```
+
+- Confluence 접근 실패(네트워크/토큰)는 non-blocking — 에러 출력 후 계속 진행. 단
+  `CONFLUENCE_TOKEN` 자체 누락처럼 사람만 해결 가능한 경우만 보고 후 대기.
+
+**완료 출력**:
+```
+[Step C-1b] 전사 진단현황 위키 갱신 완료
+  체크리스트 : docs/ocb_scan_plan.md → pageId 750459063 (INJ/XSS/FILE/DATA (PHP) 갱신)
+  전사집계   : docs/system_code_scan_status.md → pageId 771074589
+```
+
+Step C-1b 완료 후 `/sec-review` 로 인터랙티브 정/오탐 판정을 진행한다.
 
 ## Resources
 

@@ -36,13 +36,21 @@ _CHECKLIST_RE = re.compile(
     r'^:::expand 진단 체크리스트 전체 현황.*?\n(.*?)\n:::\s*$',
     re.DOTALL | re.MULTILINE,
 )
+_FRONT_MATTER_RE = re.compile(r'^# .*?\n\n((?:> .*\n)+)', re.MULTILINE)
+_PROJECT_SECTION_RE = re.compile(
+    r'^## 1\. 프로젝트 키 목록.*?\n(.*?)(?=^## )', re.DOTALL | re.MULTILINE
+)
 
 
 def _extract_checklist_section(md_text: str) -> str:
-    """docs/ocb_scan_plan.md 전체 중 ':::expand 진단 체크리스트 전체 현황' 블록만 추출.
+    """docs/ocb_scan_plan.md 전체 중 front matter + ':::expand 진단 체크리스트 전체 현황' 블록만 추출.
 
-    750459063 페이지는 전체 진단 계획 문서가 아니라 체크리스트 표만 유지하는 용도이므로,
-    원본 문서가 갱신될 때마다 이 블록만 뽑아 별도 페이지로 반영한다.
+    750459063 페이지는 0~5번 부록(로컬 작업계획/WBS 등)을 제외한 체크리스트 요약용
+    페이지이므로, 원본 문서가 갱신될 때마다 상단 메타정보(작성일/조회방법/참조/동기화
+    일자)와 체크리스트 표만 뽑아 반영한다. 레포/프로젝트 집계 수치는 매번 이 함수가
+    직접 표를 세어 계산한다 — 2026-09-15 이전에는 이 수치가 front matter에 수동으로
+    박제된 정수였고 실제 표와 무관하게 몇 달간 방치되어 있었다(279개 레포 등 근거
+    없는 값). 존재하지 않는 원본 JSON 경로를 참조하던 문제도 함께 정리했다.
     """
     m = _CHECKLIST_RE.search(md_text)
     if not m:
@@ -50,9 +58,27 @@ def _extract_checklist_section(md_text: str) -> str:
             "체크리스트 expand 블록을 찾을 수 없음 — docs/ocb_scan_plan.md 구조가 "
             "변경되었는지 확인 필요 (':::expand 진단 체크리스트 전체 현황' 헤더 기준 탐색)"
         )
+    checklist_body = m.group(1)
+    repo_count = len(re.findall(r'^\| `', checklist_body, re.MULTILINE))
+
+    proj_m = _PROJECT_SECTION_RE.search(md_text)
+    project_count = len(re.findall(r'^\| `', proj_m.group(1), re.MULTILINE)) if proj_m else None
+
+    fm_m = _FRONT_MATTER_RE.search(md_text)
+    front_matter = fm_m.group(1).rstrip("\n") if fm_m else ""
+    tally_line = f"> 집계 현황: 체크리스트 대상 {repo_count}개 레포"
+    if project_count:
+        tally_line += f" / 조사 완료 {project_count}개 프로젝트"
+    tally_line += " (본 표 기준 자동 산출, 게시 시점 스냅샷)"
+    if front_matter:
+        front_matter += "\n" + tally_line
+    else:
+        front_matter = tally_line
+
     return (
         "# OCB 서비스 군 보안진단 체크리스트 전체 현황\n\n"
-        f"{m.group(1)}\n\n"
+        f"{front_matter}\n\n"
+        f"{checklist_body}\n\n"
         "---\n"
         "*자동 동기화: `tools/sync_ocb_confluence.py` (원본: `docs/ocb_scan_plan.md`)*\n"
     )

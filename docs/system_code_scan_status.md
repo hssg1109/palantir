@@ -1,7 +1,7 @@
 # 전사 시스템코드별 Palantir 보안진단 현황
 
 :::info 문서 정보
-**작성일**: 2026-09-08
+**작성일**: 2026-09-16
 
 **원본 데이터**: `docs/system_code_to_repo_20260729_v3.json` (전사 CMDB 시스템코드 매핑, 297개)
 :::
@@ -18,12 +18,12 @@
 
 - 시스템코드: 전체 297개 (레포 매핑 있음 159개 / 레포 미확인 138개)
 - 레포: 시스템코드-레포 매핑 1062건 (고유 레포 768개, 동일 레포가 복수 시스템코드에 걸치는 경우 있음)
-- 고유 레포 기준 진단 현황: 진단완료 92개 / 부분진단 4개 / 미진단 672개
+- 고유 레포 기준 진단 현황: 진단완료 113개 / 부분진단 0개 / 미진단 655개
 - 1개 레포가 여러 시스템코드에 매핑된 경우: 152건 (§3 참조, 실제 소속 시스템코드 확인 필요)
 
 ## 1. 시스템코드별 요약
 
-> 🟢 **시스템코드 진단완료**(매핑된 레포 전체가 injection/xss/file/data 4종 모두 완료) 10개 — 아래 표의 색상 플래그 열 참조.
+> 🟢 **시스템코드 진단완료**(매핑된 레포 전체가 injection/xss/file/data 4종 모두 완료) 17개 — 아래 표의 색상 플래그 열 참조.
 
 | 상위 서비스군 | 시스템코드 | 시스템명 | 레포수 | 진단완료 | 부분진단 | 미진단 | 시스템 진단완료 | 비고 |
 |---|---|---|---|---|---|---|---|---|
@@ -52,11 +52,11 @@
 | OCB | `C001054` | OCB-com | 6 | 5 | 0 | 1 |  |  |
 | OCB | `C001055` | OCB-CMSadmin | 2 | 1 | 0 | 1 |  |  |
 | OCB | `C001056` | OCB-성수 | 1 | 1 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
-| OCB | `C001065` | OCB-OneIDPass | 4 | 0 | 4 | 0 |  |  |
+| OCB | `C001065` | OCB-OneIDPass | 4 | 4 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
 | OCB | `C001068` | OCBpass | 18 | 9 | 0 | 9 |  |  |
-| OCB | `C001070` | OCB-Sugar | 24 | 15 | 0 | 9 |  |  |
+| OCB | `C001070` | OCB-Sugar | 24 | 16 | 0 | 8 |  |  |
 | OCB | `C001072` | OCB-WebView | 12 | 10 | 0 | 2 |  |  |
-| OCB | `C001074` | OCB-게임Biz | 4 | 0 | 0 | 4 |  |  |
+| OCB | `C001074` | OCB-게임Biz | 4 | 3 | 0 | 1 |  |  |
 | OCB | `C001076` | OCB-이벤트마일리지 | 1 | 0 | 0 | 1 |  |  |
 | OCB | `C001310` | OCB-IAM | 1 | 1 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
 | OCB | `C001328` | OCB-참여적립 | 2 | 2 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
@@ -68,16 +68,16 @@
 | OCB | `C001737` | OCB-DeepLink | 1 | 1 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
 | OCB | `C001738` | OCB-애드팝콘 | 2 | 2 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
 | OCB | `C001743` | OCB-캐쉬백몰(적립) | 2 | 2 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
-| OCB | `C001753` | OCB-부루마블 | 1 | 0 | 0 | 1 |  |  |
+| OCB | `C001753` | OCB-부루마블 | 1 | 1 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
 | OCB | `C001755` | OCB-KHub | 1 | 0 | 0 | 1 |  |  |
 | OCB | `C001759` | OCB-쇼핑적립 | 2 | 0 | 0 | 2 |  |  |
 | OCB | `C001839` | OCB-연말정산 | 1 | 1 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
 | OCB | `C001881` | OCB-NFT | 12 | 6 | 0 | 6 |  |  |
 | OCB | `C002289` | OCB-PAYUI(간편사용) | 7 | 5 | 0 | 2 |  |  |
-| OCB | `C002388` | OCB-LoginUI(간편로그인) | 4 | 2 | 0 | 2 |  |  |
-| OCB | `C002454` | OCB-AI쇼핑비서 | 2 | 0 | 0 | 2 |  |  |
-| OCB | `C002466` | OCB-OMNI | 4 | 0 | 0 | 4 |  |  |
-| OCB | `C002470` | OCB-맞고 | 3 | 0 | 0 | 3 |  |  |
+| OCB | `C002388` | OCB-LoginUI(간편로그인) | 4 | 4 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
+| OCB | `C002454` | OCB-AI쇼핑비서 | 2 | 2 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
+| OCB | `C002466` | OCB-OMNI | 4 | 4 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
+| OCB | `C002470` | OCB-맞고 | 3 | 3 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
 | OCB | `C002651` | OCB-통장암호화 | 10 | 5 | 0 | 5 |  |  |
 | OCB | `C002654` | OCB이벤트-Promotion | 6 | 2 | 0 | 4 |  |  |
 | OCB | `C002849` | OCB-오글오글 | 4 | 4 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
@@ -87,7 +87,7 @@
 | OCB | `C002899` | OCB-쇼핑적립 | 15 | 12 | 0 | 3 |  |  |
 | OCB | `C002913` | OCB-JOY | 3 | 2 | 0 | 1 |  |  |
 | OCB | `C002915` | OKICK-컨텐츠 | 4 | 0 | 0 | 4 |  |  |
-| OCB | `C002925` | OCB-복지포인트 | 3 | 1 | 0 | 2 |  |  |
+| OCB | `C002925` | OCB-복지포인트 | 3 | 3 | 0 | 0 | {bg:#D4EDDA}🟢 완료 |  |
 | OCB | `C002929` | OCB-MINT | 2 | 0 | 0 | 2 |  |  |
 | OCB | `C002930` | OCB-SugarSol | 3 | 2 | 0 | 1 |  |  |
 | PICASO | `C001152` | PICASO | 1 | 0 | 0 | 1 |  |  |
@@ -345,6 +345,10 @@
 | OCB | `C001054` | `OSA/displayadmin_ui` | ✅ | ✅ | ✅ | ✅ | 2026-07-27 |
 | OCB | `C001055` | `OEP/cms_resource` | ✅ | ✅ | ✅ | ✅ | 2026-07-01 |
 | OCB | `C001056` | `OCBSUGAR/fail-info` | ✅ | ✅ | ✅ | ✅ | 2026-06-23 |
+| OCB | `C001065` | `ONEIDPASS/oip_admin` | ✅ | ✅ | ✅ | ✅ | 2026-09-07 |
+| OCB | `C001065` | `ONEIDPASS/oip_api` | ✅ | ✅ | ✅ | ✅ | 2026-09-07 |
+| OCB | `C001065` | `ONEIDPASS/oip_batch` | ✅ | ✅ | ✅ | ✅ | 2026-09-07 |
+| OCB | `C001065` | `ONEIDPASS/oip_front` | ✅ | ✅ | ✅ | ✅ | 2026-09-07 |
 | OCB | `C001068` | `OCBNFT/ocb-nft-backend` | ✅ | ✅ | ✅ | ✅ | 2026-08-03 |
 | OCB | `C001068` | `OCBNFT/ocb-nft-batch` | ✅ | ✅ | ✅ | ✅ | 2026-07-24 |
 | OCB | `C001068` | `OCBNFT/ocb-nft-homepage` | ✅ | ✅ | ✅ | ✅ | 2026-08-03 |
@@ -354,6 +358,7 @@
 | OCB | `C001068` | `OCBPASS/ocbpass-batch` | ✅ | ✅ | ✅ | ✅ | 2026-08-11 |
 | OCB | `C001068` | `OCBPASS/ocbpass-inside` | ✅ | ✅ | ✅ | ✅ | 2026-08-11 |
 | OCB | `C001068` | `OCBPASS/ocbpass-newpg` | ✅ | ✅ | ✅ | ✅ | 2026-08-12 |
+| OCB | `C001070` | `AI/ocb-api-with-python` | ✅ | ✅ | ✅ | ✅ | 2026-09-14 |
 | OCB | `C001070` | `GWS/gws-point-be` | ✅ | ✅ | ✅ | ✅ | 2026-08-20 |
 | OCB | `C001070` | `GWS/oki-be` | ✅ | ✅ | ✅ | ✅ | 2026-08-20 |
 | OCB | `C001070` | `OCBNFT/ocb-nft-backend` | ✅ | ✅ | ✅ | ✅ | 2026-08-03 |
@@ -379,8 +384,11 @@
 | OCB | `C001072` | `OCBWEBVIEW/ocb-webview-api` | ✅ | ✅ | ✅ | ✅ | 2026-05-06 |
 | OCB | `C001072` | `OCBWEBVIEW/ocb-webview-frontend` | ✅ | ✅ | ✅ | ✅ | 2026-05-06 |
 | OCB | `C001072` | `OCB_BACK_END/ocb-webview` | ✅ | ✅ | ✅ | ✅ | 2026-09-03 |
+| OCB | `C001074` | `OCB-THP/ocb_fun_real` | ✅ | ✅ | ✅ | ✅ | 2026-09-10 |
+| OCB | `C001074` | `OCB-THP/ocb_game_biz` | ✅ | ✅ | ✅ | ✅ | 2026-09-10 |
+| OCB | `C001074` | `OCB-THP/ocb_game_biz_admin` | ✅ | ✅ | ✅ | ✅ | 2026-09-10 |
 | OCB | `C001310` | `OCBSUGAR/ocb-iam` | ✅ | ✅ | ✅ | ✅ | 2026-06-01 |
-| OCB | `C001328` | `OCBRWD/rwd_adm` | ✅ | ✅ | ✅ | ✅ | 2026-07-15 |
+| OCB | `C001328` | `OCBRWD/rwd_adm` | ✅ | ✅ | ✅ | ✅ | 2026-09-14 |
 | OCB | `C001328` | `OCBRWD/rwd_front` | ✅ | ✅ | ✅ | ✅ | 2026-07-15 |
 | OCB | `C001509` | `OL/locker-frontend-admin` | ✅ | ✅ | ✅ | ✅ | 2026-08-24 |
 | OCB | `C001509` | `OL/locker-push` | ✅ | ✅ | ✅ | ✅ | 2026-08-24 |
@@ -396,6 +404,7 @@
 | OCB | `C001738` | `OCBE/ocb-event-server` | ✅ | ✅ | ✅ | ✅ | 2026-05-27 |
 | OCB | `C001743` | `OB/cashbagmall` | ✅ | ✅ | ✅ | ✅ | 2026-07-14 |
 | OCB | `C001743` | `OCB_BACK_END/ocb-cashbag-mall` | ✅ | ✅ | ✅ | ✅ | 2026-09-03 |
+| OCB | `C001753` | `OCB-THP/ocb_game_bluemarble` | ✅ | ✅ | ✅ | ✅ | 2026-09-10 |
 | OCB | `C001839` | `OEP/yetax_resource` | ✅ | ✅ | ✅ | ✅ | 2026-07-13 |
 | OCB | `C001881` | `OCBNFT/ocb-nft-admin-front` | ✅ | ✅ | ✅ | ✅ | 2026-08-03 |
 | OCB | `C001881` | `OCBNFT/ocb-nft-backend` | ✅ | ✅ | ✅ | ✅ | 2026-08-03 |
@@ -408,8 +417,19 @@
 | OCB | `C002289` | `OCBPU/ocbpayui-frontend-web` | ✅ | ✅ | ✅ | ✅ | 2026-08-10 |
 | OCB | `C002289` | `OCBPU/ocbpayui-merchant-api` | ✅ | ✅ | ✅ | ✅ | 2026-08-10 |
 | OCB | `C002289` | `OCBPU/ocbpayui-nxmile-grpc` | ✅ | ✅ | ✅ | ✅ | 2026-08-05 |
+| OCB | `C002388` | `OCBLU/ocbloginui-front-api` | ✅ | ✅ | ✅ | ✅ | 2026-09-16 |
+| OCB | `C002388` | `OCBLU/ocbloginui-partner-api` | ✅ | ✅ | ✅ | ✅ | 2026-09-16 |
 | OCB | `C002388` | `OCBPU/ocbpayui-batch` | ✅ | ✅ | ✅ | ✅ | 2026-08-04 |
 | OCB | `C002388` | `OCBPU/ocbpayui-frontend-web` | ✅ | ✅ | ✅ | ✅ | 2026-08-10 |
+| OCB | `C002454` | `AI/ocb-api-with-python` | ✅ | ✅ | ✅ | ✅ | 2026-09-14 |
+| OCB | `C002454` | `AI/ocb-web-integration` | ✅ | ✅ | ✅ | ✅ | 2026-09-16 |
+| OCB | `C002466` | `OTH/homeshopping` | ✅ | ✅ | ✅ | ✅ | 2026-09-09 |
+| OCB | `C002466` | `OTH/trend-ad` | ✅ | ✅ | ✅ | ✅ | 2026-09-09 |
+| OCB | `C002466` | `OTH/trend-cms` | ✅ | ✅ | ✅ | ✅ | 2026-09-09 |
+| OCB | `C002466` | `OTH/trendissue` | ✅ | ✅ | ✅ | ✅ | 2026-09-09 |
+| OCB | `C002470` | `OCB-THP/ocb_game_biz_matgo` | ✅ | ✅ | ✅ | ✅ | 2026-09-10 |
+| OCB | `C002470` | `OCB-THP/ocb_game_biz_matgo_php_real` | ✅ | ✅ | ✅ | ✅ | 2026-09-10 |
+| OCB | `C002470` | `OCB-THP/ocb_game_biz_matgo_server` | ✅ | ✅ | ✅ | ✅ | 2026-09-16 |
 | OCB | `C002651` | `GWS/gws-admin-be-api` | ✅ | ✅ | ✅ | ✅ | 2026-08-21 |
 | OCB | `C002651` | `GWS/gws-promotion-be` | ✅ | ✅ | ✅ | ✅ | 2026-08-20 |
 | OCB | `C002651` | `GWS/gws-promotion-consumer-be` | ✅ | ✅ | ✅ | ✅ | 2026-08-23 |
@@ -442,6 +462,8 @@
 | OCB | `C002899` | `GWS/oki-fe` | ✅ | ✅ | ✅ | ✅ | 2026-08-23 |
 | OCB | `C002913` | `OCBWEBVIEW/ocb-joy-api` | ✅ | ✅ | ✅ | ✅ | 2026-04-30 |
 | OCB | `C002913` | `OCBWEBVIEW/ocb-joy-frontend` | ✅ | ✅ | ✅ | ✅ | 2026-05-04 |
+| OCB | `C002925` | `JOYPOT/joypot-admin-frontend` | ✅ | ✅ | ✅ | ✅ | 2026-09-16 |
+| OCB | `C002925` | `JOYPOT/joypot-backend` | ✅ | ✅ | ✅ | ✅ | 2026-09-16 |
 | OCB | `C002925` | `OCBWEBVIEW/ocb-webview-frontend` | ✅ | ✅ | ✅ | ✅ | 2026-05-06 |
 | OCB | `C002930` | `OCBSUGAR/ocb-wp-api` | ✅ | ✅ | ✅ | ✅ | 2026-06-01 |
 | OCB | `C002930` | `OCBSUGAR/ocb-wp-frontend` | ✅ | ✅ | ✅ | ✅ | 2026-06-24 |
@@ -693,10 +715,6 @@
 | OCB | `C001053` | `OC/ocb_module` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001054` | `OC/ocb_module` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001055` | `OC/ocb_module` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C001065` | `ONEIDPASS/oip_admin` | 🔄 | ✅ | ✅ | ✅ | 2026-09-07 |
-| OCB | `C001065` | `ONEIDPASS/oip_api` | 🔄 | ✅ | ✅ | ✅ | 2026-09-07 |
-| OCB | `C001065` | `ONEIDPASS/oip_batch` | 🔄 | ✅ | ✅ | ✅ | 2026-09-07 |
-| OCB | `C001065` | `ONEIDPASS/oip_front` | 🔄 | ✅ | ✅ | ✅ | 2026-09-07 |
 | OCB | `C001068` | `OCBNFT/ocb-nft-script` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001068` | `SSI/dummy_jar` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001068` | `SSSC/serverconfig-common` | ❌ | ❌ | ❌ | ❌ | — |
@@ -706,7 +724,6 @@
 | OCB | `C001068` | `VAS/starchip2-creator-fe` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001068` | `VAS/starchip2-user-fe` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001068` | `VAS/starchip_admin` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C001070` | `AI/ocb-api-with-python` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001070` | `DI/rake` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001070` | `OCBNFT/ocb-nft-script` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001070` | `OE/ocb-appevt` | ❌ | ❌ | ❌ | ❌ | — |
@@ -718,9 +735,6 @@
 | OCB | `C001072` | `DMP/dmp-open-gateway` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001072` | `DMP/dmp-script` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001074` | `MKTIS/ocb_marketing_is` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C001074` | `OCB-THP/ocb_fun_real` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C001074` | `OCB-THP/ocb_game_biz` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C001074` | `OCB-THP/ocb_game_biz_admin` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001076` | `EVENTPOINT/eventpoint` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001437` | `OE/ocb-appevt` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001503` | `LEAFLET/newleafletsystem` | ❌ | ❌ | ❌ | ❌ | — |
@@ -730,7 +744,6 @@
 | OCB | `C001509` | `OL/locker-was-deploy` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001509` | `SSSC/serverconfig-syrup` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001527` | `OB/front_resource` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C001753` | `OCB-THP/ocb_game_bluemarble` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001755` | `OCBBI/pandora` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001759` | `HGV/skhgv-hgv-pub-fe` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C001759` | `HGV/skhgv-hhs-pub-fe` | ❌ | ❌ | ❌ | ❌ | — |
@@ -742,17 +755,6 @@
 | OCB | `C001881` | `SVCENG/helm-charts` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002289` | `MEC/me_conf` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002289` | `OCBPP/ocb_payment_platform` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002388` | `OCBLU/ocbloginui-front-api` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002388` | `OCBLU/ocbloginui-partner-api` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002454` | `AI/ocb-api-with-python` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002454` | `AI/ocb-web-integration` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002466` | `OTH/homeshopping` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002466` | `OTH/trend-ad` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002466` | `OTH/trend-cms` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002466` | `OTH/trendissue` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002470` | `OCB-THP/ocb_game_biz_matgo` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002470` | `OCB-THP/ocb_game_biz_matgo_php_real` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002470` | `OCB-THP/ocb_game_biz_matgo_server` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002651` | `SS/kmc` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002651` | `SS/ss-be` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002651` | `SSI/dummy_jar` | ❌ | ❌ | ❌ | ❌ | — |
@@ -773,8 +775,6 @@
 | OCB | `C002915` | `DFS/bridge` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002915` | `DFS/mosquitto` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002915` | `DFS/php` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002925` | `JOYPOT/joypot-admin-frontend` | ❌ | ❌ | ❌ | ❌ | — |
-| OCB | `C002925` | `JOYPOT/joypot-backend` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002929` | `OCB-MINT/mint-fe` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002929` | `VUL/mint-api` | ❌ | ❌ | ❌ | ❌ | — |
 | OCB | `C002930` | `OCBSUGAR/ocb-vp-api` | ❌ | ❌ | ❌ | ❌ | — |

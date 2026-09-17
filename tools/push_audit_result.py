@@ -46,7 +46,7 @@ LOGS_DIR     = PALANTIR_DIR / "logs"
 # gws-fe/gws-admin-fe/ocbpass-newpg 업로드가 조용히 유실된 사고가 있었다.
 _LOCK_PATH = PALANTIR_DIR / "state" / ".push_audit_result.lock"
 
-SKILL_ORDER   = ["injection", "xss", "file", "data", "sca"]
+SKILL_ORDER   = ["injection", "xss", "file", "data", "auth", "php", "sca"]
 BB_REMOTE_URL = os.environ.get("AUDIT_RESULT_REPO_URL", "")
 
 # PowerShell 실행 파일 (WSL에서 접근)

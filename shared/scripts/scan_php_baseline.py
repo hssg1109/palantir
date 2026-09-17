@@ -23,6 +23,11 @@ LLM-Check(수동진단)가 전담한다.
   [PATH_TRAVERSAL_CANDIDATE]    fopen/file_get_contents/readfile/unlink 인자에
                                  $_GET/$_POST/$_REQUEST/$_COOKIE 직접 전달
   [EVAL_CANDIDATE]              eval()/assert()/create_function() 인자에 변수
+  [INSECURE_TLS_CLIENT_CANDIDATE]  CURLOPT_SSL_VERIFYPEER/VERIFYHOST를 false/0으로
+                                 설정(TLS 인증서 검증 비활성화) — 2026-09-16
+                                 ocb_game_biz PHP-010(결제 danal 모듈 포함 25개
+                                 파일 64개소)이 8종 후보에 없어 원본 스캔에서
+                                 태깅조차 되지 않았던 것을 사용자 지시로 보완
 
 사용법:
   python3 scan_php_baseline.py testbed/<repo>/ocb_php -o state/<prefix>/php.json
@@ -36,14 +41,17 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.1"
 
 # ============================================================
 #  스캔 대상 제외 디렉터리 (vendor/JS 번들 등 비-PHP 자산)
 # ============================================================
 
+# PHPExcel/aci-tree: vendor/ 외 경로(예: lib/)에 번들된 서드파티 라이브러리가
+# 2026-09-14 homeshopping/trend-ad/trend-cms/trendissue 4개 레포에서 동일하게
+# WEAK_CRYPTO_CANDIDATE·LFI_RFI_CANDIDATE 오탐을 반복 생산한 것이 확인되어 추가.
 _EXCLUDE_DIR_RE = re.compile(
-    r"(^|/)(\.git|node_modules|vendor|styleup[^/]*|common/js)(/|$)",
+    r"(^|/)(\.git|node_modules|vendor|styleup[^/]*|common/js|PHPExcel|aci-tree)(/|$)",
     re.IGNORECASE,
 )
 
@@ -54,7 +62,6 @@ _EXCLUDE_DIR_RE = re.compile(
 _SQLI_RE = re.compile(r"\b(mysql_query|mysqli_query)\s*\([^)]*\$[^)]*\)")
 
 _CMD_FUNC_RE = re.compile(r"\b(system|exec|shell_exec|passthru|popen|proc_open)\s*\([^)]*\$[^)]*\)")
-_CMD_BACKTICK_RE = re.compile(r"`[^`]*\$[^`]*`")
 
 _LFI_RFI_RE = re.compile(r"\b(include|include_once|require|require_once)\b\s*\(?\s*[^;]*\$")
 
@@ -79,6 +86,63 @@ _PATH_TRAVERSAL_RE = re.compile(
 
 _EVAL_RE = re.compile(r"\b(eval|assert|create_function)\s*\([^)]*\$")
 
+_INSECURE_TLS_RE = re.compile(
+    r"\b(CURLOPT_SSL_VERIFYPEER|CURLOPT_SSL_VERIFYHOST)\s*(,|=>)\s*(false|0)\b",
+    re.IGNORECASE,
+)
+
+
+def _scan_backtick_exec(line: str, in_squote: bool, in_dquote: bool) -> tuple:
+    """PHP 백틱 shell-exec 연산자가 문자열 리터럴 '밖'에 실제로 존재하고, 그 안에
+    변수가 포함되는지 확인한다. PHP는 따옴표 밖의 백틱만 shell_exec()와 동일한
+    실행 연산자로 취급하며, 작은따옴표/큰따옴표 문자열 안의 백틱은 MySQL 식별자
+    인용(``` `column_name` ```) 등 문자 그 자체일 뿐 실행과 무관하다. 단순
+    `[^`]*\\$[^`]*` 정규식은 이 구분을 못 해 SQL 문자열 리터럴 안의 백틱까지
+    전량 CMD_INJECTION 후보로 오탐 태깅하는 문제가 있어(v1.0.0), 따옴표 상태를
+    추적하는 상태 기계로 대체한다.
+
+    PHP 문자열(특히 SQL 조립용 `$query = "..."`)은 여러 줄에 걸쳐 이어지는 경우가
+    흔하므로, 이 함수는 파일 스캔 루프가 이전 줄들로부터 넘겨준 인용부호 상태
+    (in_squote/in_dquote)를 받아 이번 줄 끝의 상태까지 함께 반환한다(caller가 다음
+    줄 호출 시 그대로 다시 넘겨 누적). 한 줄 단위로 상태를 매번 초기화하면 여는
+    따옴표가 있는 줄과 백틱이 있는 줄이 다를 때(멀티라인 문자열) 여전히 오탐이
+    발생한다(v1.1.0에서 처음 발견).
+
+    반환값: (found: bool, in_squote: bool, in_dquote: bool) — found는 이번 줄에서
+    실행 연산자로 쓰인 백틱을 발견했는지, 나머지 둘은 다음 줄에 넘길 종료 상태."""
+    found = False
+    i, n = 0, len(line)
+    while i < n:
+        ch = line[i]
+        if ch == "\\" and (in_squote or in_dquote):
+            i += 2
+            continue
+        if in_squote:
+            if ch == "'":
+                in_squote = False
+            i += 1
+            continue
+        if in_dquote:
+            if ch == '"':
+                in_dquote = False
+            i += 1
+            continue
+        if ch == "'":
+            in_squote = True
+        elif ch == '"':
+            in_dquote = True
+        elif ch == "`":
+            close = line.find("`", i + 1)
+            if close == -1:
+                # 줄 끝까지 닫히지 않음 — 이 줄에서는 실행 연산자로 판단하지 않음
+                i = n
+                continue
+            if "$" in line[i + 1:close]:
+                found = True
+            i = close
+        i += 1
+    return found, in_squote, in_dquote
+
 
 @dataclass
 class PhpCandidate:
@@ -86,7 +150,8 @@ class PhpCandidate:
     candidate_id: str
     candidate_type: str      # SQLI_CANDIDATE / CMD_INJECTION_CANDIDATE / LFI_RFI_CANDIDATE /
                               # XSS_CANDIDATE / HARDCODED_SECRET_CANDIDATE / WEAK_CRYPTO_CANDIDATE /
-                              # PATH_TRAVERSAL_CANDIDATE / EVAL_CANDIDATE
+                              # PATH_TRAVERSAL_CANDIDATE / EVAL_CANDIDATE /
+                              # INSECURE_TLS_CLIENT_CANDIDATE
     reason: str               # 태깅 근거 (매칭된 패턴)
     file: str
     line: int
@@ -117,20 +182,32 @@ def _iter_php_files(src_dir: Path):
         yield path
 
 
-def _tag_line(file_rel: str, lineno: int, line: str) -> list:
-    """한 줄에 대해 매칭되는 모든 candidate_type을 반환"""
+def _tag_line(file_rel: str, lineno: int, line: str, in_squote: bool, in_dquote: bool) -> tuple:
+    """한 줄에 대해 매칭되는 모든 candidate_type을 반환.
+
+    in_squote/in_dquote는 이전 줄들로부터 이어지는 문자열 리터럴 인용부호 상태
+    (멀티라인 PHP 문자열 대응, _scan_backtick_exec 참조)이며, 이번 줄 처리 후
+    갱신된 상태와 함께 (tags, in_squote, in_dquote) 튜플로 반환한다."""
     tags = []
     stripped = line.strip()
-    if not stripped or stripped.startswith("//") or stripped.startswith("#"):
-        return tags
+    # in_squote/in_dquote가 이미 True면(이전 줄에서 이어지는 멀티라인 문자열 내부)
+    # 이 줄이 "//"/"#"로 시작하더라도 실제 PHP 주석이 아니라 문자열 내용일 수
+    # 있으므로 주석으로 간주해 건너뛰지 않는다 — 건너뛰면 이 줄에 있는 종료
+    # 따옴표를 놓쳐 이후 모든 줄의 상태가 어긋난다.
+    if not (in_squote or in_dquote):
+        if not stripped or stripped.startswith("//") or stripped.startswith("#"):
+            return tags, in_squote, in_dquote
 
     m = _SQLI_RE.search(line)
     if m:
         tags.append(("SQLI_CANDIDATE", f"쿼리 호출에 변수 인자 포함: {m.group(1)}()"))
 
-    m = _CMD_FUNC_RE.search(line) or _CMD_BACKTICK_RE.search(line)
+    backtick_found, in_squote, in_dquote = _scan_backtick_exec(line, in_squote, in_dquote)
+    m = _CMD_FUNC_RE.search(line)
     if m:
-        tags.append(("CMD_INJECTION_CANDIDATE", f"OS 명령 실행 함수/백틱에 변수 인자 포함: {m.group(0)[:60]}"))
+        tags.append(("CMD_INJECTION_CANDIDATE", f"OS 명령 실행 함수에 변수 인자 포함: {m.group(0)[:60]}"))
+    elif backtick_found:
+        tags.append(("CMD_INJECTION_CANDIDATE", "백틱 연산자(문자열 리터럴 밖)에 변수 인자 포함"))
 
     m = _LFI_RFI_RE.search(line)
     if m:
@@ -156,7 +233,11 @@ def _tag_line(file_rel: str, lineno: int, line: str) -> list:
     if m:
         tags.append(("EVAL_CANDIDATE", f"동적 코드 실행 함수에 변수 인자 포함: {m.group(1)}()"))
 
-    return tags
+    m = _INSECURE_TLS_RE.search(line)
+    if m:
+        tags.append(("INSECURE_TLS_CLIENT_CANDIDATE", f"TLS 인증서 검증 비활성화: {m.group(1)}={m.group(3)}"))
+
+    return tags, in_squote, in_dquote
 
 
 def tag_candidates(src_dir: Path) -> tuple:
@@ -179,8 +260,11 @@ def tag_candidates(src_dir: Path) -> tuple:
             print(f"[경고] 파일 읽기 실패, skip: {rel} ({e})", file=sys.stderr)
             continue
 
+        in_squote = False
+        in_dquote = False
         for lineno, line in enumerate(text.splitlines(), start=1):
-            for candidate_type, reason in _tag_line(rel, lineno, line):
+            tags, in_squote, in_dquote = _tag_line(rel, lineno, line, in_squote, in_dquote)
+            for candidate_type, reason in tags:
                 candidates.append(PhpCandidate(
                     candidate_id=_next_id(),
                     candidate_type=candidate_type,

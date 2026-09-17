@@ -11,7 +11,7 @@
 
 #### [RULE-1] Auto-Scan은 판정을 하지 않았다 — `candidate_type`을 `category`로 그대로 쓰지 말 것
 
-`php.json`의 `candidates[]`는 `SQLI_CANDIDATE`/`CMD_INJECTION_CANDIDATE`/`LFI_RFI_CANDIDATE`/`XSS_CANDIDATE`/`HARDCODED_SECRET_CANDIDATE`/`WEAK_CRYPTO_CANDIDATE`/`PATH_TRAVERSAL_CANDIDATE`/`EVAL_CANDIDATE` 8종 태그만 붙어 있을 뿐, 실제 취약 여부·최종 category는 전혀 정해지지 않은 상태다. 이 문서의 절차를 거쳐 `php_diagnosis_criteria.md` §1 매핑표의 표준값(`SQL인젝션`/`OS Command Injection`/`파일 다운로드 경로 조작`/`원격 파일 포함`/`Reflected XSS`/`HARDCODED_SECRET`/`WEAK_CRYPTO`/`코드 인젝션`)으로 재분류한 뒤에만 finding으로 작성한다. 판정 결과 FP인 candidate는 finding으로 만들지 않는다(`findings[]`에서 제외, `evidence_trail[]`에만 기록).
+`php.json`의 `candidates[]`는 `SQLI_CANDIDATE`/`CMD_INJECTION_CANDIDATE`/`LFI_RFI_CANDIDATE`/`XSS_CANDIDATE`/`HARDCODED_SECRET_CANDIDATE`/`WEAK_CRYPTO_CANDIDATE`/`PATH_TRAVERSAL_CANDIDATE`/`EVAL_CANDIDATE`/`INSECURE_TLS_CLIENT_CANDIDATE` 9종 태그만 붙어 있을 뿐, 실제 취약 여부·최종 category는 전혀 정해지지 않은 상태다(`INSECURE_TLS_CLIENT_CANDIDATE`는 2026-09-16 ocb_game_biz PHP-010 사후발견으로 추가된 9번째 후보 — 그 전까지는 8종). 이 문서의 절차를 거쳐 `php_diagnosis_criteria.md` §1 매핑표의 표준값(`SQL인젝션`/`OS Command Injection`/`파일 다운로드 경로 조작`/`원격 파일 포함`/`Reflected XSS`/`HARDCODED_SECRET`/`WEAK_CRYPTO`/`코드 인젝션`/`INSECURE_TLS_CLIENT`)으로 재분류한 뒤에만 finding으로 작성한다. 판정 결과 FP인 candidate는 finding으로 만들지 않는다(`findings[]`에서 제외, `evidence_trail[]`에만 기록).
 
 #### [RULE-2] 판정 원칙 — "이론적 위험"이 아니라 "이 코드베이스에서 실제 도달 가능한가"
 
@@ -78,7 +78,8 @@
 | 사용자 입력이 필터링 없이 include 경로에 도달, `../` 등으로 임의 로컬 파일 포함 가능 | 취약 / High, `category: 파일 다운로드 경로 조작` (`CWE-22`) | 로컬 파일 포함으로 소스코드/설정파일 노출 가능 |
 | 사용자 입력이 include 경로에 도달하며 URL 스킴 허용(화이트리스트 없음) | 취약 / High, `category: 원격 파일 포함` (`CWE-918`) | 원격 코드 포함·실행 가능 (RFI) |
 | include 인자가 화이트리스트 배열 대조를 거친 뒤에만 결정됨 | 오탐 | FP — 화이트리스트 코드를 evidence에 명시 |
-| 변수는 있으나 상수(`SITE_HEAD_PATH.$const`)만 결합되고 사용자 입력 도달 경로 없음 | 정보 / Medium (`php_diagnosis_criteria.md` §2 기준 FP 근접) | reachability 부재하나 구조상 취약 여지 있어 정보성 기록 |
+| 변수는 있으나 상수(`SITE_HEAD_PATH.$const`)만 결합되고, **해당 코드가 향후 유지보수 시 사용자 입력이 유입될 개연성이 있는 애플리케이션 코드**(재사용 빈도 높은 공통 include 헬퍼 등) | 정보 / Medium | reachability 부재하나 구조상 향후 위험 소지 있음 — recommendation에 "코드리뷰 시 사용자 입력 유입 여부 확인" 등 **구체적 잔존 조치**를 반드시 명시 |
+| 변수는 있으나 상수만 결합되고, **벤더/서드파티 라이브러리 내부 코드**이거나 향후 변경 개연성이 없는 완전 고정 경로(예: cron 전용 배치 스크립트의 자기참조 include) | 오탐 | FP — "정보"로 남기지 않는다. 잔존 조치가 없는데 정보로 두면 보고서에 "정보 — 조치 불필요" 같은 자기모순 문구가 발생함(2026-09-14 homeshopping PHP-005/006 재분류 선례) |
 
 ---
 
@@ -120,13 +121,17 @@
 **확인 절차**:
 1. `md5()`/`sha1()` 호출의 용도 확인 — 비밀번호 해싱, 인증 토큰/세션ID 생성, 파일 체크섬, 캐시 키, ETag 생성 등 문맥 구분.
 2. 비밀번호/인증 관련 문맥이면 salt 사용 여부, `password_hash()`/`password_verify()` 같은 대체 함수 존재 여부 확인.
+3. **벤더/서드파티 라이브러리 코드 여부 확인** — 파일이 `_EXCLUDE_DIR_RE`에 등재되지 않은 다른 이름(예: `lib/<LibraryName>/`)으로 번들된 서드파티 라이브러리인지, 파일 상단 `@package`/`@copyright`/`@version` 등 오픈소스 라이브러리 고유 docblock이 있는지 확인. 해당하면 즉시 새 벤더 라이브러리명을 `scan_php_baseline.py`의 `_EXCLUDE_DIR_RE`와 `task_php_asset_identification.md` grep 패턴 두 곳에 추가하고, 이번 finding은 아래 표의 "벤더 라이브러리" 행으로 판정한다.
 
 **판정**:
 | 케이스 | 판정 | 근거 |
 |---|---|---|
 | 비밀번호 해싱 또는 인증 토큰 생성에 `md5()`/`sha1()` 단독 사용(salt 없음) | 취약 / High | 레인보우테이블·충돌공격에 취약 (CWE-327) |
-| 파일 체크섬, 캐시 키, ETag 등 인증/비밀번호와 무관한 용도 | 정보 / Medium | `php_diagnosis_criteria.md` §2 기준 — 보안 문맥 아니므로 정보성 |
+| **벤더/서드파티 라이브러리 내부 코드**에서 캐시 키/객체 해시/식별자 생성 용도로 사용 | 오탐 | FP — 애플리케이션 코드가 아니며 잔존 조치가 없음. "정보"로 남기지 않는다(2026-09-14 homeshopping/trend-ad/trend-cms/trendissue PHP Weak Crypto 재분류 선례) |
+| **애플리케이션(1st-party) 코드**에서 파일 체크섬, 캐시 키, ETag 등 인증/비밀번호와 무관한 용도로 사용 | 정보 / Medium | `php_diagnosis_criteria.md` §2 기준 — 보안 문맥 아니므로 정보성. recommendation에 "향후 인증/토큰 용도로 재사용되지 않도록 주의" 등 **구체적 잔존 조치**를 반드시 명시(단순 "조치 불필요"만 적으면 안 됨 → 아래 공통 규칙 참조) |
 | 비밀번호 해싱이나 `password_hash()`로 이미 대체되어 있고 해당 `md5()`는 레거시 호환용 별도 필드 | 오탐(또는 정보) | 실사용 경로 확인 후 판단 — 실제 인증에 사용되면 취약 유지 |
+
+> **⚠️ 공통 규칙 — "정보" 판정 시 잔존 조치 필수 (2026-09-14 추가)**: 위 표에서 "정보"로 판정하는 모든 경우, `recommendation`은 개발팀이 실제로 취할 수 있는 구체적 행동을 포함해야 한다. `recommendation`이 (수식어를 걷어내면) "조치 불필요"로만 귀결되고 잔존 실질 조치 항목이 전혀 없다면, 그 finding은 "정보"가 아니라 **오탐(양호)**으로 판정한다 — "정보"이면서 조치가 불필요한 것은 논리적 모순이며, 개발팀에게 전달되는 보고서에 "정보 — 조치 불필요합니다" 같은 자기모순적 문구가 남게 된다. 이 규칙은 Weak Crypto/LFI-RFI뿐 아니라 이 문서의 모든 candidate_type 판정에 동일하게 적용한다.
 
 ---
 
@@ -161,8 +166,31 @@
 
 ---
 
+### 9. Insecure TLS Client 판정 기준 (`INSECURE_TLS_CLIENT_CANDIDATE` → `category: INSECURE_TLS_CLIENT`)
+
+> 2026-09-16 ocb_game_biz PHP-010 추가진단으로 신설 — 결제(danal)·게임 API 연동 curl 요청 25개 파일 64개소에서
+> `CURLOPT_SSL_VERIFYPEER`/`CURLOPT_SSL_VERIFYHOST`를 false/0으로 설정한 패턴이 발견됐으나, 당시 8종 후보에
+> 없어 `scan_php_baseline.py` 태깅 단계에서부터 누락돼 있었다. 이후 재발 방지를 위한 절차.
+
+**확인 절차**:
+1. `curl_setopt`/`curl_setopt_array` 호출에서 `CURLOPT_SSL_VERIFYPEER`가 `false`/`0`으로, 또는 `CURLOPT_SSL_VERIFYHOST`가 `0`/`1`(2 미만)으로 설정되는지 확인.
+2. 값이 리터럴(`false`/`0`)이 아니라 변수/조건식(예: `!$insecure`, `$config['verify_ssl']`)이면, 그 변수의 **기본값**과 **외부에서 제어 가능한지**(CLI 플래그, GET/POST 파라미터 등)를 추적한다.
+3. 변수 기본값이 검증 활성(true/2)이고, 검증을 끄려면 명시적 opt-in(운영자 전용 CLI 플래그, 별도 인증된 관리자 파라미터 등)이 필요한 진단/디버그 목적 코드인지 확인.
+4. 해당 curl 요청의 통신 대상이 결제/과금 연동, 회원 인증, 개인정보 전송 등 민감 데이터를 다루는지 확인 — 영향도 판단 및 recommendation 우선순위 근거로 사용.
+
+**판정**:
+| 케이스 | 판정 | 근거 |
+|---|---|---|
+| 리터럴 `false`/`0`으로 검증 비활성화(조건 없이 항상 적용) | 취약 / Medium | TLS 인증서 미검증 → MITM 공격 가능 (CWE-295). `vuln_taxonomy.md` INSECURE_TLS_CLIENT 기본 severity(Medium) 적용 — 임의 상향 근거 없는 한 유지 |
+| 검증 비활성화가 일반 사용자가 도달 불가능한 명시적 opt-in 플래그(기본값은 검증 활성)로만 켜지는 진단/테스트 전용 코드 | 오탐 | FP — 운영 경로가 아니며 기본 동작은 안전. evidence에 기본값과 opt-in 조건을 명시 |
+| 결제/인증/개인정보 연동 curl에 해당 패턴이 존재 | 취약 / Medium (recommendation에서 최우선 조치 대상으로 명시) | severity 자체를 상향하지 않되(taxonomy 기본값 유지, 선례 없음), 조치 우선순위만 결제 모듈을 앞세운다 |
+| 동일 근본 원인(같은 헬퍼 함수/공통 curl 래퍼)이 여러 파일에서 반복 | 파일 간 병합(단일 finding, `evidence.affected_files`에 전체 지점 나열) | [[feedback_finding_group_merge_policy]] — HARDCODED_SECRET/DTO_EXPOSURE와 동일하게 cross-file 병합 적용 |
+
+---
+
 ### 마스킹 및 공통 규칙
 
 - `evidence.code_snippet`/`manual_review_note`에 실제 자격증명·토큰·개인정보 원문이 포함되지 않도록 [[feedback_conservative_security_policy]] 및 기존 skill들과 동일한 마스킹 원칙을 적용한다(예: `'pass'=>'thzptxptmxm01'` → `'pass'=>'***REDACTED***'`).
+- **PEM/SSH 개인키 등 블록형 시크릿은 `-----BEGIN...-----`/`-----END...-----` 헤더·푸터까지 포함해 블록 전체를 하나의 placeholder로 치환한다** — 본문(base64)만 `***REDACTED***`로 바꾸고 헤더/푸터 줄은 그대로 남기지 않는다. 헤더 리터럴 문자열 자체가 palantir_result(Bitbucket) 업로드 시 플랫폼 자체 DLP를 독자적으로 트리거해 보안 알림이 발생한 사고가 있었다(2026-09-15, ocb_game_biz_matgo/ocb_game_biz_matgo_php_real — 실제 키 값은 유출되지 않았으나 헤더 텍스트만으로 오탐성 알림 발생). 표기 예: `$gameinfo['privateKey'] = "[REDACTED PEM PRIVATE KEY BLOCK]";` (동일 계열 레포 `ocb_game_biz_admin`에서 실제 사용된 `'***REDACTED(RSA PRIVATE KEY PEM BLOCK)***'` 표기도 동일 취지 — 둘 다 허용되나 `-----BEGIN`/`-----END` 리터럴은 절대 남기지 않는다).
 - `SKILL.md` Step 4-2 HARD RULE(`reviewed`/`review_status` 필드 미설정)을 반드시 준수한다 — 이 문서(LLM-Check)는 `result`/`category`/`severity`/`llm_verdict`까지만 채우고, `reviewed`/`review_status`는 `/sec-review`의 사람 판정 전용 필드로 남긴다.
-- 8종 candidate_type 모두 순회 완료 후에만 `findings_php.json`을 완성본으로 간주한다 — 일부만 판정하고 중단 시 `task_php_llm.json`에 진행 상태를 남겨 재개 가능하게 한다.
+- 9종 candidate_type 모두 순회 완료 후에만 `findings_php.json`을 완성본으로 간주한다 — 일부만 판정하고 중단 시 `task_php_llm.json`에 진행 상태를 남겨 재개 가능하게 한다.

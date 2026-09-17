@@ -98,6 +98,36 @@ SKILL_LABEL = {
 # 2.2 요약표 · 3 취약점 상세 공통 정렬 순서 (depth1)
 SKILL_ORDER = ["injection", "xss", "file", "data", "auth", "php", "sca"]
 
+# category(취약점 유형) → 도메인(skill) 매핑 (shared/references/vuln_taxonomy.md 기준).
+# php처럼 여러 도메인 category가 한 skill에 섞여 나타나는 경우, 이 매핑으로 도메인 순위를
+# 산출해 SKILL_ORDER와 동일한 순서(injection > xss > file > data > auth)로 category를
+# 정렬한다 (_group_by_category 참조).
+CATEGORY_DOMAIN: dict[str, str] = {
+    # injection
+    "SQL인젝션": "injection", "OS Command Injection": "injection",
+    "SSI Injection": "injection", "SSTI": "injection", "코드 인젝션": "injection",
+    # xss
+    "Persistent XSS": "xss", "Reflected XSS": "xss", "DOM XSS": "xss", "View XSS": "xss",
+    "Open Redirect": "xss", "XSS 필터 미구현": "xss", "XSS 필터 불완전": "xss",
+    # file
+    "파일 업로드 취약점": "file", "파일 다운로드 경로 조작": "file",
+    "원격 파일 포함": "file", "파일 처리 범위 확인": "file",
+    # data
+    "HARDCODED_SECRET": "data", "SENSITIVE_LOGGING": "data", "WEAK_CRYPTO": "data",
+    "JWT_INCOMPLETE": "data", "DTO_EXPOSURE": "data", "CORS_MISCONFIG": "data",
+    "SECURITY_HEADER": "data", "INSECURE_TLS_CLIENT": "data",
+    "UNSAFE_DESERIALIZATION": "data", "DEBUG_MODE_ENABLED": "data",
+    # auth
+    "AUTH_BYPASS": "auth", "SESSION_MGMT": "auth", "BRUTE_FORCE_PROTECTION": "auth",
+    "IDOR": "auth", "MISSING_FUNCTION_ACCESS_CONTROL": "auth", "MASS_ASSIGNMENT": "auth",
+    "RATE_LIMIT_ABSENT": "auth", "IDEMPOTENCY_ABSENT": "auth", "CLIENT_TRUSTED_LOGIC": "auth",
+}
+
+
+def _category_domain_rank(category: str) -> int:
+    domain = CATEGORY_DOMAIN.get(category)
+    return SKILL_ORDER.index(domain) if domain in SKILL_ORDER else len(SKILL_ORDER)
+
 DISCLAIMER = """본 보고서는 palantir 진단 도구를 통한 소스코드 정적 분석(SAST) 결과이며, 보안 진단 인력이 결과를 직접 검토하였습니다.
 정적 분석(SAST) 도구의 특성상, 인증/결제 로직의 결함이나 시스템 아키텍처 구조에 기인한 심층적인 취약점은 현재 보고서에 반영되지 않았으며, 해당 영역은 추후 별도의 동적 진단(DAST) 또는 아키텍처 리뷰를 통해 리포팅될 예정입니다.
 분석 과정에서 오탐(False Positive) 및 미탐(False Negative) 가능성이 일부 존재할 수 있으므로, 식별된 취약점은 권고 사항을 참고하여 소스코드 수정 및 패치 적용 후 보안팀에 회신해 주시기 바랍니다. 본 보고서에 포함된 소스코드 스니펫 및 취약점 정보는 대외비 자산으로, 내부 보안 개선 목적으로만 사용되어야 합니다."""
@@ -442,6 +472,17 @@ def _location_cells(f: dict, omit_cve: bool = False) -> tuple[str, str, str]:
             rep_path = _to_relative_path(rep_path)
             rep_str = f"{rep_path}:{rep_line}" if rep_line else rep_path
             n = len(aff_locs)
+            af_str = f"{n}개 파일({rep_str} 외 {n - 1})" if n > 1 else rep_str
+            return (ep or "—", af_str, handler or "—")
+
+        # affected_files(복수, line 미포함 배열) + 최상위 line 스키마 폴백
+        # (예: sec-scan-file 병합 finding — affected_locations 대신 이 이름을 사용하는 사례)
+        aff_files = f.get("affected_files") or []
+        if isinstance(aff_files, list) and aff_files:
+            rep_path = _to_relative_path(str(aff_files[0]))
+            rep_line = f.get("line", "")
+            rep_str = f"{rep_path}:{rep_line}" if rep_line else rep_path
+            n = len(aff_files)
             af_str = f"{n}개 파일({rep_str} 외 {n - 1})" if n > 1 else rep_str
             return (ep or "—", af_str, handler or "—")
 
@@ -835,9 +876,11 @@ def _render_taint_expand(evidence: dict) -> list[str]:
     taint_flow_raw = evidence.get("taint_flow")
     taint_flow = taint_flow_raw if isinstance(taint_flow_raw, dict) else {}
     taint_flow_str = taint_flow_raw if isinstance(taint_flow_raw, str) else ""
-    taint_evidence = evidence.get("taint_evidence") or []
+    taint_evidence_raw = evidence.get("taint_evidence") or []
+    taint_evidence = taint_evidence_raw if isinstance(taint_evidence_raw, list) else []
+    taint_evidence_str = taint_evidence_raw if isinstance(taint_evidence_raw, str) else ""
 
-    if not taint_flow and not taint_flow_str and not taint_evidence:
+    if not taint_flow and not taint_flow_str and not taint_evidence and not taint_evidence_str:
         return lines
 
     lines.append(":::expand Taint Flow 상세 (참조용)")
@@ -869,6 +912,10 @@ def _render_taint_expand(evidence: dict) -> list[str]:
             lines += ["", "**호출 경로**", ""]
             for step in chain:
                 lines.append(f"- `{step}`")
+        lines.append("")
+
+    if taint_evidence_str:
+        lines.append(f"**Taint Evidence**: {taint_evidence_str}")
         lines.append("")
 
     for te in taint_evidence:
@@ -1120,14 +1167,18 @@ def render_markdown(
 
     def _group_by_category(findings: list[dict]) -> list[dict]:
         """같은 category(취약점 유형)끼리 묶어 연속 넘버링되도록 정렬한다.
-        그룹 순서는 그룹 내 가장 심각한(_detail_sort_key 최솟값) finding 기준,
-        그룹 내부는 기존 (결과, 위험도) 기준을 그대로 따른다."""
+        그룹 순서는 1) category가 속한 도메인의 SKILL_ORDER 순위, 2) 그룹 내 가장
+        심각한(_detail_sort_key 최솟값) finding 기준. 그룹 내부는 기존 (결과, 위험도)
+        기준을 그대로 따른다."""
         groups: dict[str, list[dict]] = {}
         for f in findings:
             groups.setdefault(f.get("category", "—"), []).append(f)
         ordered_cats = sorted(
             groups.keys(),
-            key=lambda cat: min(_detail_sort_key(f) for f in groups[cat]),
+            key=lambda cat: (
+                _category_domain_rank(cat),
+                min(_detail_sort_key(f) for f in groups[cat]),
+            ),
         )
         result: list[dict] = []
         for cat in ordered_cats:

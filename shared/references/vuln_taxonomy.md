@@ -17,15 +17,15 @@
 | OS Command 인젝션 (내부값·설정값·Dead Code) | `OS Command Injection` | `CWE-78` | `A03:2021 Injection` | `Medium` | `file` |
 | SSI 인젝션 (`<!--#exec`, `<!--#include`) | `SSI Injection` | `CWE-97` | `A03:2021 Injection` | `Critical` | `file` |
 | 서버사이드 템플릿 인젝션 (SSTI — SpEL/FreeMarker/Thymeleaf) | `SSTI` | `CWE-94` | `A03:2021 Injection` | `Critical` | `endpoint` |
-| 코드 인젝션 (PHP `eval()`/`assert()`/`create_function()` 등 동적 코드 실행) | `코드 인젝션` | `CWE-95` | `A03:2021 Injection` | `Critical` | `file` |
+| 코드 인젝션 (PHP `eval()`/`assert()`/`create_function()`, Python `eval()`/`exec()` 등 동적 코드 실행) | `코드 인젝션` | `CWE-95` | `A03:2021 Injection` | `Critical` | `file` |
 
 ### category 표준값 결정 규칙
 
 - `SQL인젝션` — SQL 직접 조작 가능한 모든 경우. 확정/잠재 여부는 severity로 구분하며 category는 동일.
 - `OS Command Injection` — `Runtime.exec`, `ProcessBuilder`, `child_process.exec/spawn`, `os.system` 등 OS 명령 실행 패턴 전체.
 - `SSI Injection` — SSI 디렉티브(`<!--#exec`, `<!--#include`, `<!--#echo`) 직접 삽입.
-- `SSTI` — SpEL parseExpression(), FreeMarker/Thymeleaf에 사용자 입력 문자열이 템플릿 변수로 전달되는 경우.
-- `코드 인젝션` — `eval()`, `assert()`(PHP 문자열 인자 버전), `create_function()`, `preg_replace()`의 `/e` modifier 등 문자열을 코드로 실행하는 함수에 사용자 입력이 도달하는 경우 (`sec-scan-php` 전용, SQL/OS Command/SSTI 어디에도 속하지 않는 동적 코드 실행).
+- `SSTI` — SpEL parseExpression(), FreeMarker/Thymeleaf, Jinja2 `render_template_string()`/`Template(user_input)` 등에 사용자 입력 문자열이 템플릿 변수로 전달되는 경우.
+- `코드 인젝션` — `eval()`, `assert()`(PHP 문자열 인자 버전), `create_function()`, `preg_replace()`의 `/e` modifier, Python `eval()`/`exec()` 등 문자열을 코드로 실행하는 함수에 사용자 입력이 도달하는 경우 (2026-09-14부로 PHP 전용에서 Python 등 다른 언어의 동일 패턴까지 확장, SQL/OS Command/SSTI 어디에도 속하지 않는 동적 코드 실행).
 
 > **❌ 금지 category 값 예시**: `Injection / OS Command (Stored RCE Pattern)`, `SQL Injection` (영문),
 > `injection`, `SQL인젝션(잠재)`, `OS 명령 실행`, `Command Injection` — 위 표준값 이외 사용 금지
@@ -119,6 +119,7 @@
 | 보안 헤더 누락 (HSTS, CSP, X-Frame-Options) | `SECURITY_HEADER` | `CWE-693` | `A05:2021 Security Misconfiguration` | `Medium` | `config` |
 | 안전하지 않은 TLS 클라이언트 (인증서 검증 비활성화) | `INSECURE_TLS_CLIENT` | `CWE-295` | `A02:2021 Cryptographic Failures` | `Medium` | `file` |
 | 안전하지 않은 역직렬화 | `UNSAFE_DESERIALIZATION` | `CWE-502` | `A08:2021 Software and Data Integrity Failures` | `Critical` | `file` |
+| 디버그 모드 운영 노출 (`DEBUG=True`, `ALLOWED_HOSTS=['*']`, 프레임워크 debug 모드) | `DEBUG_MODE_ENABLED` | `CWE-215` | `A05:2021 Security Misconfiguration` | `Medium` | `config` |
 
 ### category 표준값 결정 규칙
 
@@ -130,10 +131,17 @@
 - `CORS_MISCONFIG` — `Access-Control-Allow-Origin: *` + credentials, 임의 Origin 반사, 미설정.
 - `SECURITY_HEADER` — HTTP 응답에 HSTS/CSP/X-Frame-Options/X-Content-Type-Options 등 누락.
 - `INSECURE_TLS_CLIENT` — `SSLContext.getInstance("SSL")`, 인증서 검증 비활성 TrustManager, 평문 채널 사용.
+  PHP는 `curl_setopt(...CURLOPT_SSL_VERIFYPEER, false/0)`/`CURLOPT_SSL_VERIFYHOST` 비활성화가 동일 범주
+  (2026-09-16 ocb_game_biz PHP-010 추가진단으로 `sec-scan-php` 9번째 후보(`INSECURE_TLS_CLIENT_CANDIDATE`)로 편입).
 - `UNSAFE_DESERIALIZATION` — `ObjectInputStream`, Jackson 기본 타입, Redis 기본 직렬화 등 신뢰 불가 데이터 역직렬화.
+- `DEBUG_MODE_ENABLED` — (2026-09-14 신규, Python 진단 대응) 프레임워크 디버그 모드가 운영 배포 경로에도
+  도달 가능하게 남아있는 경우(Django `DEBUG=True`/`ALLOWED_HOSTS=['*']`, FastAPI `FastAPI(debug=True)` 등).
+  `SECURITY_HEADER`(응답 헤더 누락)나 `HARDCODED_SECRET`(값 하드코딩) 어디에도 속하지 않는, 스택트레이스·
+  내부 경로·환경변수가 노출되는 별도 결함(CWE-215)이므로 신규 category로 분리. 스택트레이스에 시크릿/쿼리가
+  실제로 노출되는 것을 확인한 경우 severity를 `High`로 상향한다.
 
 > **❌ 금지 category 값 예시**: `Hardcoded Credential`, `Sensitive Data Exposure`, `Weak Cryptography`,
-> `하드코딩`, `암호화 취약`, `보안헤더 미설정`, `CORS` — 위 표준값 이외 사용 금지
+> `하드코딩`, `암호화 취약`, `보안헤더 미설정`, `CORS`, `Debug Mode`, `디버그모드` — 위 표준값 이외 사용 금지
 
 ---
 
@@ -142,7 +150,7 @@
 | 취약점 유형 | `category` (정확한 표준값) | `cwe_id` | `owasp_category` | 기본 `severity` | `scope.type` |
 |---|---|---|---|---|---|
 | 파일 업로드 취약점 (확장자·MIME 미검증, 경로 조작) | `파일 업로드 취약점` | `CWE-434` | `A04:2021 Insecure Design` | `Critical` | `endpoint` |
-| 파일 다운로드 경로 조작 (Path Traversal, LFI) | `파일 다운로드 경로 조작` | `CWE-22` | `A01:2021 Broken Access Control` | `High` | `endpoint` |
+| 파일 다운로드 경로 조작 (Path Traversal, LFI) | `파일 다운로드 경로 조작` | `CWE-22` | `A01:2021 Broken Access Control` | `Critical` | `endpoint` |
 | 원격 파일 포함 (RFI, SSRF via file param) | `원격 파일 포함` | `CWE-918` | `A10:2021 Server-Side Request Forgery (SSRF)` | `High` | `endpoint` |
 | 파일 처리 기능 없음 (범위 확인) | `파일 처리 범위 확인` | `N/A` | `A04:2021 Insecure Design` | `Informational` | `global` |
 
@@ -155,6 +163,12 @@
 
 > **❌ 금지 category 값 예시**: `FileProcessing/UPLOAD`, `File Upload`, `파일업로드`, `LFI`, `RFI`,
 > `Path Traversal`, `파일 처리` — 위 표준값 이외 사용 금지
+
+> **2026-09-17 정정**: `파일 다운로드 경로 조작`의 기본 severity를 `High`→`Critical`로 상향.
+> `severity_criteria.md`의 "규정 명시 항목"(전자금융감독규정 제37조의3·주요정보통신기반시설보호지침
+> 근거, 규정 명시 등급 우선 적용)이 이 카테고리를 SQL인젝션/OS Command Injection/SSTI와 동일한
+> 5등급(Critical)로 규정하고 있어 본 표와 충돌해왔음 — 규정 명시 문서를 우선 적용해 본 표를 갱신.
+> `ocb_game_biz_matgo_server` FILE-001(2-1) 재판정 계기로 발견(사용자 확인 후 2026-09-17 확정).
 
 ---
 
@@ -199,3 +213,4 @@
 | 2026-05-04 | 초기 작성 — injection/xss 진단 결과물 일관성 고도화 P0 작업 |
 | 2026-05-07 | Section 4 (DATA), Section 5 (FILE) 추가 — schema 위반 방지 고도화 |
 | 2026-08-25 | Section 6 (AUTH — 인증/인가/어뷰징) 추가 — sec-scan-auth 신설에 따른 분류표 확장. Auto-Scan은 판정 없는 후보 태깅만 수행, category/severity 최종 배정은 LLM-Check 전담. |
+| 2026-09-14 | Python(Django/FastAPI) 진단 기준 수립에 따른 확장 — Section 4에 `DEBUG_MODE_ENABLED`(CWE-215) 신규 추가, Section 1 `코드 인젝션`/`SSTI` 설명을 PHP 전용에서 Python `eval()`/`exec()`/Jinja2까지 포괄하도록 확장. 상세는 `python_diagnosis_criteria.md` 참조. |
