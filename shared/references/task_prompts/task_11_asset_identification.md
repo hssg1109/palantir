@@ -115,6 +115,45 @@ skip한다. `findings[].note`(또는 자유 필드)에 아래처럼 위임 상�
 **4) 다중 레포 처리** — `$ARGUMENTS`에 레포가 여러 개면 이 판단은 레포 단위로 독립
 적용한다 (한 레포가 PHP라고 다른 레포까지 이 분기를 타지 않는다).
 
+#### 1-6. Python 판정
+
+`manage.py`, `requirements.txt`, `Pipfile`, `pyproject.toml` 존재 또는 `.py` 파일이
+주 언어인 경우:
+
+```bash
+find testbed/<project>/ -maxdepth 3 -iname "manage.py" -o -iname "requirements*.txt" \
+  -o -iname "Pipfile" -o -iname "pyproject.toml"
+find testbed/<project>/ -name "*.py" | wc -l
+```
+
+Python은 PHP와 달리 **전담 위임 skill이 없다** — `scan_python_baseline.py` 같은
+후보 태깅 스크립트 자체가 존재하지 않으므로 `/sec-scan-php`식 인라인 전체 위임을
+수행하지 않는다. 대신:
+
+**1) 이 skill의 Phase 1 출력**: `unsupported_lang: true`로 기록하고, 이 skill 자신의
+Auto-Scan Phase는 skip한다 (LLM-Check는 아래 2번 방식으로 대체 수행).
+
+**2) 이 skill이 담당하는 카테고리만 직접 수동 진단**: `shared/references/
+python_diagnosis_criteria.md`를 읽고, 그 문서의 §2(기존 5개 카테고리 매핑) 중 **현재
+실행 중인 skill에 해당하는 절만** 적용해 API 리스팅(§1)부터 진단까지 LLM이 직접
+수행한다 — 예: `/sec-scan-injection` 실행 중이면 §2-1(Injection) 행만, `/sec-scan-xss`면
+§2-2(XSS)만. 다른 카테고리는 손대지 않는다 (각 skill이 독립적으로 자기 몫만 진단 —
+PHP처럼 한 skill이 4개 도메인을 전부 대신하지 않는다).
+
+**3) §3 신규 발견 항목(설정 하이진/CORS/JWT/역직렬화/SSTI/하드코딩 인증우회) 귀속**:
+`python_diagnosis_criteria.md` §5 실행 모델에 따라 `/sec-scan-data`가 1차 담당이다.
+단, 다른 도메인 skill이 먼저 실행되며 해당 패턴을 발견하면 findings에 포함하고
+`note`에 "§3 신규 발견 — 타 skill 중복 확인 불필요"를 남겨 후속 skill의 중복 진단을
+막는다.
+
+**4) findings 저장**: 기존 skill과 동일한 `findings_<SKILL>.json` 스키마를 그대로
+사용한다 — Python이라고 별도 파일 포맷을 쓰지 않는다. `findings[].note`에 아래 템플릿을
+남긴다:
+
+- `"Python — python_diagnosis_criteria.md §2-<N> 기준 LLM 수동 진단 완료 (Auto-Scan 미지원)"`
+
+**5) 다중 레포 처리**: 1-5와 동일하게 레포 단위로 독립 적용한다.
+
 ---
 
 ### Step 2: Git 메타데이터 수집

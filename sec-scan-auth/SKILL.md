@@ -72,6 +72,7 @@ testbed/ 에 소스코드가 없으면 **위 명령을 직접 실행하고 clone
 - `shared/references/task_prompts/task_11_asset_identification.md` 절차 실행
 - Spring Controller 존재 여부, 인증 방식(세션/JWT/OAuth), Security 설정 파일(`SecurityConfig`, `WebSecurityConfigurerAdapter`) 위치 식별
 - 순수 프론트엔드면 Auto-Scan Phase skip 후 기록. PHP 등 미지원 언어이면 `task_11_asset_identification.md` §1-5에 따라 `/sec-scan-php`로 위임 실행(최초 1회, idempotent) 후 이 skill의 Auto-Scan Phase는 skip 후 기록
+- Python이면 `task_11_asset_identification.md` §1-6에 따라 `python_diagnosis_criteria.md` §2-5(Auth) 기준으로 이 skill이 직접 수동 진단(전담 위임 skill 없음, Auto-Scan skip). 하드코딩 인증우회/백도어(`AUTH_BYPASS`)도 이 skill이 담당
 
 **Auto-Scan Phase 1 — API 인벤토리 추출**
 

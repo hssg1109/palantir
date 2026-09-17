@@ -67,6 +67,7 @@ testbed/ 에 소스코드가 없으면 **위 명령을 직접 실행하고 clone
 - `shared/references/task_prompts/task_11_asset_identification.md` 절차 실행
 - frontend/backend 판별, 언어/프레임워크 확인, 설정 파일 위치(`application.yml`, `.env`) 식별
 - PHP 등 미지원 언어이면 `task_11_asset_identification.md` §1-5에 따라 `/sec-scan-php`로 위임 실행(최초 1회, idempotent) 후 이 skill의 Auto-Scan Phase는 skip 후 기록
+- Python이면 `task_11_asset_identification.md` §1-6에 따라 `python_diagnosis_criteria.md` §2-4(Data) 기준으로 이 skill이 직접 수동 진단(전담 위임 skill 없음, Auto-Scan skip). §3 신규 발견 항목(설정하이진/CORS/JWT/역직렬화)은 이 skill이 1차 담당
 
 **Phase 1 → Auto-Scan 분기 결정**
 

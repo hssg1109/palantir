@@ -29,7 +29,7 @@ find testbed/<project>/ -maxdepth 3 -iname "composer.json" -o -iname "artisan"
 ```bash
 # 비-PHP 자산(vendor/JS 번들 등) 제외 목록: scan_php_baseline.py의 _EXCLUDE_DIR_RE와 동일 기준
 find testbed/<project>/ -name "*.php" \
-  | grep -vE "(^|/)(\.git|node_modules|vendor|styleup[^/]*|common/js)(/|$)" \
+  | grep -vE "(^|/)(\.git|node_modules|vendor|styleup[^/]*|common/js|PHPExcel|aci-tree)(/|$)" \
   | sort
 ```
 

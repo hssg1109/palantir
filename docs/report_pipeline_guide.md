@@ -204,7 +204,14 @@
 | Sub_No | 결과 | 위험도 | 제목 | 분류 | 파일:라인 | 조치 요약 |
 ```
 
-**정렬 순서**: 스킬 순(injection → xss → file → data → sca) → 결과 순(취약 우선) → 위험도 내림차순
+**정렬 순서**: 스킬 순(injection → xss → file → data → auth → php → sca) → 카테고리 순
+(도메인 기준: injection → xss → file → data → auth, `SKILL_ORDER`와 동일 — `CATEGORY_DOMAIN`
+매핑, `generate_final_report.py` L100 부근 / `_category_domain_rank()`) → 결과 순(취약 우선)
+→ 위험도 내림차순
+
+> php처럼 여러 도메인 category가 한 skill에 섞여 나타나는 레포(레거시 PHP 등)에서는 이
+> 카테고리 순서가 실제로 표시 순서를 바꾼다. injection/xss/file/data/auth처럼 이미 단일
+> 도메인만 다루는 skill에서는 모든 category의 도메인 순위가 동일하므로 기존 결과와 동일하다.
 
 **각 셀 생성 규칙**:
 

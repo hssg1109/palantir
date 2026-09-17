@@ -31,7 +31,7 @@ sys.path.insert(0, str(BASE_DIR / "shared" / "scripts"))
 import secret_gate  # noqa: E402
 
 CONFLUENCE_PAGE_ID = ""  # main()에서 load_dotenv() 이후 실제 값으로 설정됨
-SKILLS = ["injection", "xss", "file", "data", "sca"]
+SKILLS = ["injection", "xss", "file", "data", "auth", "php", "sca"]
 
 KST = timezone(timedelta(hours=9))
 
