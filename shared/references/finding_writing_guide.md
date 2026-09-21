@@ -169,6 +169,8 @@ finding 하나를 완성하기 전에 아래를 모두 확인한다:
 [ ] description — 현황+위협+평가 구어체 3단 구성 완료
 [ ] recommendation — 번호 목록 (1. 2. ...) 2개 이상
 [ ] affected_endpoints — [{method, path, ...}] 구조로 영향 API 명시
+[ ] 동일 패턴 반복형 취약점이면 영향 엔드포인트 전수 기재 여부 확인 (7절)
+     — scope.affected_files[]에 확정분 전건 + report_expand에 확정/제외 표
 [ ] cwe_id / owasp_category — 기재 완료
 [ ] severity — 영문 등급 기재 (Critical/High/Medium/Low/Informational)
 [ ] risk_level — 숫자 등급 (1~5) 필수 병기. severity와 일치 확인 (4절 기준)
@@ -179,3 +181,68 @@ finding 하나를 완성하기 전에 아래를 모두 확인한다:
 > **⚠️ `risk_level` 누락 시 보고서 위험도 컬럼이 공란으로 출력된다. 반드시 포함.**
 
 코드 증적(`code_snippet`)이 없으면 finding을 미완성으로 간주한다.
+
+
+---
+
+## 7. 동일 패턴 반복형 취약점의 영향 엔드포인트 전수 명시 (필수)
+
+> **적용 대상**: 하나의 근본 원인(정제 계층 부재 등)이 여러 엔드포인트에 동일하게 나타나는 취약점.
+> 대표적으로 **Persistent XSS**(자유 텍스트 DB 저장 API), 전역 필터 부재, 공통 유틸 기반 SQL Injection,
+> 동일 업로드 핸들러를 공유하는 파일 업로드 취약점 등.
+>
+> **도입 근거 (2026-09-18 sample-game-backend XSS-002)**: Auto-Scan 취약 후보 42건 중 대표 샘플 7건만
+> finding에 기재되어 보고서에 나갔고, 실제로는 자유 텍스트를 저장하는 API가 24건이었다.
+> 개발팀이 조치 범위를 특정할 수 없었고, 사용자 지적으로 17건을 사후 보강해 재게시해야 했다.
+> 영향 범위 목록은 조치 범위 그 자체이므로, 샘플이 아니라 전수로 확정되어야 한다.
+
+### 7.1 원칙
+
+1. **확정분은 전건 기재.** `scope.affected_files[]`에 확정(정탐)된 엔드포인트를 빠짐없이 넣는다.
+   건수가 많다는 이유로 "외 N건"으로 줄이지 않는다. 이 배열이 최종 보고서 영향 범위의 근거다.
+2. **제외분도 명시.** 후보였으나 조치 대상이 아닌 엔드포인트는 사유와 함께 `report_expand`에 남긴다.
+   제외 근거가 보고서에 없으면 개발팀이 "왜 이 API는 빠졌는지"를 검증할 수 없고,
+   재진단 시 같은 판단을 반복하게 된다.
+3. **"미확인"으로 종결 금지.** 후보 전건은 확정 / 제외 / 타 finding 이관 중 하나로 분류한다.
+4. **입력 경로가 다른 건은 분리.** 같은 취약 유형이라도 입력 경로(JSON 본문 / multipart 폼 /
+   엑셀·CSV 파싱 등)가 다르면 조치 방법이 달라지므로 별도 finding으로 나누거나,
+   최소한 표에서 경로를 구분해 표기한다 — 전역 정제로 덮이는 범위가 달라지기 때문이다.
+
+### 7.2 report_expand 표 형식
+
+**확정 목록** — 컨트롤러 / 엔드포인트 / 자유 텍스트 필드 / 저장 sink 4열을 기본으로 한다.
+
+```markdown
+### 동일 패턴 추가 확인 엔드포인트
+
+| 컨트롤러 | 엔드포인트 | 자유 텍스트 필드 | 저장 sink |
+|---|---|---|---|
+| UserQuestionBoardController | `POST /api/v1/board/question` | `title`, `contents` | `QuestionRepository.save()` |
+| PartnerDepartmentController | `POST /api/v1/partner/{seq}/department` | `name` | `DepartmentRepository.save()` |
+```
+
+**제외 목록** — 엔드포인트 / 제외 사유 2열 이상.
+
+```markdown
+### 조치 대상에서 제외한 엔드포인트
+
+| 엔드포인트 | 제외 사유 |
+|---|---|
+| `POST .../employee/unlock` | `employeeIds` 식별자(Long) 목록만 수신 — 페이로드 삽입 불가 |
+| `POST .../auth/verify-otp` | 인증 계열, 형식 고정(숫자 6자리) |
+```
+
+동일 사유가 여러 건이면 한 행으로 묶고 건수를 병기해도 된다(예: `배치·인증 계열 19건`).
+
+### 7.3 집계 일관성
+
+`scan_coverage.result_breakdown`(엔드포인트 기준)과 finding 건수는 서로 다른 모수이므로 혼용하지 않는다.
+summary와 보고서에서 둘을 함께 제시할 때는 **"finding 기준" / "엔드포인트 기준"으로 표를 분리**하고,
+`result_breakdown_basis`에 원본 취약 → FP 제외 → 소스 검증 이관 → 최종 확정까지의 산출 경로를 문장으로 남긴다.
+
+### 7.4 기계적 백스톱
+
+`tools/check_endpoint_coverage.py`가 Auto-Scan 취약 엔드포인트 전건이 finding에 등장하는지 대조한다.
+`/sec-review` §5b 자기일관성 검증 단계에서 자동 실행되며, 누락 엔드포인트가 나오면
+해당 finding의 `affected_files`/`report_expand`를 보강한 뒤 진행한다.
+

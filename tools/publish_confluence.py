@@ -132,6 +132,21 @@ def md_to_confluence(md: str) -> str:
             )
             return f'\x00CODE{idx}\x00'
         text = re.sub(r'\[JIRA:([A-Z]+-\d+)\]', _stash_jira, text)
+        # 1a. status 색상 뱃지(로젠지): [status:red]High[/status]
+        #     colour 허용값: Grey/Red/Yellow/Green/Blue (대소문자 무관 → 첫글자 대문자화)
+        def _stash_status(m: re.Match) -> str:
+            colour = m.group(1).strip().capitalize()
+            title  = (m.group(2).strip()
+                      .replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
+            idx = len(code_spans)
+            code_spans.append(
+                f'<ac:structured-macro ac:name="status">'
+                f'<ac:parameter ac:name="colour">{colour}</ac:parameter>'
+                f'<ac:parameter ac:name="title">{title}</ac:parameter>'
+                f'</ac:structured-macro>'
+            )
+            return f'\x00CODE{idx}\x00'
+        text = re.sub(r'\[status:([A-Za-z]+)\](.*?)\[/status\]', _stash_status, text)
         text = re.sub(r'`([^`]+)`', _stash_code, text)
         # 1b. 마스킹 표기 등에서 쓰이는 4개 이상 연속 asterisk는 강조 마크업이 아니라
         # 리터럴 텍스트로 취급 (예: "411111******1234"). 그대로 두면 **/*** 정규식이
@@ -174,6 +189,24 @@ def md_to_confluence(md: str) -> str:
 
     while i < len(lines):
         line = lines[i]
+
+        # 단일라인 매크로: [[toc]] (목차) / [[attachments]] (페이지 첨부 목록)
+        if line.strip() == '[[toc]]':
+            out.append(
+                '<ac:structured-macro ac:name="toc">'
+                '<ac:parameter ac:name="maxLevel">2</ac:parameter>'
+                '</ac:structured-macro>'
+            )
+            i += 1
+            continue
+        if line.strip() == '[[attachments]]':
+            out.append(
+                '<ac:structured-macro ac:name="attachments">'
+                '<ac:parameter ac:name="upload">false</ac:parameter>'
+                '</ac:structured-macro>'
+            )
+            i += 1
+            continue
 
         # note/info/warning/tip 패널 매크로 (:::note ... :::)
         m_panel = re.match(r'^:::(note|info|warning|tip)(?:\s+(.*))?$', line)

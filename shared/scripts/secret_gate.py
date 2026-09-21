@@ -45,6 +45,12 @@ _VALUE_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("PEM Private Key", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |)PRIVATE KEY-----")),
     ("GitHub Token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b")),
     ("Slack Token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    # 2026-09-18 svc-api-with-python: .env 파일 원문(`OPENAI_API_KEY=sk-...`)이
+    # findings에 인용되면서 키 이름 기반 탐지(_KV_SECRET_RE)를 우회했다. 키 이름과
+    # 무관하게 값 자체의 형태로 잡아내는 2차 방어선을 추가한다(접두사가 고정돼
+    # 있어 오탐 위험이 낮은 것만 선별).
+    ("OpenAI API Key", re.compile(r"\bsk-(?:proj-|svcacct-|admin-)?[A-Za-z0-9_-]{20,}\b")),
+    ("Google API Key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
 ]
 
 # PEM 키 블록 전체(헤더~푸터, 개행 포함) — mask_text()가 이 패턴을 최우선으로 치환해
@@ -78,10 +84,28 @@ _PEM_BLOCK_RE = re.compile(
 # push.apple.cert.passwd 운영 자격증명이 이 경로로 마스킹을 4곳 우회함).
 # 값 문자 클래스 자체는 백슬래시를 계속 제외해 기존 2026-08-18 개행 이스케이프
 # 방지 로직은 그대로 유지한다.
+# .env / 환경변수 스타일 KEY=value 대응 (2026-09-18 svc-api-with-python 사고):
+# 기존 패턴은 키 이름 앞에 `\b`만 두어 `password`/`api_key`처럼 시크릿 단어로
+# **시작하는** 키만 인식했다. 그러나 `.env` 파일 원문에서 실제로 쓰이는 이름은
+# `DB_PASSWORD=`, `OPENAI_API_KEY=`, `SVC_SUGAR_SALT=`처럼 접두 세그먼트가 붙은
+# 형태이고, `_`/`-`는 단어 문자이거나 키 내부 구분자라 `\b`가 세그먼트 경계에서
+# 매치되지 않는다 — 그 결과 운영 DB 비밀번호·OpenAI 키·SUGAR SALT/SID가 마스킹과
+# 게이트를 모두 통과해 사람이 직접 잡아낼 때까지 state/에 평문으로 남았다.
+#
+# 따라서 키 이름 앞에 `(?:[A-Za-z0-9]+[_-])*` 접두 세그먼트를 허용한다. 구분자를
+# 반드시 요구하므로 `tempPassword`/`getPassword` 같은 camelCase 식별자는 여전히
+# 매치되지 않는다(2026-08-24 sample-gws-admin-api 계열 오탐 방지 로직 유지).
+#
+# 2차 목록(salt/sid/pass/...)은 단어 자체가 산문에 흔해 단독으로는 오탐이 크므로
+# **접두 세그먼트가 1개 이상 있는 환경변수 형태**(`SVC_SUGAR_SALT=`)일 때만 인정한다.
 _KV_SECRET_RE = re.compile(
-    r'(?i)(?P<prefix>\bthis\.)?\b(?P<key>password|passwd|pwd|secret|token|apikey|api[_-]key|'
+    r'(?i)(?P<prefix>\bthis\.)?\b(?P<key>'
+    r'(?:[A-Za-z0-9]+[_-])*'
+    r'(?:password|passwd|pwd|secret|token|apikey|api[_-]key|'
     r'access[_-]?key(?:[_-]id)?|secret[_-]?key|client[_-]secret|'
     r'private[_-]key|signing[_-]key|hmac[_-]key|auth[_-]key)'
+    r'|(?:[A-Za-z0-9]+[_-])+(?:salt|sid|pass|passphrase|credential|seed)'
+    r')'
     r'\s*[=:]\s*\\?(?P<quote>["\']?)(?P<value>[^\s"\'\\,\]}]{3,})\\?(?P=quote)'
 )
 
@@ -109,8 +133,34 @@ _KV_SECRET_RE = re.compile(
 # 값 앞부분에서 식별자를 추출한 뒤 나머지가 영문/숫자를 포함하지 않는지로 판단한다
 # (나머지가 영문/숫자를 포함하면 식별자 뒤에 실제 시크릿 문자가 이어붙은 것일
 # 수 있으므로 안전하지 않은 것으로 간주).
+_KOREAN_RE = re.compile(r"[가-힣]")
 _JAVA_IDENTIFIER_PREFIX_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*")
 _ALNUM_RE = re.compile(r"[A-Za-z0-9]")
+
+
+# 값 자리에 리터럴이 아니라 "코드"가 온 경우를 걸러낸다(2026-09-18, .env 스타일
+# 키 접두 허용으로 탐지 범위를 넓히면서 함께 드러난 오탐 계열):
+#   - `JWT_SECRET = os.environ.get('JWT_SECRET')` / `$user_pwd = md5(...)`
+#     → 값이 "식별자("  형태인 함수 호출식. 환경변수 조회·해시 계산 코드지 값이 아니다.
+#   - `const INITIAL_TOKEN: TokenState = { ... }`
+#     → `key: Type = ...` 타입 선언. 매치 직후에 `=`가 이어지므로 값이 아님이 드러난다.
+#   - `HARDCODED_SECRET: 2건 High → ...` 같은 한글 산문
+#     → 실제 자격증명 값에 한글이 포함되는 경우는 없다.
+# 세 경우 모두 따옴표 없는 값에 한정한다(따옴표가 있으면 리터럴로 간주).
+_CODE_CALL_VALUE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*[\(\[]")
+_TRAILING_ASSIGN_RE = re.compile(r"^\s*=[^=]")
+
+
+def _is_code_expression(m: re.Match) -> bool:
+    value = m.group("value")
+    if _KOREAN_RE.search(value):
+        return True
+    if m.group("quote"):
+        return False
+    if _CODE_CALL_VALUE_RE.match(value):
+        return True
+    tail = m.string[m.end():m.end() + 8]
+    return bool(_TRAILING_ASSIGN_RE.match(tail))
 
 
 def _is_code_field_reference(m: re.Match) -> bool:
@@ -133,13 +183,38 @@ def _is_code_field_reference(m: re.Match) -> bool:
 # 같은 변수 대입문에서 값 자리에 오는 언어 키워드(실값 아님. 2026-08-20
 # sample-k-front DATA-001 evidence.code_snippet에서 실측 — 예약어를 시크릿으로
 # 오인해 마스킹하면서 코드 자체가 손상되는 2차 사고가 이미 한 번 발생했다).
+# 꺾쇠 플레이스홀더(`<REDACTED>`, `<REDACTED_DB_PASSWORD>`, `<your-key>`)도 허용목록에
+# 포함한다(2026-09-18): 리뷰어가 수동 마스킹할 때 관용적으로 쓰는 표기인데 기존
+# 허용목록은 `[REDACTED]`/`REDACTED` 형태만 인정해, 수동 마스킹을 마친 보고서가
+# 게시 직전 게이트에서 "미마스킹 자격증명"으로 차단되는 일이 실제로 발생했다
+# (svc-api-with-python — 11곳을 `[REDACTED...]`로 일괄 치환해서야 게시됨).
+# 실제 시크릿이 `<...>`로 감싸인 채 유출되는 경우는 정의상 존재하지 않으므로
+# `^<...>$` 전체를 플레이스홀더로 간주해도 탐지 누락 위험이 없다.
 _PLACEHOLDER_PREFIX_RE = re.compile(
-    r"(?i)^\[?redact|^\*{3,}|^n/?a$|^null$|^none$|^true$|^false$"
-    r"|^enc\(|^\$\{|^\$[A-Za-z_]"
-    r"|^(?:string|number|int|integer|long|boolean|bool|object|any)[\]\)\}]?$"
+    r"(?i)^[<\[(]?(?:redact|masked?)|^<[^<>]*>$"
+    r"|^\*{3,}|^n/?a$|^null$|^none$|^true$|^false$"
+    r"|^enc\(|^\$\{|^#\{|^\{\{|^\$[A-Za-z_]"
+    r"|^(?:string|number|int|integer|long|boolean|bool|object|any)[\]\)\},;]?$"
     r"|^\.{3,}$"
     r"|^(?:await|async|function|typeof|void|yield|new|this|undefined)[\]\)\},;]?$"
+    # 파이프라인 내부 어휘(판정 출처/단계 라벨) — findings의 서술 필드에서
+    # "HARDCODED_SECRET: auto-scan High → LLM Critical"처럼 값 자리에 오지만
+    # 자격증명이 아니다(2026-09-18 sample-commerce-backend consolidation_note 오탐).
+    r"|^(?:auto|auto-scan|manual|rule|scan|llm|llm-check)$"
 )
+
+
+def _is_placeholder(value: str) -> bool:
+    """플레이스홀더/안전값 판정 — 원문과 후행 구두점 제거본을 모두 대조한다.
+
+    코드 스니펫을 산문에 인용할 때 값 뒤에 `;`/백틱/괄호가 그대로 붙어 캡처되므로
+    (예: "push_token = null;`"), 원문만 대조하면 `^null$` 같은 정확 매치형
+    허용목록이 전부 빗나간다(2026-09-18 sample-was-2 오탐).
+    """
+    if _PLACEHOLDER_PREFIX_RE.match(value):
+        return True
+    stripped = value.rstrip("`;,)]}.'\"")
+    return bool(stripped) and stripped != value and bool(_PLACEHOLDER_PREFIX_RE.match(stripped))
 
 
 # --- 마크다운 표(real/stg/dev 비교표) 형태 자격증명 탐지 -----------------------
@@ -176,7 +251,6 @@ _ENV_HEADER_CELL_RE = re.compile(
 
 _TABLE_SEPARATOR_RE = re.compile(r"^:?-{2,}:?$")
 
-_KOREAN_RE = re.compile(r"[가-힣]")
 # 최소 길이 3→5: "100"/"FTP"/"info" 같은 행 번호·짧은 영단어 오탐 방지
 # (2026-08-25 재스캔 오탐 실측 — 모두 길이 3~4).
 _TABLE_CELL_TOKEN_RE = re.compile(r"^[A-Za-z0-9!@#$%^&*()_+=./\-]{5,}$")
@@ -274,7 +348,8 @@ def scan_text(text: str) -> list[str]:
             messages.append(f"{label} (line {line_no})")
     for m in _KV_SECRET_RE.finditer(text):
         value = m.group("value")
-        if _PLACEHOLDER_PREFIX_RE.match(value) or _is_code_field_reference(m):
+        if (_is_placeholder(value) or _is_code_field_reference(m)
+                or _is_code_expression(m)):
             continue
         line_no = text.count("\n", 0, m.start()) + 1
         messages.append(f"미마스킹 자격증명 ({m.group('key')}) (line {line_no})")
@@ -296,7 +371,8 @@ def scan_text_with_lines(text: str) -> list[tuple[str, int]]:
             hits.append((label, text.count("\n", 0, m.start()) + 1))
     for m in _KV_SECRET_RE.finditer(text):
         value = m.group("value")
-        if _PLACEHOLDER_PREFIX_RE.match(value) or _is_code_field_reference(m):
+        if (_is_placeholder(value) or _is_code_field_reference(m)
+                or _is_code_expression(m)):
             continue
         hits.append((f"미마스킹 자격증명 ({m.group('key')})", text.count("\n", 0, m.start()) + 1))
     parts = _split_rows_with_seps(text)
@@ -337,7 +413,8 @@ def mask_text(text: str) -> tuple[str, int]:
     def _mask_kv(m: re.Match) -> str:
         nonlocal count
         value = m.group("value")
-        if _PLACEHOLDER_PREFIX_RE.match(value) or _is_code_field_reference(m):
+        if (_is_placeholder(value) or _is_code_field_reference(m)
+                or _is_code_expression(m)):
             return m.group(0)
         count += 1
         full = m.group(0)

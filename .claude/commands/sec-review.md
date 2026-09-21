@@ -672,6 +672,40 @@ Phase 2는 `reviewed: true` + `review_status: "정탐"` 인 모든 finding에 �
       ```
    5. 합격이면(이미 1번 항목이 구체적) 아무것도 변경하지 않고 다음 finding으로 진행.
 
+3.7. **영향 엔드포인트 커버리지 검증 ⚠️ 필수 (2026-09-18 sample-game-backend XSS-002 사례로 도입)**:
+
+   > **배경**: root cause 계열 finding(하나의 근본 원인이 여러 엔드포인트에 동일하게 나타나는 유형 —
+   > Persistent XSS, 전역 필터 부재, 공통 유틸 SQL Injection, 공유 업로드 핸들러 등)은 LLM 검토 절차가
+   > "대표 샘플 3-5건"만 확인하도록 돼 있어, Auto-Scan이 취약으로 태깅한 나머지 엔드포인트가 보고서
+   > 어디에도 나타나지 않는 사고가 발생했다(sample-game-backend XSS-002 — 실제 자유 텍스트 저장 API 28건 중
+   > 7건만 기재되어 개발팀이 조치 범위를 산정할 수 없었음). 영향 엔드포인트 목록은 곧 조치 범위이므로
+   > 샘플이 아니라 전수로 확정되어야 한다.
+
+   해당 skill의 스캔 결과가 엔드포인트 단위 판정을 포함하는 경우(`xss`, `injection` 등) 아래를 실행한다:
+
+   ```bash
+   python3 tools/check_endpoint_coverage.py --repo <repo> --skill <skill> [--run-id <run_id>]
+   ```
+
+   1. `언급 없음(분류 누락 의심)`이 0건이면 그대로 4번(저장)으로 진행한다.
+   2. 1건 이상이면 출력된 엔드포인트 각각을 소스에서 확인해 아래 중 하나로 분류하고, 해당 위치에 반영한다.
+      - **확정(조치 대상)** → 해당 finding의 `scope.affected_files[]`에 추가
+      - **제외** → `report_expand`의 "조치 대상에서 제외한 엔드포인트" 표에 **엔드포인트 단위로** 사유와 함께 추가
+        (건수만 묶은 집계 표기 — 예 "배치 계열 19건" — 는 커버리지 대조를 통과하지 못하므로 사용하지 않는다)
+      - **타 finding 이관** → 해당 finding에 추가
+   3. `affected_files[]`에 `POST 공지사항 등록`, `... 외 다수` 같은 모호 표기가 있으면 실제 엔드포인트 경로로 전개한다.
+      이런 표기는 보고서 영향 범위 목록에서 그대로 누락으로 이어진다.
+   4. 반영 후 커버리지를 재실행해 0건을 확인하고, `scan_coverage.result_breakdown`(엔드포인트 기준 집계)이
+      확정/제외 건수와 일치하는지 대조한다. 불일치하면 `result_breakdown_basis`에 산출 경로를 다시 쓴다.
+   5. 콘솔 출력:
+      ```
+      [P2-COVERAGE] {skill} — 취약 엔드포인트 {N}건 중 {M}건 미기재 → 전수 분류 후 반영 완료
+      ```
+
+   > 작성 형식은 `shared/references/finding_writing_guide.md` §7(동일 패턴 반복형 취약점의 영향 엔드포인트
+   > 전수 명시) 참조. XSS는 `sec-scan-xss/references/task_prompts/task_23_xss_review.md`의 Root Cause
+   > finding 검토 절차에 동일 원칙이 소스 단계에 반영돼 있다.
+
 4. **저장**: `findings_*.json`의 해당 finding에 `report_expand` 필드(및 3.6에서 재배치된 경우
    `recommendation` 필드) 추가 후 즉시 저장
 

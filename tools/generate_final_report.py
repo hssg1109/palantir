@@ -624,6 +624,16 @@ def _build_gemini_prompt_for_overview(
         p.append(f"   분류: {cat}")
         if desc:
             p.append(f"   설명: {desc}")
+        # 조치 방향은 반드시 finding별 확정 권고를 따라야 하므로 recommendation 첫 항목을 함께 전달한다.
+        # (미전달 시 LLM이 해당 취약점 유형의 일반론적 조치를 써넣어 본문 권고와 어긋나는 사고 발생 —
+        #  2026-09-18 sample-game-backend: 본문은 "서블릿 필터는 JSON 본문에 무효"인데 개요는 Lucy 필터 권고)
+        reco_raw = (f.get("recommendation", "") or "").strip()
+        if reco_raw:
+            first = reco_raw.split("\n", 1)[0].strip()
+            first = re.sub(r"^\s*\d+[.)]\s*", "", first)
+            if len(first) > 160:
+                first = first[:160].strip() + "…"
+            p.append(f"   확정 권고: {first}")
         p.append("")
 
     if len(sorted_findings) > 15:
@@ -640,6 +650,9 @@ def _build_gemini_prompt_for_overview(
         "2. 위험도 높은 주요 취약점 현황을 간략히 언급하고,",
         "   데이터 유출·서버 침투·개인정보 노출 등 보안 위협을 한두 가지만 간단히 적습니다.",
         "3. 마지막에 한 문장으로 간단한 조치 방향을 추가합니다.",
+        "   이때 조치 방향은 위 목록의 '확정 권고'에 적힌 내용만 근거로 삼습니다.",
+        "   해당 취약점 유형의 일반적인 대응책이라도 '확정 권고'에 없는 특정 제품·라이브러리·기법명",
+        "   (예: 특정 필터 라이브러리명)을 임의로 제시하지 않습니다.",
         "4. 분량: 2~3문장. 짧고 명확하게.",
         "5. 존댓말(합쇼체)을 사용합니다.",
         "6. 취약점이 없는 경우 '이번 진단에서 취약 항목이 발견되지 않았습니다.'로 시작합니다.",

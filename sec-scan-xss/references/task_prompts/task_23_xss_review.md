@@ -920,15 +920,49 @@ grep -r "@JsonXssFilter.*disable.*true\|disable\s*=\s*true" src/ | grep -i "xss"
 
 #### Root Cause finding (`finding_type: "root_cause"`) LLM 검토 절차
 
+> ⚠️ **후보 전수 분류 의무 (2026-09-18 도입)**
+>
+> 종전 절차는 "대표 샘플 3-5건 선택"만 지시했다. 그 결과 root cause finding의
+> `affected_files[]`에 샘플 몇 건만 남고 나머지 취약 후보 엔드포인트는 보고서 어디에도
+> 나타나지 않아, 개발팀이 조치 범위를 알 수 없는 사고가 발생했다
+> (2026-09-18 sample-game-backend XSS-002 — 실제 자유 텍스트 저장 API 24건 중 7건만 기재되어
+> 사후에 17건을 재검증·보강). **샘플링은 심층 taint 추적의 범위를 줄이는 수단일 뿐,
+> 분류 자체는 후보 전건에 대해 수행한다. "미확인 K건"을 남긴 채 종결하지 않는다.**
+
 ```
-1. affected_endpoints[] 에서 대표 샘플 3-5건 선택
-2. 각 Controller 파일 Read → Service → Repository 추적
+1. 심층 추적 (샘플 3-5건)
+   affected_endpoints[] 에서 대표 샘플 3-5건 선택
+   → 각 Controller 파일 Read → Service → Repository 까지 완전 추적
+   → call_chain을 taint_evidence 증적으로 기재
+
+2. 전수 분류 (샘플 외 나머지 전건 — 필수)
+   샘플에 들지 않은 후보 엔드포인트도 한 건도 빠짐없이
+   요청 DTO 필드 + 저장 sink를 확인하여 아래 셋 중 하나로 분류한다.
+     - 확정(TP)   : 자유 텍스트 String 필드가 정제 없이 저장 계층에 도달
+     - 제외(FP)   : 숫자/Enum/날짜/식별자 등 페이로드 삽입 불가, 형식 검증으로 제한,
+                    또는 DB write 자체가 없음
+     - 타 finding 이관 : 입력 경로가 달라(multipart 폼 필드, 엑셀 파싱 등)
+                    전역 정제로 덮이지 않아 별도 finding으로 분리해야 하는 건
+   ※ DTO 필드 타입 확인은 Controller 시그니처 + DTO 클래스 Read 두 파일이면 끝나므로,
+     후보가 수십 건이어도 전수 분류 비용은 크지 않다. 비용을 이유로 생략하지 않는다.
+
 3. DB write 여부 + 저장 필드 Data Type(String/Integer/Enum) 확인
-4. 결과 집계:
-   - 확정 TP N건: llm_verdict = "TP", manual_review_note에 대표 call_chain 기재
-   - FP M건: 각 endpoint 이유(숫자 파라미터만 등) manual_review_note에 기재
+
+4. 결과 반영 (필수)
+   - 확정(TP) 전건을 scope.affected_files[] 에 빠짐없이 기재 — 대표 1건만 남기지 않는다
+   - report_expand 에 확정분 목록 표 + 제외분 표를 모두 기재
+     (표 형식은 shared/references/finding_writing_guide.md §7 참조)
+   - llm_verdict = "TP", manual_review_note 에 "확정 N건 / 제외 M건 / 이관 K건" 집계와
+     제외 사유 요약 기재
    - FP가 전체의 70% 이상: fp_corrected = true, llm_verdict = "FP"
-   - 혼재(TP+FP): llm_verdict = "TP" 유지, note에 "TP N건 / FP M건 / 미확인 K건" 기재
+
+5. 자체 검증 (저장 직전)
+   Auto-Scan이 "취약"으로 판정한 엔드포인트 전건이
+     affected_files[] ∪ report_expand 확정 표 ∪ report_expand 제외 표 ∪ 타 finding
+   중 최소 한 곳에는 반드시 등장하는지 대조한다.
+   어느 곳에도 없는 엔드포인트가 있으면 분류 누락이므로 2단계로 돌아간다.
+   (기계적 대조는 tools/check_endpoint_coverage.py 로도 수행 가능 —
+    /sec-review §5b 자기일관성 검증에서 자동 실행된다)
 ```
 
 #### Instance finding (`finding_type: "instance"`) LLM 검토 절차
@@ -943,6 +977,10 @@ grep -r "@JsonXssFilter.*disable.*true\|disable\s*=\s*true" src/ | grep -i "xss"
 #### 복수 API가 동일 취약점에 해당하는 경우
 
 `scope.affected_files[]` 배열로 처리한다. `scope.endpoint`는 대표 API 1건, 나머지는 `affected_files[]`에 추가.
+
+> ⚠️ `affected_files[]`에는 확정(TP)된 **전건**을 넣는다. 건수가 많다는 이유로 일부만 넣고
+> "외 N건"으로 줄이지 않는다 — 이 배열이 최종 보고서의 영향 범위 목록 근거가 되므로,
+> 여기서 빠진 엔드포인트는 개발팀에 전달되지 않는다.
 
 ```json
 "scope": {
