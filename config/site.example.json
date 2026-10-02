@@ -1,16 +1,38 @@
 {
   "_설명": "config/site.local.json 예시 — 실제 값은 site.local.json(gitignore)에 둔다",
   "customer_label": "고객사",
-  "target_repo_keywords": ["keyword1", "keyword2"],
-  "target_project_keys": ["PROJKEY1", "PROJKEY2"],
-  "project_labels": {"PROJKEY1": "서비스명1"},
-  "group_rules": [["^서비스A", "서비스A"], ["^DI-", "DI(데이터인프라)"]],
-  "extra_acronyms": ["abc"],
+  "target_repo_keywords": [
+    "keyword1",
+    "keyword2"
+  ],
+  "target_project_keys": [
+    "PROJKEY1",
+    "PROJKEY2"
+  ],
+  "project_labels": {
+    "PROJKEY1": "서비스명1"
+  },
+  "group_rules": [
+    [
+      "^서비스A",
+      "서비스A"
+    ],
+    [
+      "^DI-",
+      "DI(데이터인프라)"
+    ]
+  ],
+  "extra_acronyms": [
+    "abc"
+  ],
   "plan_page_title": "<체크리스트 원본 페이지 제목>",
   "plan_parent_page_id": "<PAGE_ID>",
   "scan_plan_page_id": "<PAGE_ID>",
   "cleansing_page_id": "<PAGE_ID>",
   "service_history_page_id": "<PAGE_ID>",
   "service_history_page_title": "<신청이력 페이지 제목>",
-  "process_guide_url": "https://wiki.example.com/pages/viewpage.action?pageId=<PAGE_ID>"
+  "process_guide_url": "https://wiki.example.com/pages/viewpage.action?pageId=<PAGE_ID>",
+  "internal_email_domains": [
+    "example.com"
+  ]
 }

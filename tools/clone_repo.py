@@ -28,6 +28,7 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import jira_utils  # noqa: E402
+import site_config  # noqa: E402
 
 # ── .env 로드 ────────────────────────────────────────────────────────────────
 _ENV_PATH = Path(__file__).parent.parent / ".env"
@@ -54,7 +55,7 @@ TESTBED_DIR: Path        = Path(__file__).parent.parent / "testbed"
 STATE_DIR: Path          = Path(__file__).parent.parent / "state"
 
 # ── 담당자 표기 정규화 ─────────────────────────────────────────────────────────
-INTERNAL_EMAIL_DOMAINS = {"internal.example.com"}
+INTERNAL_EMAIL_DOMAINS = set(site_config.get("internal_email_domains", []))
 MAINTAINER_CACHE_PATH: Path = Path(__file__).parent.parent / "shared" / "references" / "maintainer_directory_cache.json"
 
 
