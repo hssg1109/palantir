@@ -222,7 +222,7 @@ _S_ENTROPY_UNIQUE_THRESHOLD = 4  # 유니크 문자 수 최소값
 # 서비스 레이어에서 userInfo.<sensitiveField> → 응답 DTO 필드 직접 할당 패턴
 # 마스킹 함수 없이 할당 시 API 응답에 PII 비마스킹 노출 위험 (CWE-359)
 _P_USERINFO_PII_RE = re.compile(
-    r'\buserInfo\.(mdn|userName|birthDate|birth\b|ciNo|svcCardNo|mbrId)\b',
+    r'\buserInfo\.(mdn|userName|birthDate|birth\b|ciNo|[a-zA-Z]*CardNo|mbrId)\b',
     re.IGNORECASE,
 )
 # 마스킹 함수 — 동일 라인 또는 인접 라인에 존재하면 보호됨
@@ -2043,7 +2043,7 @@ def scan_api_response_pii(source_dir: Path) -> list[DPFinding]:
 
     탐지 조건:
       - *Service*.kt / *Service*.java 파일에서
-      - `userInfo.(mdn|userName|birthDate|birth|ciNo|svcCardNo|mbrId)` 패턴이
+      - `userInfo.(mdn|userName|birthDate|birth|ciNo|[a-zA-Z]*CardNo|mbrId)` 패턴이
       - 대입(=) 표현식 우변에 위치하며
       - 동일 라인 ±2줄 내에 마스킹 함수 호출이 없는 경우
     """

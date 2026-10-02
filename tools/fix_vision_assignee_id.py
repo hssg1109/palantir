@@ -32,8 +32,8 @@ GATEWAY_DIR   = PALANTIR_DIR.parent / "palantir-jira-gateway"
 load_dotenv(GATEWAY_DIR / ".env")          # Jira 인증 (gateway 토큰 우선)
 load_dotenv(PALANTIR_DIR / ".env", override=False)
 
-VISION_BASE   = "https://vision.example.com"
-JENKINS_BASE  = "https://ssc.example.com:9090"
+VISION_BASE   = os.getenv("VISION_BASE_URL", "")
+JENKINS_BASE  = os.getenv("JENKINS_BASE_URL", "")
 JENKINS_JOB   = "/job/FORTIFY/job/" + urllib.parse.quote("미사용-레포-등록", safe="") + "/build"
 JENKINS_USER  = os.getenv("JENKINS_USER", "")
 JENKINS_TOKEN = os.getenv("JENKINS_TOKEN", "")

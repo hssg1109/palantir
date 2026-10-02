@@ -27,6 +27,9 @@ import urllib.request
 import urllib.parse
 from pathlib import Path
 from datetime import datetime
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_config  # noqa: E402
 
 # ── .env 로드 ─────────────────────────────────────────────────────────────────
 _ENV_PATH = Path(__file__).parent.parent / ".env"
@@ -48,10 +51,7 @@ BASE_URL = _ENV.get("BITBUCKET_BASE_URL", "https://bitbucket.example.com").rstri
 TOKEN    = _ENV.get("CUSTOMER_BB_TOKEN", "")
 
 # SVC 관련 키워드 (프로젝트 키/명, 레포명 매칭용)
-TARGET_KEYWORDS = [
-    "svc", "고객사", "고객사", "okchk", "okcb",
-    "svcwebview", "mall", "고객사",
-]
+TARGET_KEYWORDS = [k.lower() for k in site_config.get("target_repo_keywords", [])]
 
 # ── Bitbucket REST API 헬퍼 ───────────────────────────────────────────────────
 
@@ -145,7 +145,7 @@ def find_target_repos(
 
         # 알려진 SVC 프로젝트 키가 없으면 추가
         known_keys = {p["key"] for p in target_projs}
-        for kk in ["SVCWEBVIEW", "SVC", "SVCX", "SVCX"]:
+        for kk in site_config.get("target_project_keys", []):
             if kk not in known_keys:
                 # 해당 프로젝트가 실제로 존재하는지 확인
                 matched = [p for p in all_projs if p.get("key") == kk]

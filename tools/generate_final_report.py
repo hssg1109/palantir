@@ -31,6 +31,9 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_config  # noqa: E402
 
 PALANTIR_DIR   = Path(__file__).resolve().parent.parent
 STATE_DIR      = PALANTIR_DIR / "state"
@@ -135,7 +138,8 @@ DISCLAIMER = """본 보고서는 palantir 진단 도구를 통한 소스코드 �
 
 # ── 유틸 ─────────────────────────────────────────────────────────────────────
 
-_ACRONYMS = {"svc", "cust", "api", "sdk", "ui", "sns", "sms", "mms", "id", "url", "html", "css", "js", "aos", "ios"}
+_ACRONYMS = {"api", "sdk", "ui", "sns", "sms", "mms", "id", "url", "html", "css", "js", "aos", "ios"}
+_ACRONYMS |= {a.lower() for a in site_config.get("extra_acronyms", [])}
 
 
 def _repo_to_service_name(repo: str) -> str:

@@ -363,7 +363,7 @@ def _find_java(java_home_override: Optional[str] = None) -> Optional[Path]:
 
     # WSL2: IntelliJ IDEA 가 ~/.jdks/ 에 내려받은 JDK (Corretto, MS OpenJDK 등)
     # Windows 사용자 홈의 .jdks 디렉토리 탐색 (버전 내림차순 — 최신 우선)
-    for win_user in ["/mnt/c/Users/고객사", "/mnt/c/Users/GEUN", "/mnt/c/Users"]:
+    for win_user in [*sorted(str(p) for p in Path("/mnt/c/Users").glob("*") if (p / ".jdks").is_dir()), "/mnt/c/Users"]:
         jdks_dir = Path(win_user) / ".jdks"
         if jdks_dir.exists():
             for child in sorted(jdks_dir.iterdir(), reverse=True):

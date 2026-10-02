@@ -29,6 +29,9 @@ TESTBED_DIR = BASE_DIR / "testbed"
 
 sys.path.insert(0, str(BASE_DIR / "shared" / "scripts"))
 import secret_gate  # noqa: E402
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_config  # noqa: E402
 
 CONFLUENCE_PAGE_ID = ""  # main()에서 load_dotenv() 이후 실제 값으로 설정됨
 SKILLS = ["injection", "xss", "file", "data", "auth", "php", "sca"]
@@ -294,7 +297,7 @@ def add_confluence_row(
     new_row = (
         f"<tr>"
         f"<td>{last_date}</td>"
-        f"<td>SVC / {project}</td>"
+        f"<td>{site_config.get('customer_label', '고객사')} / {project}</td>"
         f"<td>{repo}</td>"
         f"<td>all ({skill_list})</td>"
         f"<td>{tb_icon}</td>"

@@ -19,6 +19,9 @@ import json
 import re
 import sys
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_config  # noqa: E402
 
 PALANTIR_DIR = Path(__file__).parent.parent
 SCAN_PLAN = PALANTIR_DIR / "docs" / "scan_plan.md"
@@ -26,21 +29,7 @@ LOGS_DIR = PALANTIR_DIR / "logs"
 REPO_CONFIG_PATH = Path("/home/geunsolo/palantir-jira-gateway/data/repo_config.json")
 OUT_PATH = PALANTIR_DIR / "docs" / "service_history_confluence.md"
 
-PROJECT_LABELS = {
-    "SVCWEBVIEW": "SVC Webview",
-    "SVCSUGAR": "SVC Sugar/SOI",
-    "SVCRWD": "참여적립",
-    "SVCLIVE": "라이브커머스",
-    "SVCE": "SVC 이벤트",
-    "OEP": "SVC 이벤트",
-    "OB": "SVC 이벤트",
-    "OSA": "SVC 전시관리",
-    "SVCX": "SVCX 블록체인",
-    "SVCNFT": "SVC NFT",
-    "SVCPASS": "SVC Pass",
-    "SVCPU": "SVC Payment UI",
-    "svck": "서비스K",
-}
+PROJECT_LABELS = site_config.get("project_labels", {})
 
 CHECKLIST_RE = re.compile(
     r'^:::expand 진단 체크리스트 전체 현황.*?\n(.*?)\n:::\s*$',
@@ -189,7 +178,7 @@ def build():
     out_rows.sort(key=lambda x: x["month"])
 
     lines = []
-    lines.append(":::expand SVC palantir 신청이력 및 결과 현황")
+    lines.append(f":::expand {site_config.get('customer_label', '고객사')} palantir 신청이력 및 결과 현황")
     lines.append("")
     lines.append("| 유형 | 진단월 | 서비스명(>프로젝트키) | 서비스담당자 | scm repo(bitbucket주소) | branch | 비고 | 결과 공유현황 |")
     lines.append("|---|---|---|---|---|---|---|---|")

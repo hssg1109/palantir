@@ -25,6 +25,9 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_config  # noqa: E402
 
 PALANTIR_DIR = Path(__file__).parent.parent
 
@@ -76,7 +79,7 @@ def _extract_checklist_section(md_text: str) -> str:
         front_matter = tally_line
 
     return (
-        "# SVC 서비스 군 보안진단 체크리스트 전체 현황\n\n"
+        f"# {site_config.get('customer_label', '고객사')} 서비스 군 보안진단 체크리스트 전체 현황\n\n"
         f"{front_matter}\n\n"
         f"{checklist_body}\n\n"
         "---\n"
@@ -88,14 +91,14 @@ TARGETS = [
     {
         "key":     "scan_plan",
         "md_path": PALANTIR_DIR / "docs" / "scan_plan.md",
-        "page_id": "<PAGE_ID>",
+        "page_id": site_config.get("scan_plan_page_id", ""),
         "title":   None,  # 페이지 제목은 덮어쓰지 않고 기존 제목("26년 진단결과") 유지
         "extract": _extract_checklist_section,
     },
     {
         "key":     "cleansing",
         "md_path": PALANTIR_DIR / "docs" / "llm_data_cleansing_registry.md",
-        "page_id": "<PAGE_ID>",
+        "page_id": site_config.get("cleansing_page_id", ""),
         "title":   "LLM 데이터 클렌징 이력 레지스트리",
         "extract": None,
     },

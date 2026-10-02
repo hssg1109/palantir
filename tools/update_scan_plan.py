@@ -39,6 +39,9 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_config  # noqa: E402
 
 PALANTIR_DIR  = Path(__file__).parent.parent
 PLAN_MD       = PALANTIR_DIR / "docs" / "scan_plan.md"
@@ -73,12 +76,12 @@ JIRA_COL_IDX   = 9
 FORTIFY_COL_IDX = 10
 
 # Confluence 페이지 제목
-CF_TITLE     = "SVC 서비스 군 보안 진단 계획"
-CF_PARENT_ID = "<PAGE_ID>"
+CF_TITLE     = site_config.get("plan_page_title", "")
+CF_PARENT_ID = site_config.get("plan_parent_page_id", "")
 
 # 신청이력 현황 하위 페이지 (<PAGE_ID>의 child, build_service_history_table.py 결과물 게시 대상)
-SERVICE_HISTORY_PAGE_ID    = "<PAGE_ID>"
-SERVICE_HISTORY_PAGE_TITLE = "SVC 서비스 군 palantir 진단결과 — 신청이력 현황"
+SERVICE_HISTORY_PAGE_ID    = site_config.get("service_history_page_id", "")
+SERVICE_HISTORY_PAGE_TITLE = site_config.get("service_history_page_title", "")
 
 
 SCA_ONLY_SECTION_HEADER = "## SCA 전용 진단 현황 (SAST 양호 레포)"

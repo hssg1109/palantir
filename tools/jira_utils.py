@@ -114,19 +114,22 @@ def load_ticket_repo_pairs(scan_plan_path: Path = _SCAN_PLAN_PATH) -> list[tuple
     lines = scan_plan_path.read_text(encoding="utf-8").splitlines()
 
     pairs: list[tuple[str, str]] = []
+    _ticket_key = load_env().get("JIRA_PROJECT_KEY", "")
+    if not _ticket_key:
+        return []
     for line in lines:
         if re.match(r"^## 2\.", line):
             break
-        if not line.startswith("|") or "SECPROJ" not in line:
+        if not line.startswith("|") or f"{_ticket_key}-" not in line:
             continue
         cells = [c.strip() for c in line.split("|")[1:-1]]
         if not cells or not cells[0].startswith("`"):
             continue
         repo = cells[0].strip("`")
         # 열 순서 변경(예: Fortify 열 추가)에 안전하도록 마지막 셀이 아닌 행 전체에서 검색
-        m = re.search(r"SECPROJ-(\d+)", line)
+        m = re.search(rf"{re.escape(_ticket_key)}-(\d+)", line)
         if m:
-            pairs.append((repo, f"SECPROJ-{m.group(1)}"))
+            pairs.append((repo, f"{_ticket_key}-{m.group(1)}"))
 
     return pairs
 

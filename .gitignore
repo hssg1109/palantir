@@ -91,3 +91,6 @@ docs/sec_scan_php_overview.md
 docs/meeting_repo_lifecycle_ownership_*.md
 docs/sec_scan_enhancement_plan_*.md
 docs/palantir_playbook_*.md
+
+### 로컬 사이트 설정 (고객사 정보 — config/site.example.json 참고) ###
+config/site.local.json

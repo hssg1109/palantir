@@ -7,22 +7,16 @@ build_system_code_scan_status.py / add_system_code_col_to_plan.py 가 공유한�
 import json
 import re
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_config  # noqa: E402
 
 PALANTIR_DIR = Path(__file__).parent.parent
 SRC_JSON = PALANTIR_DIR / "docs" / "system_code_to_repo_20260729_v3.json"
 
 # 상위 서비스군 분류 — 시스템명 접두어 기반 휴리스틱 (참고용, 100% 정확 보장 안 함)
 _GROUP_RULES: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"^(SVC이벤트|SVCpass|svck|SVC)"), "SVC"),
-    (re.compile(r"^svc2"), "svc2"),
-    (re.compile(r"^DI-"), "DI(데이터인프라)"),
-    (re.compile(r"^BI서비스"), "BI"),
-    (re.compile(r"^MGMT"), "인프라운영"),
-    (re.compile(r"^PICASO"), "PICASO"),
-    (re.compile(r"^Proxy-"), "Proxy"),
-    (re.compile(r"^정보료과금"), "정보료과금"),
-    (re.compile(r"^보안"), "보안"),
-    (re.compile(r"^광고"), "광고플랫폼"),
+    (re.compile(pat), label) for pat, label in site_config.get("group_rules", [])
 ]
 
 

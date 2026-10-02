@@ -35,6 +35,9 @@ import re
 import sys
 from datetime import date, timedelta
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import site_config  # noqa: E402
 
 import requests
 
@@ -55,7 +58,7 @@ DOCS_DIR     = PALANTIR_DIR / "docs"
 _CF_REGISTRY = DOCS_DIR / ".confluence_pages.json"
 
 # 모든 발행 티켓에 공통으로 연동할 참고 페이지 (사내 보안진단 프로세스 안내)
-_PROCESS_GUIDE_URL = "https://wiki.example.com/pages/viewpage.action?pageId=<PAGE_ID>"
+_PROCESS_GUIDE_URL = site_config.get("process_guide_url", "")
 _PROCESS_GUIDE_TITLE = "11. 보안진단 프로세스"
 
 # ──────────────────────────────────────────────────────────────────────────────
