@@ -2,7 +2,7 @@
 """
 consolidate_judgment_index.py — judgment_lookup.py 매칭 인덱스 분기별 압축 배치.
 
-배경 (Confluence pageId=<PAGE_ID> 정보보호담당 (고객사 담당자) 매니저 제안, 2026-09-07):
+배경 (고객사 정보보호담당 제안, 2026-09-07):
   reviewed finding이 무한정 누적되면 유사 판정 사례가 Jaccard 매칭 노이즈로 쌓여
   조건이 반전된 케이스(예: DATA-001류 — 같은 카테고리인데 운영 로그 여부에 따라
   판정이 갈리는 사례)를 잘못 채택할 위험이 커진다. 이 스크립트는 (category, direction)

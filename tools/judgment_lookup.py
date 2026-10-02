@@ -21,7 +21,7 @@ judgment_lookup.py — 과거 판정 이력 기반 유사 finding 검색 (/sec-r
   3. scope.file 베이스네임/로그레벨 키워드 겹치면 가산점
   4. score >= 0.45 → high, 0.2 <= score < 0.45 → low, 그 외 → none
 
-인덱스 노이즈 관리 (2026-09-08, Confluence pageId=<PAGE_ID> 댓글 반영):
+인덱스 노이즈 관리 (2026-09-08, 고객사 정보보호담당 의견 반영):
   - SCA 계열 카테고리(SCA/*, *(SCA)*)는 애초에 /sec-review가 건별 판정에서 제외하는
     대상(feedback_sca_review_policy.md)이라 judgment_lookup을 절대 호출하지 않는다 —
     인덱스에 넣어봐야 100% 데드웨이트이므로 build_index()에서 원천 제외한다.

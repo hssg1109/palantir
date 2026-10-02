@@ -42,6 +42,7 @@ docs/*.docx
 docs/*.docxx
 docs/*.pdf
 docs/*:Zone.Identifier
+docs/career/
 docs/generate_career_doc.py
 docs/2026_유성근_*
 docs/유성근_*
@@ -76,3 +77,17 @@ tools/gen_data_findings_sugar.py
 tools/report_token_usage.py
 docs/workflow_nightly_scan.md
 tools/upload_audit_to_confluence.ps1
+
+### 고객사 민감정보 문서 (2026-10-02 공개 레포 정리 — 로컬에만 유지) ###
+docs/system_code_scan_status.md
+docs/system_code_to_repo_*.json
+docs/llm_data_cleansing_registry.md
+docs/dynamic_diag_priority_*.md
+docs/scan_status_excluded_repos.json
+docs/manual_scan_guide.md
+docs/tutorial_single_repo_scan.md
+docs/jira_integration_spec.html
+docs/sec_scan_php_overview.md
+docs/meeting_repo_lifecycle_ownership_*.md
+docs/sec_scan_enhancement_plan_*.md
+docs/palantir_playbook_*.md

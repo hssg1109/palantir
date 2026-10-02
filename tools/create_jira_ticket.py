@@ -400,7 +400,7 @@ def main():
     parser = argparse.ArgumentParser(description="보안 진단 보고서 → Jira Task 생성")
     parser.add_argument("--repo",      required=True, help="레포 이름 (예: svc-event-front)")
     parser.add_argument("--project",   help="Jira 프로젝트 키 (기본: .env JIRA_PROJECT_KEY)")
-    parser.add_argument("--assignee",  default="ppNNNNN", help="Jira 담당자 username (기본: ppNNNNN)")
+    parser.add_argument("--assignee",  default=None, help="Jira 담당자 username (기본: .env JIRA_DEFAULT_ASSIGNEE)")
     parser.add_argument("--remediation-date", default=None,
                         help="조치기한 YYYY-MM-DD (기본: 공란 — 개발팀 확정 후 입력)")
     parser.add_argument("--due-days",  type=int, default=None,
@@ -411,6 +411,7 @@ def main():
 
     env      = load_env()
     jira_url = env.get("JIRA_URL", "").rstrip("/")
+    args.assignee = args.assignee or env.get("JIRA_DEFAULT_ASSIGNEE") or None
     project  = args.project or env.get("JIRA_PROJECT_KEY", "")
 
     if not jira_url:
